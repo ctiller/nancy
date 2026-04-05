@@ -1,5 +1,6 @@
-pub mod commands;
 
+
+use anyhow::Result;
 use clap::{Parser, Subcommand};
 
 #[derive(Parser, Debug)]
@@ -15,12 +16,14 @@ enum Commands {
     Init,
 }
 
-fn main() {
+fn main() -> Result<()> {
     let args = Args::parse();
 
     match &args.command {
         Commands::Init => {
-            commands::init::init();
+            nancy::commands::init::init(std::env::current_dir()?)?;
         }
     }
+    
+    Ok(())
 }
