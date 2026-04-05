@@ -1,7 +1,6 @@
 use anyhow::{Context, Result, bail};
-use did_key::{generate, CoreSign, Ed25519KeyPair, Fingerprint, KeyMaterial};
+use did_key::{generate, Ed25519KeyPair, Fingerprint, KeyMaterial};
 use git2::Repository;
-use serde_json::json;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::Path;
@@ -57,11 +56,11 @@ pub fn init<P: AsRef<Path>>(dir: P) -> Result<()> {
     let key = generate::<Ed25519KeyPair>(None);
     let did = key.fingerprint();
 
-    let id_obj = json!({
-        "did": did,
-        "public_key_hex": hex::encode(key.public_key_bytes()),
-        "private_key_hex": hex::encode(key.private_key_bytes())
-    });
+    let id_obj = crate::schema::identity_config::IdentityConfig {
+        did: did.clone(),
+        public_key_hex: hex::encode(key.public_key_bytes()),
+        private_key_hex: hex::encode(key.private_key_bytes())
+    };
 
     if let Err(e) = fs::write(
         &identity_file,
@@ -71,52 +70,23 @@ pub fn init<P: AsRef<Path>>(dir: P) -> Result<()> {
     }
 
     // Create the initial event for the DID
+    use crate::events::writer::Writer;
+    let writer = Writer::new(&repo, id_obj)?;
+
     let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
 
-    let payload = json!({
-        "type": "identity",
-        "did": did,
-        "public_key_hex": hex::encode(key.public_key_bytes()),
-        "timestamp": timestamp
+    use crate::schema::identity::IdentityPayload;
+    use crate::schema::registry::EventPayload;
+
+    let payload = EventPayload::Identity(IdentityPayload {
+        did: did.clone(),
+        public_key_hex: hex::encode(key.public_key_bytes()),
+        timestamp,
     });
 
-    let payload_str = serde_json::to_string(&payload)?;
-    let signature = key.sign(payload_str.as_bytes());
-
-    let event_record = json!({
-        "did": did,
-        "payload": payload,
-        "signature": hex::encode(signature)
-    });
-
-    let event_str = format!("{}\n", serde_json::to_string(&event_record)?);
-
-    // Save it to git database as an orphaned branch
-    let sig = repo.signature()?;
-    
-    let blob_id = repo.blob(event_str.as_bytes())?;
-    
-    let mut events_tb = repo.treebuilder(None)?;
-    events_tb.insert("00001.log", blob_id, 0o100644)?;
-    let events_tree_id = events_tb.write()?;
-    
-    let mut root_tb = repo.treebuilder(None)?;
-    root_tb.insert("events", events_tree_id, 0o040000)?;
-    let root_tree_id = root_tb.write()?;
-    
-    let root_tree = repo.find_tree(root_tree_id)?;
+    writer.log_event(payload)?;
 
     let branch_name = format!("refs/heads/nancy/{}", did);
-    
-    repo.commit(
-        Some(&branch_name),
-        &sig,
-        &sig,
-        "Initial nancy event log",
-        &root_tree,
-        &[] // No parents = orphaned commit
-    )?;
-
     println!("Successfully provisioned new DID and initialized .nancy!");
     println!("DID: {}", did);
     println!("Created orphaned branch: {}", branch_name);
@@ -179,7 +149,7 @@ mod tests {
         assert_eq!(event_json["did"], did, "Logged DID should match the generated DID");
         
         let payload = &event_json["payload"];
-        assert_eq!(payload["type"], "identity", "Initial event type should be 'identity'");
+        assert_eq!(payload["$type"], "identity", "Initial event type should be 'identity'");
         assert_eq!(payload["did"], did, "Payload should specify the DID");
         assert!(payload.get("public_key_hex").is_some(), "Payload should contain public key");
         assert!(payload.get("timestamp").is_some(), "Payload should contain a timestamp");
