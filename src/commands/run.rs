@@ -15,6 +15,16 @@ use crate::events::reader::Reader;
 use crate::schema::identity_config::Identity;
 use crate::schema::registry::EventPayload;
 
+fn build_worker_env_vars(coordinator_did: &str) -> Vec<String> {
+    let mut env_vars = vec![
+        format!("COORDINATOR_DID={}", coordinator_did),
+    ];
+    if let Ok(api_key) = std::env::var("GEMINI_API_KEY") {
+        env_vars.push(format!("GEMINI_API_KEY={}", api_key));
+    }
+    env_vars
+}
+
 pub fn run<P: AsRef<Path>>(dir: P) -> Result<()> {
     let dir = dir.as_ref();
     let repo = Repository::discover(dir).context("Failed to find git repository")?;
@@ -123,11 +133,7 @@ pub fn run<P: AsRef<Path>>(dir: P) -> Result<()> {
             fs::write(worker_nancy_dir.join("identity.json"), serde_json::to_string_pretty(&worker_identity).unwrap()).unwrap();
 
             // Run container
-            let env_vars = vec![
-                format!("AGENT_DID={}", worker.did),
-                format!("TASK_ID={}", task_ref),
-                format!("COORDINATOR_DID={}", root_did),
-            ];
+            let env_vars = build_worker_env_vars(&root_did);
 
             // Setup mapping mounting the specific targeted path string safely to the /worktree internal
             let binds = vec![
@@ -210,6 +216,26 @@ mod tests {
     use tempfile::TempDir;
     use crate::commands::init;
     use crate::commands::add_task;
+
+    use sealed_test::prelude::*;
+
+    #[sealed_test]
+    fn test_build_worker_env_vars_basic() {
+        unsafe { std::env::remove_var("GEMINI_API_KEY") };
+        let basic = build_worker_env_vars("coord1");
+        assert_eq!(basic, vec![
+            "COORDINATOR_DID=coord1".to_string()
+        ]);
+    }
+
+    #[sealed_test(env = [("GEMINI_API_KEY", "dummy_key")])]
+    fn test_build_worker_env_vars_with_key() {
+        let with_key = build_worker_env_vars("coord1");
+        assert_eq!(with_key, vec![
+            "COORDINATOR_DID=coord1".to_string(),
+            "GEMINI_API_KEY=dummy_key".to_string()
+        ]);
+    }
 
     #[test]
     fn test_run_coordinator_end2end() {

@@ -10,7 +10,9 @@ bytes = "1.11.1"
 clap = { version = "4.6.0", features = ["derive"] }
 ctrlc = "3.5.2"
 did-key = "0.2.1"
+dotenvy = "0.15.7"
 futures-util = "0.3.32"
+gemini-client-api = "7.4.5"
 git2 = "0.20.4"
 hex = "0.4.3"
 rusqlite = { version = "0.39.0", features = ["bundled"] }

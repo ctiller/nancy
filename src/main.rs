@@ -40,6 +40,7 @@ pub struct AddTaskArgs {
 }
 
 fn main() -> Result<()> {
+    dotenvy::dotenv().ok();
     let args = Args::parse();
 
     match &args.command {
