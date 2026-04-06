@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use crate::events::writer::Writer;
 use crate::schema::identity_config::Identity;
 use crate::schema::registry::EventPayload;
-use crate::schema::task::TaskPayload;
+use crate::schema::task::TaskRequestPayload;
 
 pub fn add_task<P: AsRef<Path>>(dir: P, task: Option<String>, file: Option<PathBuf>) -> Result<()> {
     let dir = dir.as_ref();
@@ -36,7 +36,7 @@ pub fn add_task<P: AsRef<Path>>(dir: P, task: Option<String>, file: Option<PathB
         _ => bail!("Either --task or --file must be provided."),
     };
 
-    let payload = EventPayload::Task(TaskPayload {
+    let payload = EventPayload::TaskRequest(TaskRequestPayload {
         requestor: id_obj.get_did_owner().did.clone(),
         description,
     });
@@ -84,7 +84,7 @@ mod tests {
         assert_eq!(event_lines.len(), 4);
         
         let task_event: Value = serde_json::from_str(event_lines[3])?;
-        assert_eq!(task_event["payload"]["$type"], "task");
+        assert_eq!(task_event["payload"]["$type"], "task_request");
         assert_eq!(task_event["payload"]["description"], "Test task 1");
         assert_eq!(task_event["payload"]["requestor"], id_obj.get_did_owner().did);
 

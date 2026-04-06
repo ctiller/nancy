@@ -9,7 +9,8 @@ use std::collections::HashSet;
 use crate::events::reader::Reader;
 use crate::events::writer::Writer;
 use crate::schema::identity_config::Identity;
-use crate::schema::registry::{EventPayload, TaskCompletePayload};
+use crate::schema::registry::EventPayload;
+use crate::schema::task::AssignmentCompletePayload;
 
 static SHUTDOWN: AtomicBool = AtomicBool::new(false);
 
@@ -50,9 +51,19 @@ pub fn grind<P: AsRef<Path>>(dir: P) -> Result<()> {
         if let Ok(iter) = root_reader.iter_events() {
             for ev_res in iter {
                 if let Ok(env) = ev_res {
-                    if let EventPayload::TaskAssigned(assignment) = env.payload {
-                        if assignment.assignee_did == worker_did {
-                            tasks_assigned.push(assignment.task_ref);
+                    if let EventPayload::CoordinatorAssignment(assignment) = env.payload {
+                        use crate::schema::task::CoordinatorAssignmentPayload;
+                        match assignment {
+                            CoordinatorAssignmentPayload::PerformTask { task_ref: _, assignee_did } => {
+                                if assignee_did == worker_did {
+                                    tasks_assigned.push(env.id.clone());
+                                }
+                            }
+                            CoordinatorAssignmentPayload::PlanTask { task_request_ref: _, assignee_did } => {
+                                if assignee_did == worker_did {
+                                    tasks_assigned.push(env.id.clone());
+                                }
+                            }
                         }
                     }
                 }
@@ -64,8 +75,8 @@ pub fn grind<P: AsRef<Path>>(dir: P) -> Result<()> {
         if let Ok(iter) = local_reader.iter_events() {
             for ev_res in iter {
                 if let Ok(env) = ev_res {
-                    if let EventPayload::TaskComplete(c) = env.payload {
-                        tasks_completed.insert(c.task_ref);
+                    if let EventPayload::AssignmentComplete(c) = env.payload {
+                        tasks_completed.insert(c.assignment_ref);
                     }
                 }
             }
@@ -80,9 +91,9 @@ pub fn grind<P: AsRef<Path>>(dir: P) -> Result<()> {
                 
                 let resolved_commit_sha = "mock_sha_xyz987".to_string();
                 let writer = Writer::new(&repo, id_obj.clone())?;
-                writer.log_event(EventPayload::TaskComplete(TaskCompletePayload {
-                    task_ref: task_id.clone(),
-                    commit_sha: resolved_commit_sha,
+                writer.log_event(EventPayload::AssignmentComplete(AssignmentCompletePayload {
+                    assignment_ref: task_id.clone(),
+                    report: format!("Completed with mock sha {}", resolved_commit_sha),
                 }))?;
                 writer.commit_batch()?;
                 
@@ -108,7 +119,7 @@ mod tests {
     use tempfile::TempDir;
     use sealed_test::prelude::*;
     use crate::schema::identity_config::DidOwner;
-    use crate::schema::registry::TaskAssignedPayload;
+    use crate::schema::task::CoordinatorAssignmentPayload;
     
     #[sealed_test(env = [("COORDINATOR_DID", "mock_coord_888")])]
     fn test_grind_end2end() -> Result<()> {
@@ -136,8 +147,12 @@ mod tests {
             private_key_hex: "000000".to_string(),
         });
         let writer = Writer::new(&repo, coord_identity)?;
-        writer.log_event(EventPayload::TaskAssigned(TaskAssignedPayload {
+        writer.log_event(EventPayload::CoordinatorAssignment(CoordinatorAssignmentPayload::PerformTask {
             task_ref: "task_01".to_string(),
+            assignee_did: worker_did.clone(),
+        }))?;
+        writer.log_event(EventPayload::CoordinatorAssignment(CoordinatorAssignmentPayload::PlanTask {
+            task_request_ref: "task_req_01".to_string(),
             assignee_did: worker_did.clone(),
         }))?;
         writer.commit_batch()?;
@@ -160,10 +175,8 @@ mod tests {
         let mut completed_task_found = false;
         for ev_res in reader.iter_events()? {
             let env = ev_res?;
-            if let EventPayload::TaskComplete(t) = env.payload {
-                if t.task_ref == "task_01" {
-                    completed_task_found = true;
-                }
+            if let EventPayload::AssignmentComplete(_) = env.payload {
+                completed_task_found = true;
             }
         }
 

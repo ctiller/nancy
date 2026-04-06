@@ -194,7 +194,7 @@ pub fn run<P: AsRef<Path>>(dir: P) -> Result<()> {
                         let root_id_obj = fs::read_to_string(&identity_file).unwrap();
                         let root_id: Identity = serde_json::from_str(&root_id_obj).unwrap();
                         let writer = crate::events::writer::Writer::new(&repo, root_id).unwrap();
-                        writer.log_event(EventPayload::TaskAssigned(crate::schema::registry::TaskAssignedPayload {
+                        writer.log_event(EventPayload::CoordinatorAssignment(crate::schema::task::CoordinatorAssignmentPayload::PerformTask {
                             task_ref: task_ref.clone(),
                             assignee_did: worker.did.clone(),
                         })).unwrap();

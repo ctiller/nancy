@@ -3,7 +3,7 @@ use did_key::{CoreSign, Ed25519KeyPair};
 use git2::Repository;
 use std::cell::RefCell;
 
-use crate::schema::identity_config::{Identity, DidOwner};
+use crate::schema::identity_config::Identity;
 use crate::schema::registry::EventPayload;
 
 use super::EventEnvelope;
@@ -199,6 +199,7 @@ impl<'a> Drop for Writer<'a> {
 mod tests {
     use super::*;
     use crate::schema::identity::IdentityPayload;
+    use crate::schema::identity_config::DidOwner;
     use did_key::{Ed25519KeyPair, Fingerprint, KeyMaterial};
     use tempfile::TempDir;
 

@@ -104,8 +104,10 @@ mod tests {
 
         // Log a task
         writer.log_event(EventPayload::Task(TaskPayload {
-            requestor: did.clone(),
             description: "A test task".to_string(),
+            preconditions: "none".to_string(),
+            postconditions: "none".to_string(),
+            validation_strategy: "none".to_string(),
         }))?;
 
         writer.commit_batch()?;

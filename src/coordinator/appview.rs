@@ -5,7 +5,8 @@ pub struct AppView {
     pub tasks: HashMap<String, EventPayload>,
     pub blocked_by: HashMap<String, HashSet<String>>,
     pub task_completions: HashSet<String>,
-    pub assignments: HashMap<String, String>,
+    pub assignments: HashMap<String, String>, // task_ref -> assignee_did
+    pub assignment_targets: HashMap<String, String>, // assignment_ref -> task_ref
 }
 
 impl AppView {
@@ -15,6 +16,7 @@ impl AppView {
             blocked_by: HashMap::new(),
             task_completions: HashSet::new(),
             assignments: HashMap::new(),
+            assignment_targets: HashMap::new(),
         }
     }
 
@@ -26,11 +28,24 @@ impl AppView {
             EventPayload::BlockedBy(b) => {
                 self.blocked_by.entry(b.source.clone()).or_default().insert(b.target.clone());
             }
-            EventPayload::TaskComplete(c) => {
-                self.task_completions.insert(c.task_ref.clone());
+            EventPayload::AssignmentComplete(c) => {
+                if let Some(target_ref) = self.assignment_targets.get(&c.assignment_ref) {
+                    self.assignments.remove(target_ref);
+                    self.task_completions.insert(target_ref.clone());
+                }
             }
-            EventPayload::TaskAssigned(a) => {
-                self.assignments.insert(a.task_ref.clone(), a.assignee_did.clone());
+            EventPayload::CoordinatorAssignment(a) => {
+                use crate::schema::task::CoordinatorAssignmentPayload;
+                match a {
+                    CoordinatorAssignmentPayload::PlanTask { task_request_ref, assignee_did } => {
+                        self.assignments.insert(task_request_ref.clone(), assignee_did.clone());
+                        self.assignment_targets.insert(event_id.to_string(), task_request_ref.clone());
+                    }
+                    CoordinatorAssignmentPayload::PerformTask { task_ref, assignee_did } => {
+                        self.assignments.insert(task_ref.clone(), assignee_did.clone());
+                        self.assignment_targets.insert(event_id.to_string(), task_ref.clone());
+                    }
+                }
             }
             _ => {}
         }
@@ -121,20 +136,32 @@ mod tests {
     fn test_pagerank_highest_impact() {
         let mut view = AppView::new();
 
-        // 3 tasks. T1 blocks T2 and T3.
-        view.apply_event(&EventPayload::Task(TaskPayload { requestor: "A".into(), description: "T1".into() }), "t1");
-        view.apply_event(&EventPayload::Task(TaskPayload { requestor: "A".into(), description: "T2".into() }), "t2");
-        view.apply_event(&EventPayload::Task(TaskPayload { requestor: "A".into(), description: "T3".into() }), "t3");
+        let default_fields = || {
+            ("none".to_string(), "none".to_string(), "none".to_string())
+        };
 
-        view.apply_event(&EventPayload::BlockedBy(crate::schema::registry::BlockedByPayload { source: "t2".into(), target: "t1".into() }), "e1");
-        view.apply_event(&EventPayload::BlockedBy(crate::schema::registry::BlockedByPayload { source: "t3".into(), target: "t1".into() }), "e2");
+        // 3 tasks. T1 blocks T2 and T3.
+        view.apply_event(&EventPayload::Task(TaskPayload { description: "T1".into(), preconditions: default_fields().0, postconditions: default_fields().1, validation_strategy: default_fields().2 }), "t1");
+        view.apply_event(&EventPayload::Task(TaskPayload { description: "T2".into(), preconditions: default_fields().0, postconditions: default_fields().1, validation_strategy: default_fields().2 }), "t2");
+        view.apply_event(&EventPayload::Task(TaskPayload { description: "T3".into(), preconditions: default_fields().0, postconditions: default_fields().1, validation_strategy: default_fields().2 }), "t3");
+
+        view.apply_event(&EventPayload::BlockedBy(crate::schema::task::BlockedByPayload { source: "t2".into(), target: "t1".into() }), "e1");
+        view.apply_event(&EventPayload::BlockedBy(crate::schema::task::BlockedByPayload { source: "t3".into(), target: "t1".into() }), "e2");
 
         let ready = view.get_highest_impact_ready_tasks();
         assert_eq!(ready.len(), 1);
         assert_eq!(ready[0], "t1"); // T1 is the only ready task, and has highest impact!
 
-        // Complete T1
-        view.apply_event(&EventPayload::TaskComplete(crate::schema::registry::TaskCompletePayload { task_ref: "t1".into(), commit_sha: "c1".into() }), "e3");
+        // Assign T1
+        view.apply_event(&EventPayload::CoordinatorAssignment(crate::schema::task::CoordinatorAssignmentPayload::PerformTask { task_ref: "t1".into(), assignee_did: "worker".into() }), "assignment_event_id");
+
+        // Complete T1 assignment
+        view.apply_event(&EventPayload::AssignmentComplete(crate::schema::task::AssignmentCompletePayload { assignment_ref: "assignment_event_id".into(), report: "done".into() }), "e3");
+        
+        // Assign PlanTask
+        view.apply_event(&EventPayload::CoordinatorAssignment(crate::schema::task::CoordinatorAssignmentPayload::PlanTask { task_request_ref: "req1".into(), assignee_did: "worker".into() }), "plan_event_id");
+        assert_eq!(view.assignments.get("req1").unwrap(), "worker");
+        assert_eq!(view.assignment_targets.get("plan_event_id").unwrap(), "req1");
 
         let ready = view.get_highest_impact_ready_tasks();
         assert_eq!(ready.len(), 2); // T2 and T3 are now ready
