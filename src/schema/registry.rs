@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use super::identity::IdentityPayload;
 use super::task::{
     BlockedByPayload, CoordinatorAssignmentPayload, TaskPayload,
-    TaskRequestPayload, AssignmentCompletePayload,
+    TaskRequestPayload, AssignmentCompletePayload, PlanPayload,
 };
 
 /// Enum describing all understood schema payloads in the event log.
@@ -15,6 +15,8 @@ pub enum EventPayload {
     Identity(IdentityPayload),
     #[serde(rename = "task_request")]
     TaskRequest(TaskRequestPayload),
+    #[serde(rename = "plan")]
+    Plan(PlanPayload),
     #[serde(rename = "task")]
     Task(TaskPayload),
     #[serde(rename = "coordinator_assignment")]

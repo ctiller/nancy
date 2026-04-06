@@ -7,6 +7,12 @@ pub struct TaskRequestPayload {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct PlanPayload {
+    pub request_ref: String,
+    pub description: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct TaskPayload {
     pub description: String,
     pub preconditions: String,
