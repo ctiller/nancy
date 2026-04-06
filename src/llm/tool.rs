@@ -17,3 +17,27 @@ pub trait LlmTool: Send + Sync {
 
     async fn call(&self, args: Value) -> anyhow::Result<Value>;
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct DummyTool;
+
+    #[async_trait]
+    impl LlmTool for DummyTool {
+        fn name(&self) -> &str { "dummy" }
+        fn description(&self) -> String { "dummy tool".to_string() }
+        fn schema(&self) -> schemars::Schema { schemars::schema_for!(String) }
+        async fn call(&self, _args: Value) -> anyhow::Result<Value> { Ok(json!({})) }
+    }
+
+    #[test]
+    fn test_llm_tool_declaration() {
+        let tool = DummyTool;
+        let decl = tool.declaration();
+        assert_eq!(decl["name"], "dummy");
+        assert_eq!(decl["description"], "dummy tool");
+        assert!(decl["parameters"].is_object());
+    }
+}

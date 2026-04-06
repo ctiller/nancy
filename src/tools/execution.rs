@@ -151,4 +151,20 @@ mod tests {
         let res = tool.call(allow).await.unwrap();
         assert!(res.get("stdout").unwrap().as_str().unwrap().contains("hello"));
     }
+
+    #[tokio::test]
+    async fn test_execution_tool_properties() {
+        let tool = RunCommand::new();
+        assert_eq!(tool.name(), "run_command");
+        assert!(tool.description().contains("Specific to dispatching linux-level commands"));
+        
+        let schema = tool.schema();
+        assert!(serde_json::to_string(&schema).unwrap().contains("RunCommandArgs"));
+        
+        // Invalid args
+        let bad_args = serde_json::json!({
+            "not_command": "echo"
+        });
+        assert!(tool.call(bad_args).await.is_err());
+    }
 }

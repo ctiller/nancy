@@ -39,11 +39,18 @@ pub fn llm_tool(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let description = desc_lines.join("\n");
     // Ensure properly capitalized camel case Tool struct
     let tool_struct_str = fn_name.to_string();
-    let mut chars = tool_struct_str.chars();
-    let camel_case = match chars.next() {
-        None => String::new(),
-        Some(f) => f.to_uppercase().chain(chars).collect(),
-    };
+    let mut camel_case = String::new();
+    let mut capitalize = true;
+    for c in tool_struct_str.chars() {
+        if c == '_' {
+            capitalize = true;
+        } else if capitalize {
+            camel_case.push(c.to_ascii_uppercase());
+            capitalize = false;
+        } else {
+            camel_case.push(c);
+        }
+    }
     let tool_struct_name = format_ident!("{}Tool", camel_case);
 
     let arg_names = args.iter().map(|(id, _)| id).collect::<Vec<_>>();
@@ -98,6 +105,13 @@ pub fn llm_tool(_attr: TokenStream, item: TokenStream) -> TokenStream {
                 
                 let input_args: Args = ::serde_json::from_value(args)?;
                 #call_expr
+            }
+        }
+        
+        #[allow(non_snake_case)]
+        #vis mod #fn_name {
+            pub fn tool() -> Box<dyn crate::llm::tool::LlmTool> {
+                Box::new(super::#tool_struct_name)
             }
         }
     };
