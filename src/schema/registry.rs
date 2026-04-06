@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::identity::IdentityPayload;
+use super::task::TaskPayload;
 
 /// Enum describing all understood schema payloads in the event log.
 /// `serde(tag = "$type")` injects `{ "$type": "identity", "did": ... }` automatically.
@@ -9,4 +10,6 @@ use super::identity::IdentityPayload;
 pub enum EventPayload {
     #[serde(rename = "identity")]
     Identity(IdentityPayload),
+    #[serde(rename = "task")]
+    Task(TaskPayload),
 }
