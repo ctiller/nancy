@@ -53,12 +53,12 @@ pub fn llm_tool(_attr: TokenStream, item: TokenStream) -> TokenStream {
 
     let call_expr = if is_async {
         quote! {
-            let res = #fn_name(#( input_args.#arg_names ),*).await;
+            let res = #fn_name(#( input_args.#arg_names ),*).await?;
             Ok(::serde_json::to_value(&res).unwrap_or(::serde_json::Value::Null))
         }
     } else {
         quote! {
-            let res = #fn_name(#( input_args.#arg_names ),*);
+            let res = #fn_name(#( input_args.#arg_names ),*)?;
             Ok(::serde_json::to_value(&res).unwrap_or(::serde_json::Value::Null))
         }
     };
