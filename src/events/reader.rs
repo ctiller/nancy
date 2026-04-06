@@ -86,6 +86,8 @@ impl<'a> Reader<'a> {
             }
         }
 
+        index.set_branch_commit(&self.did, &commit.id().to_string())?;
+
         Ok(())
     }
 }
@@ -96,7 +98,7 @@ mod tests {
     use crate::events::index::LocalIndex;
     use crate::events::writer::Writer;
     use crate::schema::identity::IdentityPayload;
-    use crate::schema::identity_config::IdentityConfig;
+    use crate::schema::identity_config::{DidOwner, Identity};
     use crate::schema::registry::EventPayload;
     use did_key::{Ed25519KeyPair, Fingerprint, KeyMaterial};
     use tempfile::TempDir;
@@ -110,11 +112,11 @@ mod tests {
 
         let key = did_key::generate::<Ed25519KeyPair>(None);
         let did = key.fingerprint();
-        let identity = IdentityConfig {
+        let identity = Identity::Grinder(DidOwner {
             did: did.clone(),
             public_key_hex: hex::encode(key.public_key_bytes()),
             private_key_hex: hex::encode(key.private_key_bytes()),
-        };
+        });
 
         let writer = Writer::new(&repo, identity)?;
 

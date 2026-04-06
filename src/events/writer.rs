@@ -3,19 +3,19 @@ use did_key::{CoreSign, Ed25519KeyPair};
 use git2::Repository;
 use std::cell::RefCell;
 
-use crate::schema::identity_config::IdentityConfig;
+use crate::schema::identity_config::{Identity, DidOwner};
 use crate::schema::registry::EventPayload;
 
 use super::EventEnvelope;
 
 pub struct Writer<'a> {
     repo: &'a Repository,
-    identity: IdentityConfig,
+    identity: Identity,
     pending_events: RefCell<Vec<String>>,
 }
 
 impl<'a> Writer<'a> {
-    pub fn new(repo: &'a Repository, identity: IdentityConfig) -> Result<Self> {
+    pub fn new(repo: &'a Repository, identity: Identity) -> Result<Self> {
         Ok(Writer {
             repo,
             identity,
@@ -24,7 +24,7 @@ impl<'a> Writer<'a> {
     }
 
     pub fn log_event(&self, payload: EventPayload) -> Result<()> {
-        let priv_bytes = hex::decode(&self.identity.private_key_hex)?;
+        let priv_bytes = hex::decode(&self.identity.get_did_owner().private_key_hex)?;
         let keypair = did_key::generate::<Ed25519KeyPair>(Some(&priv_bytes));
 
         let payload_str = serde_json::to_string(&payload)?;
@@ -39,7 +39,7 @@ impl<'a> Writer<'a> {
         }
 
         let core = EventCore {
-            did: &self.identity.did,
+            did: &self.identity.get_did_owner().did,
             payload: &payload,
             signature: &signature,
         };
@@ -51,7 +51,7 @@ impl<'a> Writer<'a> {
 
         let envelope = EventEnvelope {
             id: id_str,
-            did: self.identity.did.clone(),
+            did: self.identity.get_did_owner().did.clone(),
             payload,
             signature,
         };
@@ -68,7 +68,7 @@ impl<'a> Writer<'a> {
             return Ok(());
         }
 
-        let branch_name = format!("refs/heads/nancy/{}", self.identity.did);
+        let branch_name = format!("refs/heads/nancy/{}", self.identity.get_did_owner().did);
         let branch_ref = self.repo.find_reference(&branch_name);
         let sig = self.repo.signature()?;
 
@@ -172,7 +172,7 @@ impl<'a> Writer<'a> {
         let parents_refs: Vec<&git2::Commit> = parents.iter().collect();
 
         self.repo.commit(
-            Some(&format!("refs/heads/nancy/{}", self.identity.did)),
+            Some(&format!("refs/heads/nancy/{}", self.identity.get_did_owner().did)),
             &sig,
             &sig,
             "Batched append event logs",
@@ -209,10 +209,13 @@ mod tests {
 
         let key = did_key::generate::<Ed25519KeyPair>(None);
         let did = key.fingerprint();
-        let identity = IdentityConfig {
-            did: did.clone(),
-            public_key_hex: hex::encode(key.public_key_bytes()),
-            private_key_hex: hex::encode(key.private_key_bytes()),
+        let identity = Identity::Coordinator {
+            did: DidOwner {
+                did: did.clone(),
+                public_key_hex: hex::encode(key.public_key_bytes()),
+                private_key_hex: hex::encode(key.private_key_bytes()),
+            },
+            workers: vec![],
         };
 
         let writer = Writer::new(&repo, identity)?;
@@ -258,10 +261,13 @@ mod tests {
 
         let key = did_key::generate::<Ed25519KeyPair>(None);
         let did = key.fingerprint();
-        let identity = IdentityConfig {
-            did: did.clone(),
-            public_key_hex: hex::encode(key.public_key_bytes()),
-            private_key_hex: hex::encode(key.private_key_bytes()),
+        let identity = Identity::Coordinator {
+            did: DidOwner {
+                did: did.clone(),
+                public_key_hex: hex::encode(key.public_key_bytes()),
+                private_key_hex: hex::encode(key.private_key_bytes()),
+            },
+            workers: vec![],
         };
 
         // First instance creates the git repo and orphaned branch initially
@@ -306,11 +312,11 @@ mod tests {
 
         let key = did_key::generate::<Ed25519KeyPair>(None);
         let did = key.fingerprint();
-        let identity = IdentityConfig {
+        let identity = Identity::Grinder(DidOwner {
             did: did.clone(),
             public_key_hex: hex::encode(key.public_key_bytes()),
             private_key_hex: hex::encode(key.private_key_bytes()),
-        };
+        });
 
         let writer = Writer::new(&repo, identity)?;
 

@@ -21,6 +21,14 @@ impl LocalIndex {
             [],
         )?;
 
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS branch_sync_state (
+                did TEXT PRIMARY KEY,
+                commit_hash TEXT NOT NULL
+            )",
+            [],
+        )?;
+
         Ok(LocalIndex { conn })
     }
 
@@ -56,6 +64,30 @@ impl LocalIndex {
             Ok(None)
         }
     }
+
+    pub fn get_branch_commit(&self, did: &str) -> Result<Option<String>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT commit_hash FROM branch_sync_state WHERE did = ?1")?;
+        
+        let mut rows = stmt.query(params![did])?;
+        if let Some(row) = rows.next()? {
+            let commit_hash: String = row.get(0)?;
+            Ok(Some(commit_hash))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn set_branch_commit(&self, did: &str, commit_hash: &str) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO branch_sync_state (did, commit_hash) 
+             VALUES (?1, ?2) 
+             ON CONFLICT(did) DO UPDATE SET commit_hash=excluded.commit_hash",
+            params![did, commit_hash],
+        )?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -82,6 +114,25 @@ mod tests {
 
         let miss = index.lookup_event("unknown")?;
         assert!(miss.is_none());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_branch_sync_state() -> Result<()> {
+        let temp_dir = TempDir::new()?;
+        let index = LocalIndex::new(temp_dir.path())?;
+
+        let res = index.get_branch_commit("did:test")?;
+        assert!(res.is_none());
+
+        index.set_branch_commit("did:test", "commit1")?;
+        let res = index.get_branch_commit("did:test")?.unwrap();
+        assert_eq!(res, "commit1");
+
+        index.set_branch_commit("did:test", "commit2")?;
+        let res = index.get_branch_commit("did:test")?.unwrap();
+        assert_eq!(res, "commit2");
 
         Ok(())
     }

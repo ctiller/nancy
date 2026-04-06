@@ -5,12 +5,19 @@ edition = "2024"
 
 [dependencies]
 anyhow = "1.0.102"
+bollard = "0.20.2"
+bytes = "1.11.1"
 clap = { version = "4.6.0", features = ["derive"] }
+ctrlc = "3.5.2"
 did-key = "0.2.1"
+futures-util = "0.3.32"
 git2 = "0.20.4"
 hex = "0.4.3"
 rusqlite = { version = "0.39.0", features = ["bundled"] }
+sealed_test = "1.1.0"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 sha2 = "0.11.0"
+tar = "0.4.45"
 tempfile = "3.27.0"
+tokio = { version = "1.51.0", features = ["full"] }

@@ -56,10 +56,15 @@ pub fn init<P: AsRef<Path>>(dir: P) -> Result<()> {
     let key = generate::<Ed25519KeyPair>(None);
     let did = key.fingerprint();
 
-    let id_obj = crate::schema::identity_config::IdentityConfig {
+    let did_owner = crate::schema::identity_config::DidOwner {
         did: did.clone(),
         public_key_hex: hex::encode(key.public_key_bytes()),
-        private_key_hex: hex::encode(key.private_key_bytes())
+        private_key_hex: hex::encode(key.private_key_bytes()),
+    };
+
+    let id_obj = crate::schema::identity_config::Identity::Coordinator {
+        did: did_owner,
+        workers: vec![],
     };
 
     if let Err(e) = fs::write(
@@ -119,8 +124,8 @@ mod tests {
 
         // Extract the generated DID from identity.json
         let identity_content = fs::read_to_string(&identity_file)?;
-        let identity_json: Value = serde_json::from_str(&identity_content)?;
-        let did = identity_json["did"].as_str().expect("DID should be a string");
+        let id_obj: crate::schema::identity_config::Identity = serde_json::from_str(&identity_content)?;
+        let did = id_obj.get_did_owner().did.clone();
 
         // Verify the orphaned branch exists
         let branch_name = format!("refs/heads/nancy/{}", did);
@@ -177,5 +182,16 @@ mod tests {
         assert!(gitignore_content.contains(".nancy"));
 
         Ok(())
+    }
+
+    #[test]
+    fn test_init_double_fails() {
+        let temp_dir = TempDir::new().unwrap();
+        let _repo = git2::Repository::init(temp_dir.path()).unwrap();
+        crate::commands::init::init(temp_dir.path()).unwrap();
+        
+        // Ensure double initialization returns an error securely
+        let result = crate::commands::init::init(temp_dir.path());
+        assert!(result.is_err());
     }
 }

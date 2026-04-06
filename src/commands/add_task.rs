@@ -4,7 +4,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::events::writer::Writer;
-use crate::schema::identity_config::IdentityConfig;
+use crate::schema::identity_config::Identity;
 use crate::schema::registry::EventPayload;
 use crate::schema::task::TaskPayload;
 
@@ -25,7 +25,7 @@ pub fn add_task<P: AsRef<Path>>(dir: P, task: Option<String>, file: Option<PathB
 
     let identity_content =
         fs::read_to_string(&identity_file).context("Failed to read identity.json")?;
-    let id_obj: IdentityConfig =
+    let id_obj: Identity =
         serde_json::from_str(&identity_content).context("Failed to parse identity.json")?;
 
     // Determine the description based on the provided inputs
@@ -37,7 +37,7 @@ pub fn add_task<P: AsRef<Path>>(dir: P, task: Option<String>, file: Option<PathB
     };
 
     let payload = EventPayload::Task(TaskPayload {
-        requestor: id_obj.did.clone(),
+        requestor: id_obj.get_did_owner().did.clone(),
         description,
     });
 
@@ -68,10 +68,10 @@ mod tests {
 
         let nancy_dir = repo_path.join(".nancy");
         let identity_content = fs::read_to_string(nancy_dir.join("identity.json"))?;
-        let id_obj: IdentityConfig = serde_json::from_str(&identity_content)?;
+        let id_obj: Identity = serde_json::from_str(&identity_content)?;
 
         let repo = Repository::open(repo_path)?;
-        let branch_name = format!("refs/heads/nancy/{}", id_obj.did);
+        let branch_name = format!("refs/heads/nancy/{}", id_obj.get_did_owner().did);
         let branch_ref = repo.find_reference(&branch_name).expect("branch should exist");
         let commit = branch_ref.peel_to_commit()?;
         let tree = commit.tree()?;
@@ -86,7 +86,7 @@ mod tests {
         let task_event: Value = serde_json::from_str(event_lines[1])?;
         assert_eq!(task_event["payload"]["$type"], "task");
         assert_eq!(task_event["payload"]["description"], "Test task 1");
-        assert_eq!(task_event["payload"]["requestor"], id_obj.did);
+        assert_eq!(task_event["payload"]["requestor"], id_obj.get_did_owner().did);
 
         Ok(())
     }
@@ -106,10 +106,10 @@ mod tests {
 
         let nancy_dir = repo_path.join(".nancy");
         let identity_content = fs::read_to_string(nancy_dir.join("identity.json"))?;
-        let id_obj: IdentityConfig = serde_json::from_str(&identity_content)?;
+        let id_obj: Identity = serde_json::from_str(&identity_content)?;
 
         let repo = Repository::open(repo_path)?;
-        let branch_name = format!("refs/heads/nancy/{}", id_obj.did);
+        let branch_name = format!("refs/heads/nancy/{}", id_obj.get_did_owner().did);
         let branch_ref = repo.find_reference(&branch_name).unwrap();
         let tree = branch_ref.peel_to_commit()?.tree()?;
         

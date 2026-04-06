@@ -17,6 +17,10 @@ enum Commands {
     Init,
     /// Add a new task to nancy
     AddTask(AddTaskArgs),
+    /// Run the main agentic runloop
+    Grind,
+    /// Provision orchestration environments natively locally
+    Run,
 }
 
 #[derive(clap::Args, Debug)]
@@ -43,7 +47,29 @@ fn main() -> Result<()> {
                 add_task_args.file.clone(),
             )?;
         }
+        Commands::Grind => {
+            nancy::commands::grind::grind(std::env::current_dir()?)?;
+        }
+        Commands::Run => {
+            nancy::commands::run::run(std::env::current_dir()?)?;
+        }
     }
     
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    #[test]
+    fn test_cli_parsing() {
+        assert!(Args::try_parse_from(["nancy", "init"]).is_ok());
+        assert!(Args::try_parse_from(["nancy", "add-task"]).is_err()); // Correctly bails without file/task payload constraints
+        assert!(Args::try_parse_from(["nancy", "grind"]).is_ok());
+        assert!(Args::try_parse_from(["nancy", "run"]).is_ok());
+        assert!(Args::try_parse_from(["nancy", "add-task", "--task", "test"]).is_ok());
+        assert!(Args::try_parse_from(["nancy", "add-task", "--file", "test.txt"]).is_ok());
+    }
 }
