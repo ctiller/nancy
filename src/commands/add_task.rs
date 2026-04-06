@@ -8,7 +8,7 @@ use crate::schema::identity_config::Identity;
 use crate::schema::registry::EventPayload;
 use crate::schema::task::TaskRequestPayload;
 
-pub fn add_task<P: AsRef<Path>>(dir: P, task: Option<String>, file: Option<PathBuf>) -> Result<()> {
+pub async fn add_task<P: AsRef<Path>>(dir: P, task: Option<String>, file: Option<PathBuf>) -> Result<()> {
     let dir = dir.as_ref();
     let repo = Repository::discover(dir)
         .context("Failed to validate git tree. Ensure you are inside a git repository")?;
@@ -56,15 +56,15 @@ mod tests {
     use serde_json::Value;
     use tempfile::TempDir;
 
-    #[test]
-    fn test_add_task_inline() -> Result<()> {
+    #[tokio::test]
+    async fn test_add_task_inline() -> Result<()> {
         let temp_dir = TempDir::new()?;
         let repo_path = temp_dir.path();
         
         Repository::init(repo_path)?;
-        init(repo_path, 2)?;
+        init(repo_path, 2).await?;
 
-        add_task(repo_path, Some("Test task 1".to_string()), None)?;
+        add_task(repo_path, Some("Test task 1".to_string()), None).await?;
 
         let nancy_dir = repo_path.join(".nancy");
         let identity_content = fs::read_to_string(nancy_dir.join("identity.json"))?;
@@ -91,18 +91,18 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn test_add_task_file() -> Result<()> {
+    #[tokio::test]
+    async fn test_add_task_file() -> Result<()> {
         let temp_dir = TempDir::new()?;
         let repo_path = temp_dir.path();
         
         Repository::init(repo_path)?;
-        init(repo_path, 2)?;
+        init(repo_path, 2).await?;
 
         let task_file = repo_path.join("task.txt");
         fs::write(&task_file, "File task desc")?;
 
-        add_task(repo_path, None, Some(task_file))?;
+        add_task(repo_path, None, Some(task_file)).await?;
 
         let nancy_dir = repo_path.join(".nancy");
         let identity_content = fs::read_to_string(nancy_dir.join("identity.json"))?;
@@ -126,31 +126,31 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn test_add_task_errors() -> Result<()> {
+    #[tokio::test]
+    async fn test_add_task_errors() -> Result<()> {
         let temp_dir = TempDir::new()?;
         let repo_path = temp_dir.path();
 
-        let res = add_task(repo_path, Some("text".to_string()), None);
+        let res = add_task(repo_path, Some("text".to_string()), None).await;
         assert!(res.is_err());
 
         Repository::init(repo_path)?;
 
-        let res = add_task(repo_path, Some("text".to_string()), None);
+        let res = add_task(repo_path, Some("text".to_string()), None).await;
         assert!(res.is_err());
 
-        init(repo_path, 2)?;
+        init(repo_path, 2).await?;
 
-        let res = add_task(repo_path, None, None);
+        let res = add_task(repo_path, None, None).await;
         assert!(res.is_err());
 
-        let res = add_task(repo_path, None, Some(repo_path.join("nonexistent.txt")));
+        let res = add_task(repo_path, None, Some(repo_path.join("nonexistent.txt"))).await;
         assert!(res.is_err());
 
         // 5. Bare repo
         let bare_dir = TempDir::new()?;
         Repository::init_bare(bare_dir.path())?;
-        let res = add_task(bare_dir.path(), Some("text".to_string()), None);
+        let res = add_task(bare_dir.path(), Some("text".to_string()), None).await;
         assert!(res.is_err());
         assert_eq!(res.unwrap_err().to_string(), "Repository appears to be bare. Need a working directory.");
 

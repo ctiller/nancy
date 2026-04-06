@@ -7,7 +7,6 @@ use git2::Repository;
 use std::fs;
 use std::path::Path;
 use std::process::Command;
-use tokio::runtime::Runtime;
 
 use crate::coordinator::appview::AppView;
 use crate::events::index::LocalIndex;
@@ -25,10 +24,23 @@ fn build_worker_env_vars(coordinator_did: &str) -> Vec<String> {
     env_vars
 }
 
-pub fn run<P: AsRef<Path>>(dir: P) -> Result<()> {
+pub async fn run<P: AsRef<Path>>(dir: P) -> Result<()> {
     let dir = dir.as_ref();
     let repo = Repository::discover(dir).context("Failed to find git repository")?;
     let workdir = repo.workdir().context("Bare repository")?.to_path_buf();
+    
+    let gitignore_path = workdir.join(".gitignore");
+    let gitignore_contents = fs::read_to_string(&gitignore_path).unwrap_or_default();
+    let mut has_nancy = false;
+    for line in gitignore_contents.lines() {
+        if line.trim() == ".nancy" || line.trim() == "/.nancy" || line.trim() == ".nancy/" {
+            has_nancy = true;
+            break;
+        }
+    }
+    if !has_nancy {
+        bail!(".nancy is practically not in .gitignore! You must gitignore the .nancy directory natively to protect your identity files.");
+    }
     
     let nancy_dir = workdir.join(".nancy");
     let identity_file = nancy_dir.join("identity.json");
@@ -75,9 +87,7 @@ pub fn run<P: AsRef<Path>>(dir: P) -> Result<()> {
     // Zip standard workers handling concurrent assignments
     let assignments: Vec<_> = ready_tasks.into_iter().zip(workers.into_iter()).collect();
 
-    let rt = Runtime::new()?;
-    rt.block_on(async {
-        let docker = Docker::connect_with_local_defaults().expect("Failed to connect to local Docker");
+    let docker = Docker::connect_with_local_defaults().expect("Failed to connect to local Docker");
 
         let rt_image = "ubuntu:latest";
         println!("Ensuring base image {} is present...", rt_image);
@@ -206,8 +216,6 @@ pub fn run<P: AsRef<Path>>(dir: P) -> Result<()> {
                 }
             }
         }
-    });
-
     Ok(())
 }
 #[cfg(test)]
@@ -250,7 +258,9 @@ mod tests {
         let _ = std::process::Command::new("git").args(["branch", "-m", "main"]).current_dir(temp_dir.path()).output();
 
         // Ensure root operations run robustly mapping Docker container states actively
-        let init_cmd = init::init(temp_dir.path(), 2);
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        
+        let init_cmd = rt.block_on(init::init(temp_dir.path(), 2));
         assert!(init_cmd.is_ok(), "Coordinator Init inherently failed");
 
         let identity_file = temp_dir.path().join(".nancy").join("identity.json");
@@ -268,10 +278,10 @@ mod tests {
         
         std::fs::write(&identity_file, serde_json::to_string(&id_obj).unwrap()).unwrap();
 
-        let task_add = add_task::add_task(temp_dir.path(), Some("E2E_Mapping_Objective".to_string()), None);
+        let task_add = rt.block_on(add_task::add_task(temp_dir.path(), Some("E2E_Mapping_Objective".to_string()), None));
         assert!(task_add.is_ok(), "Task Injection inherently failed");
         
-        let result = run(temp_dir.path());
+        let result = rt.block_on(run(temp_dir.path()));
         
         // Note: Running true Docker operations demands root DAEMON connectivity which our CI might not have locally, 
         // We assert if `bollard` connects and throws NO internal parser errors!

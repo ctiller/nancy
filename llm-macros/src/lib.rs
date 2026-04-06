@@ -1,9 +1,7 @@
 use proc_macro::TokenStream;
 use quote::{quote, format_ident};
-use syn::{parse_macro_input, ItemFn, LitStr, ExprClosure, Token, Pat, Generics, Ident, Type};
+use syn::{parse_macro_input, ItemFn, LitStr, ExprClosure, Token, Pat};
 use syn::parse::{Parse, ParseStream};
-use syn::punctuated::Punctuated;
-
 /// Parses `#[llm_tool]` on a function.
 /// It keeps the function exactly as is, but generates a companion struct Named `{FnName}Tool`
 /// which implements `LlmTool`.
@@ -86,6 +84,7 @@ pub fn llm_tool(_attr: TokenStream, item: TokenStream) -> TokenStream {
             }
 
             fn schema(&self) -> ::schemars::Schema {
+                #[allow(dead_code)]
                 #[derive(::serde::Deserialize, ::schemars::JsonSchema)]
                 struct Args {
                     #(
@@ -96,6 +95,7 @@ pub fn llm_tool(_attr: TokenStream, item: TokenStream) -> TokenStream {
             }
 
             async fn call(&self, args: ::serde_json::Value) -> ::anyhow::Result<::serde_json::Value> {
+                #[allow(dead_code)]
                 #[derive(::serde::Deserialize)]
                 struct Args {
                     #(
@@ -169,6 +169,7 @@ pub fn make_tool(input: TokenStream) -> TokenStream {
 
     let expanded = quote! {
         {
+            #[allow(dead_code)]
             #[derive(::serde::Deserialize, ::schemars::JsonSchema)]
             struct ToolArgs {
                 #( #arg_names: #arg_types, )*

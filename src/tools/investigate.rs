@@ -15,12 +15,12 @@ Follow these critical principles:
 4. **Be Exhaustive**: When asked to locate or identify something, do not stop at the first match. Comb through the architecture to guarantee complete isolation.
 5. **Report Clearly**: Synthesize your discoveries into a hyper-direct, rigorous, and technical answer yielding exact file paths, snippets, and mechanical processes."#;
 
-    thinking_llm::<String>()
+    let mut client = thinking_llm::<String>()
         .tools(super::agent_tools())
         .system_prompt(system_prompt)
-        .build()
-        .ask(&question)
-        .await
+        .build()?;
+        
+    client.ask(&question).await
 }
 
 /// A parallelism helper to run multiple investigate tools simultaneously.

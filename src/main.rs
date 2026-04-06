@@ -39,26 +39,27 @@ pub struct AddTaskArgs {
     pub file: Option<PathBuf>,
 }
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     dotenvy::dotenv().ok();
     let args = Args::parse();
 
     match &args.command {
         Commands::Init(init_args) => {
-            nancy::commands::init::init(std::env::current_dir()?, init_args.grinders)?;
+            nancy::commands::init::init(std::env::current_dir()?, init_args.grinders).await?;
         }
         Commands::AddTask(add_task_args) => {
             nancy::commands::add_task::add_task(
                 std::env::current_dir()?,
                 add_task_args.task.clone(),
                 add_task_args.file.clone(),
-            )?;
+            ).await?;
         }
         Commands::Grind => {
-            nancy::commands::grind::grind(std::env::current_dir()?)?;
+            nancy::commands::grind::grind(std::env::current_dir()?).await?;
         }
         Commands::Run => {
-            nancy::commands::run::run(std::env::current_dir()?)?;
+            nancy::commands::run::run(std::env::current_dir()?).await?;
         }
     }
     

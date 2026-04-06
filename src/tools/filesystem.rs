@@ -63,7 +63,7 @@ pub async fn grep_search(
     let mut results = Vec::new();
 
     for path in &search_paths {
-        let mut builder = WalkBuilder::new(path);
+        let builder = WalkBuilder::new(path);
         if let Some(_filters) = &file_filters {
             // Future implementation: map glob strings natively to the builder
         }

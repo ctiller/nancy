@@ -6,7 +6,7 @@ use std::io::Write;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-pub fn init<P: AsRef<Path>>(dir: P, grinders: usize) -> Result<()> {
+pub async fn init<P: AsRef<Path>>(dir: P, grinders: usize) -> Result<()> {
     let dir = dir.as_ref();
     let repo = Repository::discover(dir)
         .context("Failed to validate git tree. Ensure you are inside a git repository")?;
@@ -141,7 +141,8 @@ mod tests {
         let repo = Repository::init(repo_path)?;
 
         // Run the init command with 2 grinders
-        init(repo_path, 2)?;
+        let rt = tokio::runtime::Runtime::new()?;
+        rt.block_on(init(repo_path, 2))?;
 
         // Verify .nancy directory and identity.json were created
         let nancy_dir = repo_path.join(".nancy");
@@ -216,10 +217,11 @@ mod tests {
     fn test_init_double_fails() {
         let temp_dir = TempDir::new().unwrap();
         let _repo = git2::Repository::init(temp_dir.path()).unwrap();
-        crate::commands::init::init(temp_dir.path(), 6).unwrap();
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(crate::commands::init::init(temp_dir.path(), 6)).unwrap();
         
         // Ensure double initialization returns an error securely
-        let result = crate::commands::init::init(temp_dir.path(), 6);
+        let result = rt.block_on(crate::commands::init::init(temp_dir.path(), 6));
         assert!(result.is_err());
     }
 }

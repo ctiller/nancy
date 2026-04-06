@@ -7,14 +7,12 @@ use std::time::Duration;
 use std::collections::HashSet;
 
 use crate::events::reader::Reader;
-use crate::events::writer::Writer;
 use crate::schema::identity_config::Identity;
 use crate::schema::registry::EventPayload;
-use crate::schema::task::AssignmentCompletePayload;
 
 static SHUTDOWN: AtomicBool = AtomicBool::new(false);
 
-pub fn grind<P: AsRef<Path>>(dir: P) -> Result<()> {
+pub async fn grind<P: AsRef<Path>>(dir: P) -> Result<()> {
     let dir = dir.as_ref();
     let repo = Repository::discover(dir).context("Not a git repository")?;
     let workdir = repo.workdir().context("Bare repository")?.to_path_buf();
@@ -101,7 +99,7 @@ pub fn grind<P: AsRef<Path>>(dir: P) -> Result<()> {
                             &id_obj, 
                             &task_id, 
                             &task_request_ref
-                        )?;
+                        ).await?;
                     }
                 }
                 processed = true;
@@ -126,6 +124,7 @@ mod tests {
     use sealed_test::prelude::*;
     use crate::schema::identity_config::DidOwner;
     use crate::schema::task::CoordinatorAssignmentPayload;
+    use crate::events::writer::Writer;
     
     #[sealed_test(env = [("COORDINATOR_DID", "mock_coord_888")])]
     fn test_grind_end2end() -> Result<()> {
@@ -167,7 +166,8 @@ mod tests {
         SHUTDOWN.store(false, Ordering::SeqCst);
         let dir = temp_dir.path().to_path_buf();
         let handle = std::thread::spawn(move || {
-            grind(dir).unwrap();
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            rt.block_on(grind(dir)).unwrap();
         });
 
         // Let the grinder loop cycle against our mapped mock events!
