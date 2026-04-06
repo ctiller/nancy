@@ -4,4 +4,5 @@ pub mod schema;
 pub mod tasks;
 pub mod coordinator;
 pub mod grind;
+pub mod llm;
 

@@ -1,0 +1,208 @@
+use proc_macro::TokenStream;
+use quote::{quote, format_ident};
+use syn::{parse_macro_input, ItemFn, LitStr, ExprClosure, Token, Pat, Generics, Ident, Type};
+use syn::parse::{Parse, ParseStream};
+use syn::punctuated::Punctuated;
+
+/// Parses `#[llm_tool]` on a function.
+/// It keeps the function exactly as is, but generates a companion struct Named `{FnName}Tool`
+/// which implements `LlmTool`.
+#[proc_macro_attribute]
+pub fn llm_tool(_attr: TokenStream, item: TokenStream) -> TokenStream {
+    let input_fn = parse_macro_input!(item as ItemFn);
+    let fn_name = &input_fn.sig.ident;
+    let vis = &input_fn.vis;
+    let mut args = Vec::new();
+
+    for arg in &input_fn.sig.inputs {
+        if let syn::FnArg::Typed(pat_type) = arg {
+            if let Pat::Ident(pat_ident) = &*pat_type.pat {
+                args.push((pat_ident.ident.clone(), pat_type.ty.clone()));
+            }
+        }
+    }
+
+    // Extract doc comments for description
+    let mut desc_lines = Vec::new();
+    for attr in &input_fn.attrs {
+        if attr.path().is_ident("doc") {
+            if let syn::Meta::NameValue(nv) = &attr.meta {
+                if let syn::Expr::Lit(expr_lit) = &nv.value {
+                    if let syn::Lit::Str(lit_str) = &expr_lit.lit {
+                        desc_lines.push(lit_str.value().trim().to_string());
+                    }
+                }
+            }
+        }
+    }
+    
+    let description = desc_lines.join("\n");
+    // Ensure properly capitalized camel case Tool struct
+    let tool_struct_str = fn_name.to_string();
+    let mut chars = tool_struct_str.chars();
+    let camel_case = match chars.next() {
+        None => String::new(),
+        Some(f) => f.to_uppercase().chain(chars).collect(),
+    };
+    let tool_struct_name = format_ident!("{}Tool", camel_case);
+
+    let arg_names = args.iter().map(|(id, _)| id).collect::<Vec<_>>();
+    let arg_types = args.iter().map(|(_, ty)| ty).collect::<Vec<_>>();
+
+    let is_async = input_fn.sig.asyncness.is_some();
+
+    let call_expr = if is_async {
+        quote! {
+            let res = #fn_name(#( input_args.#arg_names ),*).await;
+            Ok(::serde_json::to_value(&res).unwrap_or(::serde_json::Value::Null))
+        }
+    } else {
+        quote! {
+            let res = #fn_name(#( input_args.#arg_names ),*);
+            Ok(::serde_json::to_value(&res).unwrap_or(::serde_json::Value::Null))
+        }
+    };
+
+    let expanded = quote! {
+        #input_fn
+
+        #vis struct #tool_struct_name;
+
+        #[::async_trait::async_trait]
+        impl crate::llm::tool::LlmTool for #tool_struct_name {
+            fn name(&self) -> &str {
+                stringify!(#fn_name)
+            }
+
+            fn description(&self) -> String {
+                #description.to_string()
+            }
+
+            fn schema(&self) -> ::schemars::Schema {
+                #[derive(::serde::Deserialize, ::schemars::JsonSchema)]
+                struct Args {
+                    #(
+                        #arg_names: #arg_types,
+                    )*
+                }
+                ::schemars::schema_for!(Args)
+            }
+
+            async fn call(&self, args: ::serde_json::Value) -> ::anyhow::Result<::serde_json::Value> {
+                #[derive(::serde::Deserialize)]
+                struct Args {
+                    #(
+                        #arg_names: #arg_types,
+                    )*
+                }
+                
+                let input_args: Args = ::serde_json::from_value(args)?;
+                #call_expr
+            }
+        }
+    };
+
+    TokenStream::from(expanded)
+}
+
+struct MakeToolInput {
+    name: LitStr,
+    description: LitStr,
+    closure: ExprClosure,
+}
+
+impl Parse for MakeToolInput {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let name = input.parse()?;
+        input.parse::<Token![,]>()?;
+        let description = input.parse()?;
+        input.parse::<Token![,]>()?;
+        let closure = input.parse()?;
+        Ok(MakeToolInput {
+            name,
+            description,
+            closure,
+        })
+    }
+}
+
+/// Parses a closure and returns an instantiated LlmTool trait object via Box<dyn LlmTool>.
+#[proc_macro]
+pub fn make_tool(input: TokenStream) -> TokenStream {
+    let MakeToolInput { name, description, closure } = parse_macro_input!(input as MakeToolInput);
+
+    let mut args = Vec::new();
+    for pat in &closure.inputs {
+        if let Pat::Type(pat_type) = pat {
+            if let Pat::Ident(pat_ident) = &*pat_type.pat {
+                args.push((pat_ident.ident.clone(), pat_type.ty.clone()));
+            }
+        } else {
+            panic!("make_tool! requires typed closure arguments (e.g., |a: i32|)");
+        }
+    }
+
+    let arg_names = args.iter().map(|(id, _)| id).collect::<Vec<_>>();
+    let arg_types = args.iter().map(|(_, ty)| ty).collect::<Vec<_>>();
+
+    let closure_is_async = closure.asyncness.is_some();
+    
+    let closure_call = if closure_is_async {
+        quote! { closure(#( input_args.#arg_names ),*).await }
+    } else {
+        quote! { closure(#( input_args.#arg_names ),*) }
+    };
+
+    let expanded = quote! {
+        {
+            #[derive(::serde::Deserialize, ::schemars::JsonSchema)]
+            struct ToolArgs {
+                #( #arg_names: #arg_types, )*
+            }
+
+            struct ClosureTool<F> {
+                name: String,
+                description: String,
+                closure: F,
+            }
+
+            #[::async_trait::async_trait]
+            impl<F, Fut, T> crate::llm::tool::LlmTool for ClosureTool<F>
+            where
+                F: Fn(#( #arg_types ),*) -> Fut + Send + Sync,
+                Fut: std::future::Future<Output = ::anyhow::Result<T>> + Send,
+                T: ::serde::Serialize + Send,
+            {
+                fn name(&self) -> &str {
+                    &self.name
+                }
+
+                fn description(&self) -> String {
+                    self.description.clone()
+                }
+
+                fn schema(&self) -> ::schemars::Schema {
+                    ::schemars::schema_for!(ToolArgs)
+                }
+
+                async fn call(&self, args: ::serde_json::Value) -> ::anyhow::Result<::serde_json::Value> {
+                    let input_args: ToolArgs = ::serde_json::from_value(args)?;
+                    let res = (self.closure)(#( input_args.#arg_names ),*).await?;
+                    Ok(::serde_json::to_value(&res).unwrap_or(::serde_json::Value::Null))
+                }
+            }
+
+            let closure = #closure;
+            
+            let async_wrap = |#( #arg_names: #arg_types ),*| async move { #closure_call };
+
+            Box::new(ClosureTool {
+                name: #name.to_string(),
+                description: #description.to_string(),
+                closure: async_wrap,
+            }) as Box<dyn crate::llm::tool::LlmTool>
+        }
+    };
+
+    TokenStream::from(expanded)
+}
