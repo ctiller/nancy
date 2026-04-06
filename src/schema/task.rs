@@ -9,7 +9,7 @@ pub struct TaskRequestPayload {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct PlanPayload {
     pub request_ref: String,
-    pub description: String,
+    pub branch_name: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

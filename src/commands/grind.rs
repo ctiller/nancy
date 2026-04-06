@@ -53,15 +53,15 @@ pub fn grind<P: AsRef<Path>>(dir: P) -> Result<()> {
                 if let Ok(env) = ev_res {
                     if let EventPayload::CoordinatorAssignment(assignment) = env.payload {
                         use crate::schema::task::CoordinatorAssignmentPayload;
-                        match assignment {
-                            CoordinatorAssignmentPayload::PerformTask { task_ref: _, assignee_did } => {
-                                if assignee_did == worker_did {
-                                    tasks_assigned.push(env.id.clone());
+                        match &assignment {
+                            CoordinatorAssignmentPayload::PerformTask { assignee_did, .. } => {
+                                if assignee_did == &worker_did {
+                                    tasks_assigned.push((env.id.clone(), assignment));
                                 }
                             }
-                            CoordinatorAssignmentPayload::PlanTask { task_request_ref: _, assignee_did } => {
-                                if assignee_did == worker_did {
-                                    tasks_assigned.push(env.id.clone());
+                            CoordinatorAssignmentPayload::PlanTask { assignee_did, .. } => {
+                                if assignee_did == &worker_did {
+                                    tasks_assigned.push((env.id.clone(), assignment));
                                 }
                             }
                         }
@@ -83,21 +83,27 @@ pub fn grind<P: AsRef<Path>>(dir: P) -> Result<()> {
         }
 
         let mut processed = false;
-        for task_id in tasks_assigned {
+        for (task_id, assignment) in tasks_assigned {
             if !tasks_completed.contains(&task_id) {
-                // Future handling injects the work execution here!
-                println!("Executing Task: {}", task_id);
-                std::thread::sleep(Duration::from_secs(1)); // Mock work
-                
-                let resolved_commit_sha = "mock_sha_xyz987".to_string();
-                let writer = Writer::new(&repo, id_obj.clone())?;
-                writer.log_event(EventPayload::AssignmentComplete(AssignmentCompletePayload {
-                    assignment_ref: task_id.clone(),
-                    report: format!("Completed with mock sha {}", resolved_commit_sha),
-                }))?;
-                writer.commit_batch()?;
-                
-                println!("Completed Task: {}", task_id);
+                use crate::schema::task::CoordinatorAssignmentPayload;
+                match assignment {
+                    CoordinatorAssignmentPayload::PerformTask { task_ref, .. } => {
+                        crate::grind::perform_task::execute(
+                            &repo, 
+                            &id_obj, 
+                            &task_id, 
+                            &task_ref
+                        )?;
+                    }
+                    CoordinatorAssignmentPayload::PlanTask { task_request_ref, .. } => {
+                        crate::grind::plan_task::execute(
+                            &repo, 
+                            &id_obj, 
+                            &task_id, 
+                            &task_request_ref
+                        )?;
+                    }
+                }
                 processed = true;
                 break; // One task at a time natively bounds state. Loop continues to fetch latest after committing.
             }
