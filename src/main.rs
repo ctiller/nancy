@@ -14,13 +14,19 @@ struct Args {
 #[derive(Subcommand, Debug)]
 enum Commands {
     /// Initialize a nancy tracking repository
-    Init,
+    Init(InitArgs),
     /// Add a new task to nancy
     AddTask(AddTaskArgs),
     /// Run the main agentic runloop
     Grind,
     /// Provision orchestration environments natively locally
     Run,
+}
+
+#[derive(clap::Args, Debug)]
+pub struct InitArgs {
+    #[arg(long, default_value_t = 6)]
+    pub grinders: usize,
 }
 
 #[derive(clap::Args, Debug)]
@@ -37,8 +43,8 @@ fn main() -> Result<()> {
     let args = Args::parse();
 
     match &args.command {
-        Commands::Init => {
-            nancy::commands::init::init(std::env::current_dir()?)?;
+        Commands::Init(init_args) => {
+            nancy::commands::init::init(std::env::current_dir()?, init_args.grinders)?;
         }
         Commands::AddTask(add_task_args) => {
             nancy::commands::add_task::add_task(
@@ -66,6 +72,12 @@ mod tests {
     #[test]
     fn test_cli_parsing() {
         assert!(Args::try_parse_from(["nancy", "init"]).is_ok());
+        let init_args = Args::try_parse_from(["nancy", "init", "--grinders", "10"]).unwrap();
+        if let Commands::Init(args) = init_args.command {
+            assert_eq!(args.grinders, 10);
+        } else {
+            panic!("Expected Init command");
+        }
         assert!(Args::try_parse_from(["nancy", "add-task"]).is_err()); // Correctly bails without file/task payload constraints
         assert!(Args::try_parse_from(["nancy", "grind"]).is_ok());
         assert!(Args::try_parse_from(["nancy", "run"]).is_ok());

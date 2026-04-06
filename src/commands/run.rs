@@ -224,7 +224,7 @@ mod tests {
         let _ = std::process::Command::new("git").args(["branch", "-m", "main"]).current_dir(temp_dir.path()).output();
 
         // Ensure root operations run robustly mapping Docker container states actively
-        let init_cmd = init::init(temp_dir.path());
+        let init_cmd = init::init(temp_dir.path(), 2);
         assert!(init_cmd.is_ok(), "Coordinator Init inherently failed");
 
         let identity_file = temp_dir.path().join(".nancy").join("identity.json");

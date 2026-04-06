@@ -6,7 +6,7 @@ use std::io::Write;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-pub fn init<P: AsRef<Path>>(dir: P) -> Result<()> {
+pub fn init<P: AsRef<Path>>(dir: P, grinders: usize) -> Result<()> {
     let dir = dir.as_ref();
     let repo = Repository::discover(dir)
         .context("Failed to validate git tree. Ensure you are inside a git repository")?;
@@ -62,9 +62,38 @@ pub fn init<P: AsRef<Path>>(dir: P) -> Result<()> {
         private_key_hex: hex::encode(key.private_key_bytes()),
     };
 
+    let mut workers = Vec::new();
+    let mut worker_payloads = Vec::new();
+
+    let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
+    use crate::schema::identity::IdentityPayload;
+    use crate::schema::registry::EventPayload;
+
+    for i in 0..grinders {
+        let worker_key = generate::<Ed25519KeyPair>(None);
+        let worker_did = worker_key.fingerprint();
+        
+        let worker_owner = crate::schema::identity_config::DidOwner {
+            did: worker_did.clone(),
+            public_key_hex: hex::encode(worker_key.public_key_bytes()),
+            private_key_hex: hex::encode(worker_key.private_key_bytes()),
+        };
+        workers.push(worker_owner);
+        
+        println!("Provisioned grinder {} DID: {}", i + 1, worker_did);
+
+        worker_payloads.push(EventPayload::Identity(
+            IdentityPayload {
+                did: worker_did,
+                public_key_hex: hex::encode(worker_key.public_key_bytes()),
+                timestamp, // can use the same timestamp for simplicity
+            }
+        ));
+    }
+
     let id_obj = crate::schema::identity_config::Identity::Coordinator {
         did: did_owner,
-        workers: vec![],
+        workers,
     };
 
     if let Err(e) = fs::write(
@@ -78,11 +107,6 @@ pub fn init<P: AsRef<Path>>(dir: P) -> Result<()> {
     use crate::events::writer::Writer;
     let writer = Writer::new(&repo, id_obj)?;
 
-    let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
-
-    use crate::schema::identity::IdentityPayload;
-    use crate::schema::registry::EventPayload;
-
     let payload = EventPayload::Identity(IdentityPayload {
         did: did.clone(),
         public_key_hex: hex::encode(key.public_key_bytes()),
@@ -90,6 +114,10 @@ pub fn init<P: AsRef<Path>>(dir: P) -> Result<()> {
     });
 
     writer.log_event(payload)?;
+
+    for worker_payload in worker_payloads {
+        writer.log_event(worker_payload)?;
+    }
 
     let branch_name = format!("refs/heads/nancy/{}", did);
     println!("Successfully provisioned new DID and initialized .nancy!");
@@ -112,8 +140,8 @@ mod tests {
         let repo_path = temp_dir.path();
         let repo = Repository::init(repo_path)?;
 
-        // Run the init command
-        init(repo_path)?;
+        // Run the init command with 2 grinders
+        init(repo_path, 2)?;
 
         // Verify .nancy directory and identity.json were created
         let nancy_dir = repo_path.join(".nancy");
@@ -148,7 +176,7 @@ mod tests {
         // Parse the event log and verify its contents
         let log_content = std::str::from_utf8(log_blob.content())?;
         let event_lines: Vec<&str> = log_content.trim().split('\n').collect();
-        assert_eq!(event_lines.len(), 1, "There should be exactly one event log entry");
+        assert_eq!(event_lines.len(), 3, "There should be exactly three event log entries (1 coordinator, 2 grinders)");
 
         let event_json: Value = serde_json::from_str(event_lines[0])?;
         assert_eq!(event_json["did"], did, "Logged DID should match the generated DID");
@@ -188,10 +216,10 @@ mod tests {
     fn test_init_double_fails() {
         let temp_dir = TempDir::new().unwrap();
         let _repo = git2::Repository::init(temp_dir.path()).unwrap();
-        crate::commands::init::init(temp_dir.path()).unwrap();
+        crate::commands::init::init(temp_dir.path(), 6).unwrap();
         
         // Ensure double initialization returns an error securely
-        let result = crate::commands::init::init(temp_dir.path());
+        let result = crate::commands::init::init(temp_dir.path(), 6);
         assert!(result.is_err());
     }
 }

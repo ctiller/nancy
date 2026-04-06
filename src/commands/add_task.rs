@@ -62,7 +62,7 @@ mod tests {
         let repo_path = temp_dir.path();
         
         Repository::init(repo_path)?;
-        init(repo_path)?;
+        init(repo_path, 2)?;
 
         add_task(repo_path, Some("Test task 1".to_string()), None)?;
 
@@ -81,9 +81,9 @@ mod tests {
 
         let log_content = std::str::from_utf8(log_blob.content())?;
         let event_lines: Vec<&str> = log_content.trim().split('\n').collect();
-        assert_eq!(event_lines.len(), 2);
+        assert_eq!(event_lines.len(), 4);
         
-        let task_event: Value = serde_json::from_str(event_lines[1])?;
+        let task_event: Value = serde_json::from_str(event_lines[3])?;
         assert_eq!(task_event["payload"]["$type"], "task");
         assert_eq!(task_event["payload"]["description"], "Test task 1");
         assert_eq!(task_event["payload"]["requestor"], id_obj.get_did_owner().did);
@@ -97,7 +97,7 @@ mod tests {
         let repo_path = temp_dir.path();
         
         Repository::init(repo_path)?;
-        init(repo_path)?;
+        init(repo_path, 2)?;
 
         let task_file = repo_path.join("task.txt");
         fs::write(&task_file, "File task desc")?;
@@ -118,8 +118,9 @@ mod tests {
 
         let log_content = std::str::from_utf8(log_blob.content())?;
         let event_lines: Vec<&str> = log_content.trim().split('\n').collect();
+        assert_eq!(event_lines.len(), 4);
         
-        let task_event: Value = serde_json::from_str(event_lines[1])?;
+        let task_event: Value = serde_json::from_str(event_lines[3])?;
         assert_eq!(task_event["payload"]["description"], "File task desc");
 
         Ok(())
@@ -138,7 +139,7 @@ mod tests {
         let res = add_task(repo_path, Some("text".to_string()), None);
         assert!(res.is_err());
 
-        init(repo_path)?;
+        init(repo_path, 2)?;
 
         let res = add_task(repo_path, None, None);
         assert!(res.is_err());
