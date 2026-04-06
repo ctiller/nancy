@@ -155,6 +155,21 @@ mod tests {
         assert!(payload.get("timestamp").is_some(), "Payload should contain a timestamp");
         
         assert!(event_json.get("signature").is_some(), "Event should be signed");
+        assert!(event_json.get("id").is_some(), "Event should have an ID");
+
+        let id = event_json["id"].as_str().unwrap();
+
+        // Test the reader index syncing
+        use crate::events::reader::Reader;
+        use crate::events::index::LocalIndex;
+        let reader = Reader::new(&repo, did.to_string());
+        let local_index = LocalIndex::new(&nancy_dir)?;
+        reader.sync_index(&local_index)?;
+
+        let resolved = local_index.lookup_event(id)?.expect("Event should be indexed");
+        assert_eq!(resolved.0, did, "Indexed DID should match");
+        assert_eq!(resolved.1, "00001.log", "Indexed log file should be 00001.log");
+        assert_eq!(resolved.2, 0, "Indexed line number should be 0");
 
         // Also verify .gitignore was updated
         let gitignore_path = repo_path.join(".gitignore");
