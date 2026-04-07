@@ -1,5 +1,5 @@
 use anyhow::{Context, Result, bail};
-use did_key::{generate, Ed25519KeyPair, Fingerprint, KeyMaterial};
+use did_key::{Ed25519KeyPair, Fingerprint, KeyMaterial, generate};
 use git2::Repository;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
@@ -13,7 +13,7 @@ pub async fn init<P: AsRef<Path>>(dir: P, grinders: usize) -> Result<()> {
 
     let workdir = match repo.workdir() {
         Some(p) => p.to_path_buf(),
-        None => bail!("Repository appears to be bare. Need a working directory.")
+        None => bail!("Repository appears to be bare. Need a working directory."),
     };
 
     let nancy_dir = workdir.join(".nancy");
@@ -33,7 +33,7 @@ pub async fn init<P: AsRef<Path>>(dir: P, grinders: usize) -> Result<()> {
             break;
         }
     }
-    
+
     if !has_nancy {
         let mut file = OpenOptions::new()
             .create(true)
@@ -72,23 +72,21 @@ pub async fn init<P: AsRef<Path>>(dir: P, grinders: usize) -> Result<()> {
     for i in 0..grinders {
         let worker_key = generate::<Ed25519KeyPair>(None);
         let worker_did = worker_key.fingerprint();
-        
+
         let worker_owner = crate::schema::identity_config::DidOwner {
             did: worker_did.clone(),
             public_key_hex: hex::encode(worker_key.public_key_bytes()),
             private_key_hex: hex::encode(worker_key.private_key_bytes()),
         };
         workers.push(worker_owner);
-        
+
         println!("Provisioned grinder {} DID: {}", i + 1, worker_did);
 
-        worker_payloads.push(EventPayload::Identity(
-            IdentityPayload {
-                did: worker_did,
-                public_key_hex: hex::encode(worker_key.public_key_bytes()),
-                timestamp, // can use the same timestamp for simplicity
-            }
-        ));
+        worker_payloads.push(EventPayload::Identity(IdentityPayload {
+            did: worker_did,
+            public_key_hex: hex::encode(worker_key.public_key_bytes()),
+            timestamp, // can use the same timestamp for simplicity
+        }));
     }
 
     let id_obj = crate::schema::identity_config::Identity::Coordinator {
@@ -153,56 +151,87 @@ mod tests {
 
         // Extract the generated DID from identity.json
         let identity_content = fs::read_to_string(&identity_file)?;
-        let id_obj: crate::schema::identity_config::Identity = serde_json::from_str(&identity_content)?;
+        let id_obj: crate::schema::identity_config::Identity =
+            serde_json::from_str(&identity_content)?;
         let did = id_obj.get_did_owner().did.clone();
 
         // Verify the orphaned branch exists
         let branch_name = format!("refs/heads/nancy/{}", did);
-        let branch_ref = repo.find_reference(&branch_name).expect("Orphaned branch should exist");
-        
+        let branch_ref = repo
+            .find_reference(&branch_name)
+            .expect("Orphaned branch should exist");
+
         // Verify the commit points to a tree with the correct event log structure
         let commit = branch_ref.peel_to_commit()?;
         let tree = commit.tree()?;
-        
+
         // events directory should exist
-        let events_entry = tree.get_name("events").expect("events directory should exist in tree");
+        let events_entry = tree
+            .get_name("events")
+            .expect("events directory should exist in tree");
         let events_object = events_entry.to_object(&repo)?;
         let events_tree = events_object.as_tree().expect("events should be a tree");
 
         // 00001.log should exist inside the events directory
-        let log_entry = events_tree.get_name("00001.log").expect("00001.log should exist in events tree");
+        let log_entry = events_tree
+            .get_name("00001.log")
+            .expect("00001.log should exist in events tree");
         let log_object = log_entry.to_object(&repo)?;
         let log_blob = log_object.as_blob().expect("00001.log should be a blob");
 
         // Parse the event log and verify its contents
         let log_content = std::str::from_utf8(log_blob.content())?;
         let event_lines: Vec<&str> = log_content.trim().split('\n').collect();
-        assert_eq!(event_lines.len(), 3, "There should be exactly three event log entries (1 coordinator, 2 grinders)");
+        assert_eq!(
+            event_lines.len(),
+            3,
+            "There should be exactly three event log entries (1 coordinator, 2 grinders)"
+        );
 
         let event_json: Value = serde_json::from_str(event_lines[0])?;
-        assert_eq!(event_json["did"], did, "Logged DID should match the generated DID");
-        
+        assert_eq!(
+            event_json["did"], did,
+            "Logged DID should match the generated DID"
+        );
+
         let payload = &event_json["payload"];
-        assert_eq!(payload["$type"], "identity", "Initial event type should be 'identity'");
+        assert_eq!(
+            payload["$type"], "identity",
+            "Initial event type should be 'identity'"
+        );
         assert_eq!(payload["did"], did, "Payload should specify the DID");
-        assert!(payload.get("public_key_hex").is_some(), "Payload should contain public key");
-        assert!(payload.get("timestamp").is_some(), "Payload should contain a timestamp");
-        
-        assert!(event_json.get("signature").is_some(), "Event should be signed");
+        assert!(
+            payload.get("public_key_hex").is_some(),
+            "Payload should contain public key"
+        );
+        assert!(
+            payload.get("timestamp").is_some(),
+            "Payload should contain a timestamp"
+        );
+
+        assert!(
+            event_json.get("signature").is_some(),
+            "Event should be signed"
+        );
         assert!(event_json.get("id").is_some(), "Event should have an ID");
 
         let id = event_json["id"].as_str().unwrap();
 
         // Test the reader index syncing
-        use crate::events::reader::Reader;
         use crate::events::index::LocalIndex;
+        use crate::events::reader::Reader;
         let reader = Reader::new(&repo, did.to_string());
         let local_index = LocalIndex::new(&nancy_dir)?;
         reader.sync_index(&local_index)?;
 
-        let resolved = local_index.lookup_event(id)?.expect("Event should be indexed");
+        let resolved = local_index
+            .lookup_event(id)?
+            .expect("Event should be indexed");
         assert_eq!(resolved.0, did, "Indexed DID should match");
-        assert_eq!(resolved.1, "00001.log", "Indexed log file should be 00001.log");
+        assert_eq!(
+            resolved.1, "00001.log",
+            "Indexed log file should be 00001.log"
+        );
         assert_eq!(resolved.2, 0, "Indexed line number should be 0");
 
         // Also verify .gitignore was updated
@@ -218,8 +247,9 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let _repo = git2::Repository::init(temp_dir.path()).unwrap();
         let rt = tokio::runtime::Runtime::new().unwrap();
-        rt.block_on(crate::commands::init::init(temp_dir.path(), 6)).unwrap();
-        
+        rt.block_on(crate::commands::init::init(temp_dir.path(), 6))
+            .unwrap();
+
         // Ensure double initialization returns an error securely
         let result = rt.block_on(crate::commands::init::init(temp_dir.path(), 6));
         assert!(result.is_err());

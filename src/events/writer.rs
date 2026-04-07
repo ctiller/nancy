@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use did_key::{CoreSign, Ed25519KeyPair};
 use git2::Repository;
 use std::cell::RefCell;
@@ -67,7 +67,7 @@ impl<'a> Writer<'a> {
 
         let event_line = format!("{}\n", serde_json::to_string(&envelope)?);
         self.pending_events.borrow_mut().push(event_line);
-        
+
         Ok(())
     }
 
@@ -132,7 +132,11 @@ impl<'a> Writer<'a> {
             let blob = self.repo.find_blob(*blob_id)?;
             let content_str = std::str::from_utf8(blob.content())?;
             current_content = content_str.to_string();
-            current_lines = current_content.trim().split('\n').filter(|l| !l.is_empty()).count();
+            current_lines = current_content
+                .trim()
+                .split('\n')
+                .filter(|l| !l.is_empty())
+                .count();
         }
 
         let mut blobs_to_write = Vec::new();
@@ -247,18 +251,30 @@ mod tests {
             public_key_hex: "dummy".to_string(),
             timestamp: 123456790,
         }))?;
-        
+
         writer.commit_batch()?;
 
         // Verify git branches
         let branch_name = format!("refs/heads/nancy/{}", did);
-        let branch_ref = repo.find_reference(&branch_name).expect("Branch should exist");
-        
+        let branch_ref = repo
+            .find_reference(&branch_name)
+            .expect("Branch should exist");
+
         let commit = branch_ref.peel_to_commit()?;
         let tree = commit.tree()?;
-        let events_tree = tree.get_name("events").unwrap().to_object(&repo)?.into_tree().unwrap();
-        let log_blob = events_tree.get_name("00001.log").unwrap().to_object(&repo)?.into_blob().unwrap();
-        
+        let events_tree = tree
+            .get_name("events")
+            .unwrap()
+            .to_object(&repo)?
+            .into_tree()
+            .unwrap();
+        let log_blob = events_tree
+            .get_name("00001.log")
+            .unwrap()
+            .to_object(&repo)?
+            .into_blob()
+            .unwrap();
+
         let content = std::str::from_utf8(log_blob.content())?;
         let lines: Vec<&str> = content.trim().split('\n').collect();
         assert_eq!(lines.len(), 2, "There should be two events logged");
@@ -297,10 +313,10 @@ mod tests {
 
         // Second instance triggers the tree validation and updates existing log blob
         let writer2 = Writer::new(&repo, identity.clone())?;
-        
+
         // Let's also cover the empty payload return gracefully!
         writer2.commit_batch()?;
-        
+
         writer2.log_event(EventPayload::Identity(IdentityPayload {
             did: did.clone(),
             public_key_hex: "dummy2".to_string(),
@@ -309,15 +325,30 @@ mod tests {
         writer2.commit_batch()?;
 
         let branch_name = format!("refs/heads/nancy/{}", did);
-        let branch_ref = repo.find_reference(&branch_name).expect("Branch should exist");
+        let branch_ref = repo
+            .find_reference(&branch_name)
+            .expect("Branch should exist");
         let commit = branch_ref.peel_to_commit()?;
         let tree = commit.tree()?;
-        let events_tree = tree.get_name("events").unwrap().to_object(&repo)?.into_tree().unwrap();
-        let log_blob = events_tree.get_name("00001.log").unwrap().to_object(&repo)?.into_blob().unwrap();
-        
+        let events_tree = tree
+            .get_name("events")
+            .unwrap()
+            .to_object(&repo)?
+            .into_tree()
+            .unwrap();
+        let log_blob = events_tree
+            .get_name("00001.log")
+            .unwrap()
+            .to_object(&repo)?
+            .into_blob()
+            .unwrap();
+
         let content = std::str::from_utf8(log_blob.content())?;
-        assert_eq!(content.trim().split('\n').filter(|l| !l.is_empty()).count(), 2);
-        
+        assert_eq!(
+            content.trim().split('\n').filter(|l| !l.is_empty()).count(),
+            2
+        );
+
         Ok(())
     }
 
@@ -344,33 +375,73 @@ mod tests {
                 timestamp: i as u64,
             }))?;
         }
-        
+
         // Execute the fast batch memory evaluation
         writer.commit_batch()?;
 
         let branch_name = format!("refs/heads/nancy/{}", did);
-        let branch_ref = repo.find_reference(&branch_name).expect("Branch should exist");
-        
+        let branch_ref = repo
+            .find_reference(&branch_name)
+            .expect("Branch should exist");
+
         let commit = branch_ref.peel_to_commit()?;
         let tree = commit.tree()?;
-        let events_tree = tree.get_name("events").unwrap().to_object(&repo)?.into_tree().unwrap();
-        
-        assert!(events_tree.get_name("00001.log").is_some(), "00001.log must exist");
-        assert!(events_tree.get_name("00002.log").is_some(), "00002.log must exist for rollover bound");
+        let events_tree = tree
+            .get_name("events")
+            .unwrap()
+            .to_object(&repo)?
+            .into_tree()
+            .unwrap();
 
-        let log1_blob = events_tree.get_name("00001.log").unwrap().to_object(&repo)?.into_blob().unwrap();
+        assert!(
+            events_tree.get_name("00001.log").is_some(),
+            "00001.log must exist"
+        );
+        assert!(
+            events_tree.get_name("00002.log").is_some(),
+            "00002.log must exist for rollover bound"
+        );
+
+        let log1_blob = events_tree
+            .get_name("00001.log")
+            .unwrap()
+            .to_object(&repo)?
+            .into_blob()
+            .unwrap();
         let log1_content = std::str::from_utf8(log1_blob.content())?;
-        assert_eq!(log1_content.trim().split('\n').filter(|l| !l.is_empty()).count(), 10000);
+        assert_eq!(
+            log1_content
+                .trim()
+                .split('\n')
+                .filter(|l| !l.is_empty())
+                .count(),
+            10000
+        );
 
-        let log2_blob = events_tree.get_name("00002.log").unwrap().to_object(&repo)?.into_blob().unwrap();
+        let log2_blob = events_tree
+            .get_name("00002.log")
+            .unwrap()
+            .to_object(&repo)?
+            .into_blob()
+            .unwrap();
         let log2_content = std::str::from_utf8(log2_blob.content())?;
-        assert_eq!(log2_content.trim().split('\n').filter(|l| !l.is_empty()).count(), 5000);
-        
+        assert_eq!(
+            log2_content
+                .trim()
+                .split('\n')
+                .filter(|l| !l.is_empty())
+                .count(),
+            5000
+        );
+
         // Now test the reader retrieving all 15k!
         use crate::events::reader::Reader;
         let reader = Reader::new(&repo, did.clone());
         let count = reader.iter_events()?.count();
-        assert_eq!(count, 15000, "Reader must successfully retrieve exactly 15000 entries sequentially via chunks");
+        assert_eq!(
+            count, 15000,
+            "Reader must successfully retrieve exactly 15000 entries sequentially via chunks"
+        );
 
         Ok(())
     }

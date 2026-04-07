@@ -1,10 +1,10 @@
 pub mod commands;
-pub mod events;
-pub mod schema;
-pub mod tasks;
-pub mod eval;
 pub mod coordinator;
+pub mod eval;
+pub mod events;
 pub mod grind;
 pub mod llm;
+pub mod personas;
+pub mod schema;
+pub mod tasks;
 pub mod tools;
-

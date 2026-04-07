@@ -20,16 +20,16 @@ Follow these critical principles:
         .tools(super::agent_tools())
         .system_prompt(system_prompt)
         .build()?;
-        
+
     client.ask(&question).await
 }
 
 /// A parallelism helper to run multiple investigate tools simultaneously.
 #[llm_tool]
 pub async fn multi_investigate(questions: Vec<String>) -> anyhow::Result<Vec<String>> {
-    let futures = questions.into_iter().map(|q| async move {
-        investigate(q).await
-    });
+    let futures = questions
+        .into_iter()
+        .map(|q| async move { investigate(q).await });
     try_join_all(futures).await
 }
 
@@ -47,4 +47,3 @@ mod tests {
         let _ = multi_investigate(vec!["q1".to_string(), "q2".to_string()]).await;
     }
 }
-

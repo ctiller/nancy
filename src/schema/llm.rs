@@ -30,4 +30,3 @@ pub struct LlmResponsePayload {
     pub timestamp: u64,
     pub response: String,
 }
-

@@ -1,5 +1,3 @@
-
-
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
@@ -62,7 +60,8 @@ async fn main() -> Result<()> {
                 std::env::current_dir()?,
                 add_task_args.task.clone(),
                 add_task_args.file.clone(),
-            ).await?;
+            )
+            .await?;
         }
         Commands::Grind => {
             nancy::commands::grind::grind(std::env::current_dir()?, None, None).await?;
@@ -77,7 +76,7 @@ async fn main() -> Result<()> {
             nancy::commands::eval::run(action.clone(), file.clone()).await?;
         }
     }
-    
+
     Ok(())
 }
 

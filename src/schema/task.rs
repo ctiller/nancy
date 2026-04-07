@@ -24,9 +24,15 @@ pub struct TaskPayload {
 #[serde(tag = "assignment_type")]
 pub enum CoordinatorAssignmentPayload {
     #[serde(rename = "plan_task")]
-    PlanTask { task_request_ref: String, assignee_did: String },
+    PlanTask {
+        task_request_ref: String,
+        assignee_did: String,
+    },
     #[serde(rename = "perform_task")]
-    PerformTask { task_ref: String, assignee_did: String },
+    PerformTask {
+        task_ref: String,
+        assignee_did: String,
+    },
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

@@ -1,11 +1,13 @@
 use serde::{Deserialize, Serialize};
 
 use super::identity::IdentityPayload;
-use super::task::{
-    BlockedByPayload, CoordinatorAssignmentPayload, TaskPayload,
-    TaskRequestPayload, AssignmentCompletePayload, PlanPayload,
+use super::llm::{
+    LlmPromptPayload, LlmResponsePayload, LlmToolCallPayload, LlmToolResponsePayload,
 };
-use super::llm::{LlmPromptPayload, LlmToolCallPayload, LlmToolResponsePayload, LlmResponsePayload};
+use super::task::{
+    AssignmentCompletePayload, BlockedByPayload, CoordinatorAssignmentPayload, PlanPayload,
+    TaskPayload, TaskRequestPayload,
+};
 
 /// Enum describing all understood schema payloads in the event log.
 /// `serde(tag = "$type")` injects `{ "$type": "identity", "did": ... }` automatically.

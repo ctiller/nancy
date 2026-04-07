@@ -1,9 +1,9 @@
 pub mod builder;
 pub mod client;
-pub mod tool;
 pub mod schema;
+pub mod tool;
 
+pub use builder::{LlmBuilder, fast_llm, thinking_llm};
 pub use client::LlmClient;
-pub use builder::{thinking_llm, fast_llm, LlmBuilder};
-pub use tool::LlmTool;
 pub use llm_macros::{llm_tool, make_tool};
+pub use tool::LlmTool;

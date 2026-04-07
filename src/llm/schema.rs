@@ -4,18 +4,20 @@ use serde_json::Value;
 pub fn transpile_schema(mut schema: Value) -> Value {
     let defs = schema.get("$defs").cloned();
     transpile_recursive(&mut schema, &defs, 0);
-    
+
     if let Value::Object(ref mut map) = schema {
         map.remove("$schema");
         map.remove("$defs");
     }
-    
+
     schema
 }
 
 fn transpile_recursive(val: &mut Value, defs: &Option<Value>, depth: usize) {
     if depth > 250 {
-        panic!("Acyclic verification failed: Schema traversal exceeded maximum depth safely catching cyclic reference!");
+        panic!(
+            "Acyclic verification failed: Schema traversal exceeded maximum depth safely catching cyclic reference!"
+        );
     }
 
     match val {
@@ -52,10 +54,14 @@ fn transpile_recursive(val: &mut Value, defs: &Option<Value>, depth: usize) {
                 }
             }
             if let Some(Value::Array(arr)) = map.get_mut("anyOf") {
-                for v in arr.iter_mut() { transpile_recursive(v, defs, depth + 1); }
+                for v in arr.iter_mut() {
+                    transpile_recursive(v, defs, depth + 1);
+                }
             }
             if let Some(Value::Array(arr)) = map.get_mut("allOf") {
-                for v in arr.iter_mut() { transpile_recursive(v, defs, depth + 1); }
+                for v in arr.iter_mut() {
+                    transpile_recursive(v, defs, depth + 1);
+                }
             }
 
             // 3. Process anyOf arrays
@@ -69,7 +75,7 @@ fn transpile_recursive(val: &mut Value, defs: &Option<Value>, depth: usize) {
                         primary = Some(item);
                     }
                 }
-                
+
                 if let Some(Value::Object(prim_map)) = primary {
                     for (k, v) in prim_map {
                         map.insert(k, v);
@@ -98,7 +104,7 @@ fn transpile_recursive(val: &mut Value, defs: &Option<Value>, depth: usize) {
                         if let Some(Value::Array(reqs)) = item_map.remove("required") {
                             merged_required.extend(reqs);
                         }
-                        
+
                         for (k, v) in item_map {
                             if k != "properties" && k != "required" {
                                 map.insert(k, v);
@@ -106,16 +112,20 @@ fn transpile_recursive(val: &mut Value, defs: &Option<Value>, depth: usize) {
                         }
                     }
                 }
-                
+
                 if !merged_props.is_empty() {
-                    let map_props = map.entry("properties".to_string()).or_insert_with(|| Value::Object(serde_json::Map::new()));
+                    let map_props = map
+                        .entry("properties".to_string())
+                        .or_insert_with(|| Value::Object(serde_json::Map::new()));
                     if let Value::Object(existing_props) = map_props {
                         existing_props.extend(merged_props);
                     }
                 }
 
                 if !merged_required.is_empty() {
-                    let map_reqs = map.entry("required".to_string()).or_insert_with(|| Value::Array(Vec::new()));
+                    let map_reqs = map
+                        .entry("required".to_string())
+                        .or_insert_with(|| Value::Array(Vec::new()));
                     if let Value::Array(existing_reqs) = map_reqs {
                         existing_reqs.extend(merged_required);
                     }
@@ -163,7 +173,15 @@ fn transpile_recursive(val: &mut Value, defs: &Option<Value>, depth: usize) {
             }
 
             // 7. Prune unsupported nodes gracefully rigidly elegantly smoothly
-            let valid_keys = ["type", "description", "properties", "required", "items", "enum", "nullable"];
+            let valid_keys = [
+                "type",
+                "description",
+                "properties",
+                "required",
+                "items",
+                "enum",
+                "nullable",
+            ];
             map.retain(|k, _| valid_keys.contains(&k.as_str()));
         }
         _ => {}
@@ -260,9 +278,9 @@ mod tests {
             },
             "required": ["req", "opt"]
         });
-        
+
         let res = transpile_schema(input);
-        
+
         assert_eq!(res["properties"]["opt"]["nullable"], true);
         assert_eq!(res["required"].as_array().unwrap().len(), 1);
         assert_eq!(res["required"][0], "req");
@@ -277,7 +295,7 @@ mod tests {
         assert_eq!(res["type"], "string");
         assert_eq!(res["nullable"], true);
     }
-    
+
     #[test]
     fn test_transpile_handles_type_array_non_nullable() {
         let input = json!({
@@ -292,11 +310,11 @@ mod tests {
     fn test_transpile_deep_ref_and_flattening() {
         let input = json!({
             "$defs": {
-                "A": { 
-                    "type": "object", 
-                    "properties": { "b": { "$ref": "#/$defs/B" } } 
+                "A": {
+                    "type": "object",
+                    "properties": { "b": { "$ref": "#/$defs/B" } }
                 },
-                "B": { 
+                "B": {
                     "anyOf": [ { "type": "string" }, { "type": "null" } ]
                 }
             },
@@ -307,7 +325,7 @@ mod tests {
         assert_eq!(res["properties"]["b"]["type"], "string");
         assert_eq!(res["properties"]["b"]["nullable"], true);
     }
-    
+
     #[test]
     fn test_transpile_array_items() {
         let input = json!({
@@ -325,7 +343,9 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "Acyclic verification failed: Schema traversal exceeded maximum depth safely catching cyclic reference!")]
+    #[should_panic(
+        expected = "Acyclic verification failed: Schema traversal exceeded maximum depth safely catching cyclic reference!"
+    )]
     fn test_transpile_cyclic_ref_panics_explicitly() {
         let input = json!({
             "$defs": {
@@ -336,7 +356,7 @@ mod tests {
         });
         let _ = transpile_schema(input);
     }
-    
+
     #[test]
     fn test_transpile_handles_objects_nested_deeply() {
         let mut nested = json!({"type": "string"});

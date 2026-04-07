@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use git2::Repository;
 use std::collections::BTreeMap;
 
@@ -21,9 +21,13 @@ impl<'a> Reader<'a> {
         let commit = branch_ref.peel_to_commit()?;
         let tree = commit.tree()?;
 
-        let events_entry = tree.get_name("events").context("events directory missing")?;
+        let events_entry = tree
+            .get_name("events")
+            .context("events directory missing")?;
         let events_object = events_entry.to_object(self.repo)?;
-        let events_tree = events_object.as_tree().ok_or_else(|| anyhow!("events is not a tree"))?;
+        let events_tree = events_object
+            .as_tree()
+            .ok_or_else(|| anyhow!("events is not a tree"))?;
 
         // Collect all blobs ordered by filename
         let mut log_blobs = BTreeMap::new();
@@ -46,9 +50,9 @@ impl<'a> Reader<'a> {
             }
         }
 
-        let iter = all_lines.into_iter().map(|line| {
-            serde_json::from_str::<EventEnvelope>(&line).map_err(anyhow::Error::from)
-        });
+        let iter = all_lines
+            .into_iter()
+            .map(|line| serde_json::from_str::<EventEnvelope>(&line).map_err(anyhow::Error::from));
 
         Ok(iter)
     }
@@ -60,9 +64,13 @@ impl<'a> Reader<'a> {
         let commit = branch_ref.peel_to_commit()?;
         let tree = commit.tree()?;
 
-        let events_entry = tree.get_name("events").context("events directory missing")?;
+        let events_entry = tree
+            .get_name("events")
+            .context("events directory missing")?;
         let events_object = events_entry.to_object(self.repo)?;
-        let events_tree = events_object.as_tree().ok_or_else(|| anyhow!("events is not a tree"))?;
+        let events_tree = events_object
+            .as_tree()
+            .ok_or_else(|| anyhow!("events is not a tree"))?;
 
         // Collect all blobs ordered by filename
         let mut log_blobs = BTreeMap::new();
@@ -128,7 +136,7 @@ mod tests {
             timestamp: 100,
         }))?;
         writer.commit_batch()?;
-        
+
         let reader = Reader::new(&repo, did.clone());
         let mut count = 0;
         let mut cached_id = String::new();
@@ -142,8 +150,10 @@ mod tests {
 
         let local_index = LocalIndex::new(&nancy_dir)?;
         reader.sync_index(&local_index)?;
-        
-        let lookup_res = local_index.lookup_event(&cached_id)?.expect("Event should be indexed after sync");
+
+        let lookup_res = local_index
+            .lookup_event(&cached_id)?
+            .expect("Event should be indexed after sync");
         assert_eq!(lookup_res.0, did);
         assert_eq!(lookup_res.2, 0, "Line index should be 0");
 

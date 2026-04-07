@@ -2,10 +2,10 @@ use anyhow::{Result, bail};
 use git2::Repository;
 
 use crate::events::writer::Writer;
+use crate::llm::thinking_llm;
 use crate::schema::identity_config::Identity;
 use crate::schema::registry::EventPayload;
 use crate::schema::task::AssignmentCompletePayload;
-use crate::llm::thinking_llm;
 
 pub async fn execute(
     repo: &Repository,
@@ -26,16 +26,23 @@ pub async fn execute(
         let tree = repo.find_tree(tree_id)?;
         println!("Step 1b: configuring signature.");
         let sig = git2::Signature::now("Grinder LLM", "grind@nancy.com")?;
-        
+
         println!("Step 1c: committing.");
-        let _ = repo.commit(Some(&branch_name), &sig, &sig, "Initial mocked plan", &tree, &[]);
+        let _ = repo.commit(
+            Some(&branch_name),
+            &sig,
+            &sig,
+            "Initial mocked plan",
+            &tree,
+            &[],
+        );
     }
 
     println!("Step 2: resolving target worktree mapping.");
     let target_path = if let Some(workdir) = repo.workdir() {
         let safe_ref = task_request_ref.replace(":", "_").replace("/", "_");
         let path = workdir.join("plans").join(&safe_ref);
-        
+
         println!("Step 2a: resolving add options.");
         // Shell out to avoid libgit2 locking/hanging anomalies
         let status = std::process::Command::new("git")
@@ -45,7 +52,7 @@ pub async fn execute(
             .arg(&branch_name)
             .current_dir(workdir)
             .status()?;
-            
+
         println!("Step 2b: adding worktree completed.");
         if !status.success() {
             bail!("Failed to spawn worktree locally");
@@ -65,7 +72,7 @@ pub async fn execute(
         .system_prompt("Your objective is to draft a comprehensive architecture plan and design document before listing execution steps.")
         .tools(crate::tools::agent_tools())
         .build()?;
-        
+
     let mut appview = crate::coordinator::appview::AppView::new();
     let reader = crate::events::reader::Reader::new(repo, coordinator_did.to_string());
     if let Ok(iter) = reader.iter_events() {
@@ -103,47 +110,50 @@ pub async fn execute(
         task_desc,
         target_path.display()
     );
-        
+
     let mut prompt = init_prompt;
 
-        loop {
-            let result = match client.ask(&prompt).await {
-                Ok(r) => r,
-                Err(e) => {
-                    println!("LLM Loop runtime encountered error: {}", e);
-                    break;
-                }
-            };
-
-            if result.trim() == "SLARTIBARTFAST" {
-                #[cfg(test)]
-                let _ = std::fs::write(target_path.join("plan.md"), "Mock bound execution gracefully placed.");
-
-                if target_path.join("plan.md").exists() {
-                    println!("Plan correctly validated via direct FileSystem binding!");
-                    break;
-                } else {
-                    prompt = "You responded SLARTIBARTFAST but you failed to write plan.md. Try again using the write_file tool.".to_string();
-                }
-            } else {
-                prompt = "You did not respond with exactly SLARTIBARTFAST. Are you done?".to_string();
+    loop {
+        let result = match client.ask(&prompt).await {
+            Ok(r) => r,
+            Err(e) => {
+                println!("LLM Loop runtime encountered error: {}", e);
+                break;
             }
+        };
+
+        if result.trim() == "SLARTIBARTFAST" {
+            #[cfg(test)]
+            let _ = std::fs::write(
+                target_path.join("plan.md"),
+                "Mock bound execution gracefully placed.",
+            );
+
+            if target_path.join("plan.md").exists() {
+                println!("Plan correctly validated via direct FileSystem binding!");
+                break;
+            } else {
+                prompt = "You responded SLARTIBARTFAST but you failed to write plan.md. Try again using the write_file tool.".to_string();
+            }
+        } else {
+            prompt = "You did not respond with exactly SLARTIBARTFAST. Are you done?".to_string();
         }
-        
-    // Natively commit the mapped output dropping natively completing its loop 
+    }
+
+    // Natively commit the mapped output dropping natively completing its loop
     let shell_cmd = "git add plan.md && git commit -m 'Initial drafted LLM plan'";
     let status = std::process::Command::new("sh")
         .arg("-c")
         .arg(&shell_cmd)
         .current_dir(&target_path)
         .status()?;
-    
+
     if !status.success() {
         println!("Failed committing plan. Usually indicates identity mapping wasn't found.");
     }
 
     let writer = Writer::new(repo, id_obj.clone())?;
-    
+
     // Emit PlanPayload pointing to the new branch
     writer.log_event(EventPayload::Plan(crate::schema::task::PlanPayload {
         request_ref: task_request_ref.to_string(),
@@ -159,12 +169,14 @@ pub async fn execute(
     }))?;
 
     // 4. Completion
-    writer.log_event(EventPayload::AssignmentComplete(AssignmentCompletePayload {
-        assignment_ref: task_id.to_string(),
-        report: format!("Completed PlanTask, created {} via LLM", branch_name),
-    }))?;
+    writer.log_event(EventPayload::AssignmentComplete(
+        AssignmentCompletePayload {
+            assignment_ref: task_id.to_string(),
+            report: format!("Completed PlanTask, created {} via LLM", branch_name),
+        },
+    ))?;
     writer.commit_batch()?;
-    
+
     println!("Completed LLM PlanTask: {}", task_id);
     Ok(())
 }

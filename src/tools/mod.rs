@@ -1,7 +1,7 @@
 use crate::llm::LlmTool;
 
-pub mod filesystem;
 pub mod execution;
+pub mod filesystem;
 pub mod investigate;
 
 pub(crate) fn agent_tools() -> Vec<Box<dyn LlmTool>> {
@@ -29,4 +29,3 @@ mod tests {
         assert!(!tools.is_empty());
     }
 }
-

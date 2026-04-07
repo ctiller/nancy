@@ -1,5 +1,5 @@
 use anyhow::Result;
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 use std::path::Path;
 
 pub struct LocalIndex {
@@ -52,7 +52,7 @@ impl LocalIndex {
         let mut stmt = self
             .conn
             .prepare("SELECT did, log_file, line_index FROM events WHERE id = ?1")?;
-            
+
         let mut rows = stmt.query(params![id])?;
 
         if let Some(row) = rows.next()? {
@@ -69,7 +69,7 @@ impl LocalIndex {
         let mut stmt = self
             .conn
             .prepare("SELECT commit_hash FROM branch_sync_state WHERE did = ?1")?;
-        
+
         let mut rows = stmt.query(params![did])?;
         if let Some(row) = rows.next()? {
             let commit_hash: String = row.get(0)?;

@@ -1,11 +1,11 @@
+use anyhow::{Context, Result, bail};
+use ignore::WalkBuilder;
+use llm_macros::llm_tool;
+use regex::Regex;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use std::path::Path;
 use tokio::fs;
-use anyhow::{Context, Result, bail};
-use ignore::WalkBuilder;
-use regex::Regex;
-use llm_macros::llm_tool;
 
 const MAX_LINES_PER_VIEW: usize = 2000;
 
@@ -17,7 +17,11 @@ pub struct FileFilters {
 
 fn suggest_closest_path(target: &Path) -> Option<String> {
     let parent = target.parent().unwrap_or_else(|| Path::new("."));
-    let parent = if parent.as_os_str().is_empty() { Path::new(".") } else { parent };
+    let parent = if parent.as_os_str().is_empty() {
+        Path::new(".")
+    } else {
+        parent
+    };
     let target_name = target.file_name()?.to_string_lossy().to_lowercase();
 
     let mut closest: Option<(String, usize)> = None;
@@ -26,7 +30,7 @@ fn suggest_closest_path(target: &Path) -> Option<String> {
         for entry in entries.filter_map(|e| e.ok()) {
             let name = entry.file_name().to_string_lossy().to_lowercase();
             let distance = strsim::levenshtein(&target_name, &name);
-            
+
             if distance <= 3 {
                 if let Some((_, min_dist)) = closest {
                     if distance < min_dist {
@@ -38,7 +42,7 @@ fn suggest_closest_path(target: &Path) -> Option<String> {
             }
         }
     }
-    
+
     closest.map(|(p, _)| p)
 }
 
@@ -49,7 +53,7 @@ pub async fn grep_search(
     search_paths: Vec<String>,
     is_regex: Option<bool>,
     file_filters: Option<FileFilters>,
-    match_per_line: Option<bool>
+    match_per_line: Option<bool>,
 ) -> Result<serde_json::Value> {
     let is_regex = is_regex.unwrap_or(false);
     let match_per_line = match_per_line.unwrap_or(true);
@@ -76,7 +80,7 @@ pub async fn grep_search(
 
             if let Ok(content) = std::fs::read_to_string(entry.path()) {
                 let mut file_matches = Vec::new();
-                
+
                 for (i, line) in content.lines().enumerate() {
                     if regex.is_match(line) {
                         if match_per_line {
@@ -102,7 +106,7 @@ pub async fn grep_search(
             }
         }
     }
-    
+
     Ok(serde_json::json!({ "search_results": results }))
 }
 
@@ -110,17 +114,24 @@ pub async fn grep_search(
 #[llm_tool]
 pub async fn list_dir(
     target_directory: String,
-    recursive: Option<bool>
+    recursive: Option<bool>,
 ) -> Result<serde_json::Value> {
     let is_recursive = recursive.unwrap_or(false);
     let max_depth = if is_recursive { 3 } else { 1 };
-    
+
     let path = Path::new(&target_directory);
     if !path.exists() {
         if let Some(suggestion) = suggest_closest_path(path) {
-            bail!("Error: Directory '{}' does not exist. Did you mean '{}'?", target_directory, suggestion);
+            bail!(
+                "Error: Directory '{}' does not exist. Did you mean '{}'?",
+                target_directory,
+                suggestion
+            );
         }
-        bail!("Error: Directory '{}' does not exist. Please check your path and try again.", target_directory);
+        bail!(
+            "Error: Directory '{}' does not exist. Please check your path and try again.",
+            target_directory
+        );
     }
 
     let mut out = Vec::new();
@@ -128,15 +139,17 @@ pub async fn list_dir(
 
     for entry in walker.into_iter().filter_map(|e| e.ok()) {
         let p = entry.path();
-        if p == path { continue; }
+        if p == path {
+            continue;
+        }
 
         out.push(serde_json::json!({
             "path": p.to_string_lossy(),
             "is_dir": entry.file_type().map_or(false, |ft| ft.is_dir())
         }));
-        
+
         if out.len() > 1000 {
-            return Ok(serde_json::json!({ 
+            return Ok(serde_json::json!({
                 "error": format!("Recursion protection triggered: directory {} contains over 1000 items. Truncating output. Use specific deeper searches.", target_directory),
                 "items": out
             }));
@@ -156,10 +169,10 @@ pub struct PaginationBounds {
 #[llm_tool]
 pub async fn view_files(
     target_paths: Vec<String>,
-    pagination: Option<Vec<PaginationBounds>>
+    pagination: Option<Vec<PaginationBounds>>,
 ) -> Result<serde_json::Value> {
     let mut results = Vec::new();
-    
+
     for (i, target) in target_paths.iter().enumerate() {
         let path = Path::new(target);
         if !path.exists() {
@@ -178,7 +191,7 @@ pub async fn view_files(
                 continue;
             }
         };
-        
+
         let lines: Vec<&str> = content.lines().collect();
 
         let (start, end) = if let Some(bounds) = pagination.as_ref() {
@@ -192,10 +205,10 @@ pub async fn view_files(
         } else {
             (0, lines.len())
         };
-        
+
         let end_bounded = std::cmp::min(end, lines.len());
         let line_count = end_bounded.saturating_sub(start);
-        
+
         if line_count > MAX_LINES_PER_VIEW {
             results.push(serde_json::json!({
                 "file": target,
@@ -204,7 +217,11 @@ pub async fn view_files(
             continue;
         }
 
-        let slice = if start < end_bounded { &lines[start..end_bounded] } else { &[] };
+        let slice = if start < end_bounded {
+            &lines[start..end_bounded]
+        } else {
+            &[]
+        };
         results.push(serde_json::json!({
             "file": target,
             "lines": slice.join("\n")
@@ -227,14 +244,21 @@ pub struct ReplacementChunk {
 #[llm_tool]
 pub async fn multi_replace_file_content(
     target_file: String,
-    replacement_chunks: Vec<ReplacementChunk>
+    replacement_chunks: Vec<ReplacementChunk>,
 ) -> Result<serde_json::Value> {
     let path = Path::new(&target_file);
     if !path.exists() {
         if let Some(suggestion) = suggest_closest_path(path) {
-            bail!("Error: Target file '{}' does not exist. Cannot modify missing structures. Did you mean '{}'?", target_file, suggestion);
+            bail!(
+                "Error: Target file '{}' does not exist. Cannot modify missing structures. Did you mean '{}'?",
+                target_file,
+                suggestion
+            );
         }
-        bail!("Error: Target file '{}' does not exist. Cannot modify missing structures. Write the layout explicitly via write_files.", target_file);
+        bail!(
+            "Error: Target file '{}' does not exist. Cannot modify missing structures. Write the layout explicitly via write_files.",
+            target_file
+        );
     }
 
     let mut content = fs::read_to_string(path).await?;
@@ -242,14 +266,20 @@ pub async fn multi_replace_file_content(
     for chunk in &replacement_chunks {
         let allow_multiple = chunk.allow_multiple.unwrap_or(false);
         let matches: Vec<_> = content.match_indices(&chunk.target_content).collect();
-        
+
         if matches.is_empty() {
-            bail!("Error: Target sequence was missing physically from file. Ensure whitespace alignments or literal bindings precisely match! Sequence: {}", chunk.target_content);
+            bail!(
+                "Error: Target sequence was missing physically from file. Ensure whitespace alignments or literal bindings precisely match! Sequence: {}",
+                chunk.target_content
+            );
         }
         if matches.len() > 1 && !allow_multiple {
-            bail!("Error: Target content matches multiple instances in the bounds! To confirm replacement across all locations seamlessly, set allow_multiple: true explicitly! Sequence: {}", chunk.target_content);
+            bail!(
+                "Error: Target content matches multiple instances in the bounds! To confirm replacement across all locations seamlessly, set allow_multiple: true explicitly! Sequence: {}",
+                chunk.target_content
+            );
         }
-        
+
         content = content.replace(&chunk.target_content, &chunk.replacement_content);
     }
 
@@ -266,31 +296,32 @@ pub struct WritePayload {
 
 /// Create fresh artifacts structurally or safely destroy previous architectures natively wrapping Overwrite protections.
 #[llm_tool]
-pub async fn write_files(
-    files: Vec<WritePayload>
-) -> Result<serde_json::Value> {
+pub async fn write_files(files: Vec<WritePayload>) -> Result<serde_json::Value> {
     for file in &files {
         let path = Path::new(&file.target_path);
-        
+
         if path.exists() && !file.overwrite.unwrap_or(false) {
-            bail!("Error: Path '{}' already strictly exists! Protectively blocking destruction. Re-issue the sequence explicitly dictating overwrite: true manually.", file.target_path);
+            bail!(
+                "Error: Path '{}' already strictly exists! Protectively blocking destruction. Re-issue the sequence explicitly dictating overwrite: true manually.",
+                file.target_path
+            );
         }
-        
+
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).await?;
         }
-        
+
         fs::write(path, &file.content).await?;
     }
-    
-    Ok(serde_json::json!({ "status": format!("Successfully processed {} file configurations securely.", files.len()) }))
+
+    Ok(
+        serde_json::json!({ "status": format!("Successfully processed {} file configurations securely.", files.len()) }),
+    )
 }
 
 /// Fallback wrapper for extremely simple models mapping single reads without array layouts natively.
 #[llm_tool]
-pub async fn read_file(
-    target_file: String
-) -> Result<serde_json::Value> {
+pub async fn read_file(target_file: String) -> Result<serde_json::Value> {
     view_files(vec![target_file], None).await
 }
 
@@ -299,13 +330,14 @@ pub async fn read_file(
 pub async fn write_file(
     target_file: String,
     content: String,
-    overwrite: Option<bool>
+    overwrite: Option<bool>,
 ) -> Result<serde_json::Value> {
     write_files(vec![WritePayload {
         target_path: target_file,
         content,
-        overwrite
-    }]).await
+        overwrite,
+    }])
+    .await
 }
 
 #[derive(JsonSchema, Deserialize)]
@@ -337,9 +369,7 @@ async fn copy_dir_all(src: &Path, dst: &Path) -> Result<(), std::io::Error> {
 
 /// Execute standardized layout transitions logically avoiding external linux bash boundaries securely.
 #[llm_tool]
-pub async fn manage_paths(
-    operations: Vec<PathOperation>
-) -> Result<serde_json::Value> {
+pub async fn manage_paths(operations: Vec<PathOperation>) -> Result<serde_json::Value> {
     for op in &operations {
         let target = Path::new(&op.target_path);
 
@@ -347,9 +377,16 @@ pub async fn manage_paths(
             "delete" => {
                 if !target.exists() {
                     if let Some(suggestion) = suggest_closest_path(target) {
-                        bail!("Error resolving target '{:?}': Object conceptually absent explicitly. Did you mean '{}'?", target, suggestion);
+                        bail!(
+                            "Error resolving target '{:?}': Object conceptually absent explicitly. Did you mean '{}'?",
+                            target,
+                            suggestion
+                        );
                     }
-                    bail!("Error resolving target '{:?}': Object conceptually absent inside standard runtime space natively.", target);
+                    bail!(
+                        "Error resolving target '{:?}': Object conceptually absent inside standard runtime space natively.",
+                        target
+                    );
                 }
                 if target.is_dir() {
                     fs::remove_dir_all(target).await?;
@@ -361,16 +398,26 @@ pub async fn manage_paths(
                 fs::create_dir_all(target).await?;
             }
             "move" | "copy" => {
-                let source_raw = op.source_path.as_ref().context("source_path explicitly required for mapping transitions")?;
+                let source_raw = op
+                    .source_path
+                    .as_ref()
+                    .context("source_path explicitly required for mapping transitions")?;
                 let source = Path::new(source_raw);
-                
+
                 if !source.exists() {
                     if let Some(suggestion) = suggest_closest_path(source) {
-                        bail!("Source Object '{:?}' resolving to missing pointer conceptually natively. Did you mean '{}'?", source, suggestion);
+                        bail!(
+                            "Source Object '{:?}' resolving to missing pointer conceptually natively. Did you mean '{}'?",
+                            source,
+                            suggestion
+                        );
                     }
-                    bail!("Source Object '{:?}' resolving to missing pointer conceptually natively.", source);
+                    bail!(
+                        "Source Object '{:?}' resolving to missing pointer conceptually natively.",
+                        source
+                    );
                 }
-                
+
                 if op.action == "move" {
                     fs::rename(source, target).await?;
                 } else {
@@ -381,7 +428,10 @@ pub async fn manage_paths(
                     }
                 }
             }
-            _ => bail!("Unknown command action resolving: {}. Available actions are: 'delete', 'mkdir', 'move', 'copy'.", op.action)
+            _ => bail!(
+                "Unknown command action resolving: {}. Available actions are: 'delete', 'mkdir', 'move', 'copy'.",
+                op.action
+            ),
         }
     }
 
@@ -409,7 +459,7 @@ mod tests {
                 "overwrite": false
             }]
         });
-        
+
         let res: serde_json::Value = write_tool.call(p).await.unwrap();
         assert!(res.get("status").is_some());
         assert_eq!(fs::read_to_string(&file_path).unwrap(), "hello world");
@@ -432,7 +482,7 @@ mod tests {
     async fn test_read_bounds_protection() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("big.txt");
-        
+
         // Write exactly 2005 lines to deliberately overflow the new limit boundary natively
         let huge_content = "line\n".repeat(2005);
         fs::write(&path, huge_content).unwrap();
@@ -441,10 +491,17 @@ mod tests {
         let v = serde_json::json!({
             "target_paths": [path.to_string_lossy()]
         });
-        
+
         let res: serde_json::Value = read_tool.call(v).await.unwrap();
         let files = res.get("files").unwrap().as_array().unwrap();
-        assert!(files[0].get("error").unwrap().as_str().unwrap().contains("too large"));
+        assert!(
+            files[0]
+                .get("error")
+                .unwrap()
+                .as_str()
+                .unwrap()
+                .contains("too large")
+        );
     }
 
     #[tokio::test]
@@ -458,7 +515,7 @@ mod tests {
             "query": "hidden",
             "search_paths": [dir.path().to_string_lossy()]
         });
-        
+
         let res: serde_json::Value = tool.call(p).await.unwrap();
         let results = res.get("search_results").unwrap().as_array().unwrap();
         assert!(!results.is_empty());
@@ -520,7 +577,7 @@ mod tests {
             "target_file": path.to_string_lossy()
         });
         let res: serde_json::Value = rt.call(r).await.unwrap();
-        
+
         let files = res.get("files").unwrap().as_array().unwrap();
         let lines = files[0].get("lines").unwrap().as_str().unwrap();
         assert_eq!(lines, "simple string");
@@ -528,13 +585,15 @@ mod tests {
     #[tokio::test]
     async fn test_filesystem_coverage_gaps() {
         let dir = tempdir().unwrap();
-        
+
         let list_tool = list_dir::tool();
-        let res = list_tool.call(serde_json::json!({
-            "target_directory": dir.path().join("non_existent").to_string_lossy(),
-        })).await;
+        let res = list_tool
+            .call(serde_json::json!({
+                "target_directory": dir.path().join("non_existent").to_string_lossy(),
+            }))
+            .await;
         assert!(res.is_err());
-        
+
         let grep_tool = grep_search::tool();
         fs::write(dir.path().join("regex.txt"), "some 123 pattern").unwrap();
         let p = serde_json::json!({
@@ -545,33 +604,44 @@ mod tests {
         });
         let res: serde_json::Value = grep_tool.call(p).await.unwrap();
         assert!(res.get("search_results").unwrap().as_array().unwrap().len() > 0);
-        
+
         let p_bad = serde_json::json!({
             "query": "[0-9",
             "search_paths": [dir.path().to_string_lossy()],
             "is_regex": true
         });
         assert!(grep_tool.call(p_bad).await.is_err());
-        
+
         let view_tool = view_files::tool();
         let v = serde_json::json!({
             "target_paths": [dir.path().join("missing.txt").to_string_lossy()]
         });
         let res: serde_json::Value = view_tool.call(v).await.unwrap();
-        assert!(res.get("files").unwrap().as_array().unwrap()[0].get("error").is_some());
-        
+        assert!(
+            res.get("files").unwrap().as_array().unwrap()[0]
+                .get("error")
+                .is_some()
+        );
+
         fs::write(dir.path().join("page.txt"), "line1\nline2\nline3").unwrap();
         let v2 = serde_json::json!({
             "target_paths": [dir.path().join("page.txt").to_string_lossy()],
             "pagination": [{"start_line": 2, "end_line": 2}]
         });
         let res2: serde_json::Value = view_tool.call(v2).await.unwrap();
-        assert_eq!(res2.get("files").unwrap().as_array().unwrap()[0].get("lines").unwrap().as_str().unwrap(), "line2");
-        
+        assert_eq!(
+            res2.get("files").unwrap().as_array().unwrap()[0]
+                .get("lines")
+                .unwrap()
+                .as_str()
+                .unwrap(),
+            "line2"
+        );
+
         let replace_tool = multi_replace_file_content::tool();
         let fpath = dir.path().join("rep.txt");
         fs::write(&fpath, "dupe\ndupe\n").unwrap();
-        
+
         let p1 = serde_json::json!({
             "target_file": fpath.to_string_lossy(),
             "replacement_chunks": [{"target_content": "nonexistent", "replacement_content": "x"}]
@@ -583,32 +653,32 @@ mod tests {
             "replacement_chunks": [{"target_content": "dupe", "replacement_content": "x"}]
         });
         assert!(replace_tool.call(p2).await.is_err());
-        
+
         let p_missing = serde_json::json!({
             "target_file": dir.path().join("rep_missing.txt").to_string_lossy(),
             "replacement_chunks": [{"target_content": "x", "replacement_content": "x"}]
         });
         assert!(replace_tool.call(p_missing).await.is_err());
-        
+
         let write_tool = write_files::tool();
         let p_wr = serde_json::json!({
             "files": [{"target_path": fpath.to_string_lossy(), "content": "block"}]
         });
         assert!(write_tool.call(p_wr).await.is_err());
-        
+
         let manage_tool = manage_paths::tool();
         let md1 = serde_json::json!({
             "operations": [{"action": "delete", "target_path": dir.path().join("missing.txt").to_string_lossy()}]
         });
         assert!(manage_tool.call(md1).await.is_err());
-        
+
         let del2 = dir.path().join("del2.txt");
         fs::write(&del2, "x").unwrap();
         let md2 = serde_json::json!({
             "operations": [{"action": "delete", "target_path": del2.to_string_lossy()}]
         });
         assert!(manage_tool.call(md2).await.is_ok());
-        
+
         let dsrc = dir.path().join("dsrc");
         fs::create_dir_all(dsrc.join("sub")).unwrap();
         fs::write(dsrc.join("sub").join("f.txt"), "hello").unwrap();
@@ -617,12 +687,12 @@ mod tests {
             "operations": [{"action": "copy", "source_path": dsrc.to_string_lossy(), "target_path": ddst.to_string_lossy()}]
         });
         assert!(manage_tool.call(md_copy).await.is_ok());
-        
+
         let md_move_err = serde_json::json!({
             "operations": [{"action": "move", "source_path": dir.path().join("nothere").to_string_lossy(), "target_path": dir.path().join("dst").to_string_lossy()}]
         });
         assert!(manage_tool.call(md_move_err).await.is_err());
-        
+
         let md_unk = serde_json::json!({
             "operations": [{"action": "explode", "target_path": dir.path().join("dst").to_string_lossy()}]
         });
@@ -632,33 +702,34 @@ mod tests {
     #[tokio::test]
     async fn test_coverage_gaps_part2() {
         let dir = tempdir().unwrap();
-        
+
         // 1. Suggestion paths
         fs::write(dir.path().join("apple.txt"), "").unwrap();
         fs::write(dir.path().join("apply.txt"), "").unwrap(); // Will overwrite closest matching distance tests iteratively natively 
         fs::write(dir.path().join("applt.txt"), "").unwrap(); // Extra file for min_dist branch replacements
-        
+
         // view_files hitting missing file fallback suggestion natively
         let view_tool = view_files::tool();
         let p_view = serde_json::json!({
             "target_paths": [dir.path().join("appla.txt").to_string_lossy()]
         });
         view_tool.call(p_view).await.unwrap();
-        
+
         // list_dir hitting missing file fallback suggestion natively
         let list_tool = list_dir::tool();
-        let p_list = serde_json::json!({"target_directory": dir.path().join("appla.txt").to_string_lossy()});
+        let p_list =
+            serde_json::json!({"target_directory": dir.path().join("appla.txt").to_string_lossy()});
         let _ = list_tool.call(p_list).await;
-        
+
         // replace content fallback natively
         let replace = multi_replace_file_content::tool();
         let r = serde_json::json!({"target_file": dir.path().join("appla.txt").to_string_lossy(), "replacement_chunks": []});
         let _ = replace.call(r).await;
-        
+
         let manage = manage_paths::tool();
         let d = serde_json::json!({"operations": [{"action": "delete", "target_path": dir.path().join("appla.txt").to_string_lossy()}]});
         let _ = manage.call(d).await;
-        
+
         // Source suggestion path mapping errors
         let m = serde_json::json!({"operations": [{"action": "move", "source_path": dir.path().join("appla.txt").to_string_lossy(), "target_path": dir.path().join("dst.txt").to_string_lossy()}]});
         let _ = manage.call(m).await;
@@ -695,7 +766,9 @@ mod tests {
         for i in 0..1002 {
             fs::write(dir.path().join(format!("f{}.txt", i)), "").unwrap();
         }
-        let _ = list_tool.call(serde_json::json!({"target_directory": dir.path().to_string_lossy()})).await;
+        let _ = list_tool
+            .call(serde_json::json!({"target_directory": dir.path().to_string_lossy()}))
+            .await;
 
         // 5. manage_paths action paths
         // delete a directory
@@ -703,7 +776,7 @@ mod tests {
         fs::create_dir_all(&delete_dir).unwrap();
         let p_del = serde_json::json!({"operations": [{"action": "delete", "target_path": delete_dir.to_string_lossy()}]});
         manage.call(p_del).await.unwrap();
-        
+
         // mkdir
         let p_mk = serde_json::json!({"operations": [{"action": "mkdir", "target_path": dir.path().join("mk_dir").to_string_lossy()}]});
         manage.call(p_mk).await.unwrap();
@@ -720,4 +793,3 @@ mod tests {
         write_tool.call(p_wr).await.unwrap();
     }
 }
-

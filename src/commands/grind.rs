@@ -1,10 +1,10 @@
 use anyhow::{Context, Result, bail};
 use git2::Repository;
+use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
-use std::collections::HashSet;
 
 use crate::events::reader::Reader;
 use crate::schema::identity_config::Identity;
@@ -12,7 +12,11 @@ use crate::schema::registry::EventPayload;
 
 pub static SHUTDOWN: AtomicBool = AtomicBool::new(false);
 
-pub async fn grind<P: AsRef<Path>>(dir: P, explicit_coordinator_did: Option<String>, identity_override: Option<Identity>) -> Result<()> {
+pub async fn grind<P: AsRef<Path>>(
+    dir: P,
+    explicit_coordinator_did: Option<String>,
+    identity_override: Option<Identity>,
+) -> Result<()> {
     let dir = dir.as_ref();
     let repo = Repository::discover(dir).context("Not a git repository")?;
     let workdir = repo.workdir().context("Bare repository")?.to_path_buf();
@@ -34,7 +38,8 @@ pub async fn grind<P: AsRef<Path>>(dir: P, explicit_coordinator_did: Option<Stri
         bail!("'nancy grind' must be executed within an Identity::Grinder context.");
     }
 
-    let coordinator_did = explicit_coordinator_did.unwrap_or_else(|| std::env::var("COORDINATOR_DID").unwrap_or_default());
+    let coordinator_did = explicit_coordinator_did
+        .unwrap_or_else(|| std::env::var("COORDINATOR_DID").unwrap_or_default());
     if coordinator_did.is_empty() {
         println!("No explicit Coordinator DID set. Grinder loop idling.");
         return Ok(());
@@ -43,9 +48,13 @@ pub async fn grind<P: AsRef<Path>>(dir: P, explicit_coordinator_did: Option<Stri
     ctrlc::set_handler(move || {
         println!("Received interrupt signal. Shutting down grinder safely...");
         SHUTDOWN.store(true, Ordering::SeqCst);
-    }).unwrap_or_else(|e| eprintln!("Error setting Ctrl-C handler: {}", e));
+    })
+    .unwrap_or_else(|e| eprintln!("Error setting Ctrl-C handler: {}", e));
 
-    println!("Grinder {} polling root ledger {}...", worker_did, coordinator_did);
+    println!(
+        "Grinder {} polling root ledger {}...",
+        worker_did, coordinator_did
+    );
 
     let global_writer = crate::events::writer::Writer::new(&repo, id_obj.clone())?;
     crate::events::logger::init_global_writer(global_writer.tracer());
@@ -93,21 +102,19 @@ pub async fn grind<P: AsRef<Path>>(dir: P, explicit_coordinator_did: Option<Stri
                 use crate::schema::task::CoordinatorAssignmentPayload;
                 match assignment {
                     CoordinatorAssignmentPayload::PerformTask { task_ref, .. } => {
-                        crate::grind::perform_task::execute(
-                            &repo, 
-                            &id_obj, 
-                            &task_id, 
-                            &task_ref
-                        )?;
+                        crate::grind::perform_task::execute(&repo, &id_obj, &task_id, &task_ref)?;
                     }
-                    CoordinatorAssignmentPayload::PlanTask { task_request_ref, .. } => {
+                    CoordinatorAssignmentPayload::PlanTask {
+                        task_request_ref, ..
+                    } => {
                         crate::grind::plan_task::execute(
-                            &repo, 
-                            &id_obj, 
-                            &task_id, 
+                            &repo,
+                            &id_obj,
+                            &task_id,
                             &task_request_ref,
-                            &coordinator_did
-                        ).await?;
+                            &coordinator_did,
+                        )
+                        .await?;
                     }
                 }
                 processed = true;
@@ -118,7 +125,7 @@ pub async fn grind<P: AsRef<Path>>(dir: P, explicit_coordinator_did: Option<Stri
         if !processed {
             std::thread::sleep(Duration::from_millis(500));
         }
-        
+
         let _ = global_writer.commit_batch();
     }
 
@@ -129,47 +136,54 @@ pub async fn grind<P: AsRef<Path>>(dir: P, explicit_coordinator_did: Option<Stri
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
-    use tempfile::TempDir;
-    use sealed_test::prelude::*;
+    use crate::events::writer::Writer;
     use crate::schema::identity_config::DidOwner;
     use crate::schema::task::CoordinatorAssignmentPayload;
-    use crate::events::writer::Writer;
-    
+    use sealed_test::prelude::*;
+    use std::path::PathBuf;
+    use tempfile::TempDir;
+
     #[sealed_test(env = [("COORDINATOR_DID", "mock_coord_888")])]
     fn test_grind_end2end() -> Result<()> {
         let temp_dir = TempDir::new()?;
         let repo = Repository::init(temp_dir.path())?;
-        
+
         let nancy_dir = temp_dir.path().join(".nancy");
         std::fs::create_dir_all(&nancy_dir)?;
-        
+
         // Mock Coordinator & Target task
         let coordinator_did = "mock_coord_888".to_string();
         let worker_did = "mock_worker_999".to_string();
-        
+
         let worker_identity = Identity::Grinder(DidOwner {
             did: worker_did.clone(),
             public_key_hex: "000000".to_string(),
             private_key_hex: "000000".to_string(),
         });
-        fs::write(nancy_dir.join("identity.json"), serde_json::to_string(&worker_identity)?)?;
-        
-        // Push a TaskAssigned mapping into Coordinator branch natively 
+        fs::write(
+            nancy_dir.join("identity.json"),
+            serde_json::to_string(&worker_identity)?,
+        )?;
+
+        // Push a TaskAssigned mapping into Coordinator branch natively
         let coord_identity = Identity::Grinder(DidOwner {
             did: coordinator_did.clone(),
             public_key_hex: "000000".to_string(),
             private_key_hex: "000000".to_string(),
         });
         let writer = Writer::new(&repo, coord_identity)?;
-        writer.log_event(EventPayload::CoordinatorAssignment(CoordinatorAssignmentPayload::PerformTask {
-            task_ref: "task_01".to_string(),
-            assignee_did: worker_did.clone(),
-        }))?;
-        writer.log_event(EventPayload::CoordinatorAssignment(CoordinatorAssignmentPayload::PlanTask {
-            task_request_ref: "task_req_01".to_string(),
-            assignee_did: worker_did.clone(),
-        }))?;
+        writer.log_event(EventPayload::CoordinatorAssignment(
+            CoordinatorAssignmentPayload::PerformTask {
+                task_ref: "task_01".to_string(),
+                assignee_did: worker_did.clone(),
+            },
+        ))?;
+        writer.log_event(EventPayload::CoordinatorAssignment(
+            CoordinatorAssignmentPayload::PlanTask {
+                task_request_ref: "task_req_01".to_string(),
+                assignee_did: worker_did.clone(),
+            },
+        ))?;
         writer.commit_batch()?;
 
         // Spin the grinder threaded
@@ -186,7 +200,7 @@ mod tests {
 
         let _ = handle.join();
 
-        // Verify the localized branch has the mapped output dropping natively completing its loop 
+        // Verify the localized branch has the mapped output dropping natively completing its loop
         let reader = Reader::new(&repo, worker_did.clone());
         let mut completed_task_found = false;
         for ev_res in reader.iter_events()? {
@@ -196,7 +210,10 @@ mod tests {
             }
         }
 
-        assert!(completed_task_found, "Grinder looping failed to register the execution and push TaskComplete references natively!");
+        assert!(
+            completed_task_found,
+            "Grinder looping failed to register the execution and push TaskComplete references natively!"
+        );
         Ok(())
     }
 }

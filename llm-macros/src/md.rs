@@ -39,8 +39,43 @@ pub fn md_defined(_attr: TokenStream, item: TokenStream) -> TokenStream {
         }
     }
 
+    let struct_ident = &ast.ident;
+    
+    let mut default_fields = Vec::new();
+    for field in &ast.fields {
+        let field_ident = &field.ident;
+        let mut is_string = false;
+        let mut is_option = false;
+
+        if let Type::Path(type_path) = &field.ty {
+            if let Some(segment) = type_path.path.segments.last() {
+                if segment.ident == "String" || segment.ident == "string" {
+                    is_string = true;
+                } else if segment.ident == "Option" {
+                    is_option = true;
+                }
+            }
+        }
+        
+        if is_string {
+            default_fields.push(quote! { #field_ident: "" });
+        } else if is_option {
+            default_fields.push(quote! { #field_ident: None });
+        } else {
+            // fallback (maybe won't compile in const, but required to emit something)
+            default_fields.push(quote! { #field_ident: Default::default() });
+        }
+    }
+
     TokenStream::from(quote! {
         #ast
+        
+        impl #struct_ident {
+            #[doc(hidden)]
+            pub const __MD_DEFAULT: Self = Self {
+                #(#default_fields),*
+            };
+        }
     })
 }
 
@@ -48,14 +83,26 @@ struct IncludeMdInput {
     struct_name: Ident,
     _comma: Token![,],
     filename: LitStr,
+    body_field: Option<(Token![,], Ident)>,
 }
 
 impl Parse for IncludeMdInput {
     fn parse(input: ParseStream) -> syn::Result<Self> {
+        let struct_name = input.parse()?;
+        let _comma = input.parse()?;
+        let filename = input.parse()?;
+        
+        let body_field = if input.peek(Token![,]) {
+            Some((input.parse()?, input.parse()?))
+        } else {
+            None
+        };
+        
         Ok(IncludeMdInput {
-            struct_name: input.parse()?,
-            _comma: input.parse()?,
-            filename: input.parse()?,
+            struct_name,
+            _comma,
+            filename,
+            body_field,
         })
     }
 }
@@ -64,6 +111,7 @@ pub fn include_md(input: TokenStream) -> TokenStream {
     let IncludeMdInput {
         struct_name,
         filename,
+        body_field,
         ..
     } = parse_macro_input!(input as IncludeMdInput);
     let path_str = filename.value();
@@ -120,33 +168,48 @@ pub fn include_md(input: TokenStream) -> TokenStream {
         if let serde_yaml::Value::Mapping(map) = yaml_val {
             for (key, value) in map {
                 if let serde_yaml::Value::String(k) = key {
-                    // Extract value as string
-                    let v = match value {
-                        serde_yaml::Value::String(s) => s,
-                        serde_yaml::Value::Number(n) => n.to_string(),
-                        serde_yaml::Value::Bool(b) => b.to_string(),
+                    let key_ident = format_ident!("{}", k);
+                    match value {
+                        serde_yaml::Value::String(s) => {
+                            fields.push(quote! { #key_ident: #s });
+                        }
+                        serde_yaml::Value::Number(n) => {
+                            if let Some(f) = n.as_f64() {
+                                let f32_val = f as f32;
+                                fields.push(quote! { #key_ident: Some(#f32_val) });
+                            } else if let Some(i) = n.as_i64() {
+                                let f32_val = i as f32;
+                                fields.push(quote! { #key_ident: Some(#f32_val) });
+                            }
+                        }
+                        serde_yaml::Value::Bool(b) => {
+                            fields.push(quote! { #key_ident: #b });
+                        }
                         _ => {
                             let err_msg = format!("Unsupported YAML value type for key '{}'", k);
                             return syn::Error::new(filename.span(), err_msg)
                                 .to_compile_error()
                                 .into();
                         }
-                    };
-                    let key_ident = format_ident!("{}", k);
-                    fields.push(quote! { #key_ident: #v });
+                    }
                 }
             }
         }
     }
 
     // Add body field
-    // We assume the body field is named `body`.
-    let body_ident = format_ident!("body");
+    // We assume the body field is named `body` unless specified otherwise.
+    let body_ident = if let Some((_, ident)) = body_field {
+        ident
+    } else {
+        format_ident!("body")
+    };
     fields.push(quote! { #body_ident: #body });
 
     let expanded = quote! {
         #struct_name {
-            #( #fields ),*
+            #( #fields, )*
+            ..#struct_name::__MD_DEFAULT
         }
     };
 

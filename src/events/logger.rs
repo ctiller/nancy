@@ -1,6 +1,6 @@
+use crate::schema::registry::EventPayload;
 use std::sync::OnceLock;
 use tokio::sync::mpsc;
-use crate::schema::registry::EventPayload;
 
 static GLOBAL_TX: OnceLock<mpsc::UnboundedSender<EventPayload>> = OnceLock::new();
 

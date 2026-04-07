@@ -47,7 +47,7 @@ impl<'a> TaskManager<'a> {
                 if name.starts_with("nancy/") {
                     let did = name.trim_start_matches("nancy/");
                     let reader = Reader::new(self.repo, did.to_string());
-                    
+
                     for event_res in reader.iter_events()? {
                         if let Ok(env) = event_res {
                             if let EventPayload::Task(task_payload) = env.payload {
@@ -113,7 +113,7 @@ mod tests {
         writer.commit_batch()?;
 
         let manager = TaskManager::new(&repo, &local_index);
-        
+
         manager.refresh_cache()?;
 
         let ready_tasks = manager.get_ready_tasks()?;

@@ -1,4 +1,4 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use git2::Repository;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -8,7 +8,11 @@ use crate::schema::identity_config::Identity;
 use crate::schema::registry::EventPayload;
 use crate::schema::task::TaskRequestPayload;
 
-pub async fn add_task<P: AsRef<Path>>(dir: P, task: Option<String>, file: Option<PathBuf>) -> Result<()> {
+pub async fn add_task<P: AsRef<Path>>(
+    dir: P,
+    task: Option<String>,
+    file: Option<PathBuf>,
+) -> Result<()> {
     let dir = dir.as_ref();
     let repo = Repository::discover(dir)
         .context("Failed to validate git tree. Ensure you are inside a git repository")?;
@@ -60,7 +64,7 @@ mod tests {
     async fn test_add_task_inline() -> Result<()> {
         let temp_dir = TempDir::new()?;
         let repo_path = temp_dir.path();
-        
+
         Repository::init(repo_path)?;
         init(repo_path, 2).await?;
 
@@ -72,21 +76,36 @@ mod tests {
 
         let repo = Repository::open(repo_path)?;
         let branch_name = format!("refs/heads/nancy/{}", id_obj.get_did_owner().did);
-        let branch_ref = repo.find_reference(&branch_name).expect("branch should exist");
+        let branch_ref = repo
+            .find_reference(&branch_name)
+            .expect("branch should exist");
         let commit = branch_ref.peel_to_commit()?;
         let tree = commit.tree()?;
-        
-        let events_tree = tree.get_name("events").unwrap().to_object(&repo)?.into_tree().unwrap();
-        let log_blob = events_tree.get_name("00001.log").unwrap().to_object(&repo)?.into_blob().unwrap();
+
+        let events_tree = tree
+            .get_name("events")
+            .unwrap()
+            .to_object(&repo)?
+            .into_tree()
+            .unwrap();
+        let log_blob = events_tree
+            .get_name("00001.log")
+            .unwrap()
+            .to_object(&repo)?
+            .into_blob()
+            .unwrap();
 
         let log_content = std::str::from_utf8(log_blob.content())?;
         let event_lines: Vec<&str> = log_content.trim().split('\n').collect();
         assert_eq!(event_lines.len(), 4);
-        
+
         let task_event: Value = serde_json::from_str(event_lines[3])?;
         assert_eq!(task_event["payload"]["$type"], "task_request");
         assert_eq!(task_event["payload"]["description"], "Test task 1");
-        assert_eq!(task_event["payload"]["requestor"], id_obj.get_did_owner().did);
+        assert_eq!(
+            task_event["payload"]["requestor"],
+            id_obj.get_did_owner().did
+        );
 
         Ok(())
     }
@@ -95,7 +114,7 @@ mod tests {
     async fn test_add_task_file() -> Result<()> {
         let temp_dir = TempDir::new()?;
         let repo_path = temp_dir.path();
-        
+
         Repository::init(repo_path)?;
         init(repo_path, 2).await?;
 
@@ -112,14 +131,24 @@ mod tests {
         let branch_name = format!("refs/heads/nancy/{}", id_obj.get_did_owner().did);
         let branch_ref = repo.find_reference(&branch_name).unwrap();
         let tree = branch_ref.peel_to_commit()?.tree()?;
-        
-        let events_tree = tree.get_name("events").unwrap().to_object(&repo)?.into_tree().unwrap();
-        let log_blob = events_tree.get_name("00001.log").unwrap().to_object(&repo)?.into_blob().unwrap();
+
+        let events_tree = tree
+            .get_name("events")
+            .unwrap()
+            .to_object(&repo)?
+            .into_tree()
+            .unwrap();
+        let log_blob = events_tree
+            .get_name("00001.log")
+            .unwrap()
+            .to_object(&repo)?
+            .into_blob()
+            .unwrap();
 
         let log_content = std::str::from_utf8(log_blob.content())?;
         let event_lines: Vec<&str> = log_content.trim().split('\n').collect();
         assert_eq!(event_lines.len(), 4);
-        
+
         let task_event: Value = serde_json::from_str(event_lines[3])?;
         assert_eq!(task_event["payload"]["description"], "File task desc");
 
@@ -152,9 +181,11 @@ mod tests {
         Repository::init_bare(bare_dir.path())?;
         let res = add_task(bare_dir.path(), Some("text".to_string()), None).await;
         assert!(res.is_err());
-        assert_eq!(res.unwrap_err().to_string(), "Repository appears to be bare. Need a working directory.");
+        assert_eq!(
+            res.unwrap_err().to_string(),
+            "Repository appears to be bare. Need a working directory."
+        );
 
         Ok(())
     }
 }
-

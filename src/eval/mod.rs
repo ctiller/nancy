@@ -15,14 +15,14 @@ impl EvalDefinition {
         let temp_dir = tempfile::tempdir()?;
         let repo_path = temp_dir.path();
         std::env::set_current_dir(repo_path)?;
-        
+
         let repo = git2::Repository::init(repo_path)?;
         let _empty_tree_id = {
             let tb = repo.treebuilder(None)?;
             tb.write()?
         };
         let sig = git2::Signature::now("Eval Orchestrator", "eval@nancy.com")?;
-        
+
         let mut parent_commit_id = None;
         for commit in &self.commits {
             let tree_id = {
@@ -34,18 +34,19 @@ impl EvalDefinition {
                 tb.write()?
             };
             let tree = repo.find_tree(tree_id)?;
-            
+
             let parent_commit = match parent_commit_id {
                 Some(id) => Some(repo.find_commit(id)?),
                 None => None,
             };
-            
+
             let parents: Vec<&git2::Commit> = match &parent_commit {
                 Some(p) => vec![p],
                 None => vec![],
             };
-            
-            let commit_id = repo.commit(Some("HEAD"), &sig, &sig, &commit.message, &tree, &parents)?;
+
+            let commit_id =
+                repo.commit(Some("HEAD"), &sig, &sig, &commit.message, &tree, &parents)?;
             parent_commit_id = Some(commit_id);
         }
 
@@ -65,19 +66,25 @@ pub struct EvalResult {
     pub traces: Vec<crate::schema::registry::EventPayload>,
 }
 
-pub fn extract_traces(repo: &git2::Repository, id_obj: &crate::schema::identity_config::Identity) -> Vec<crate::schema::registry::EventPayload> {
+pub fn extract_traces(
+    repo: &git2::Repository,
+    id_obj: &crate::schema::identity_config::Identity,
+) -> Vec<crate::schema::registry::EventPayload> {
     let mut traces = Vec::new();
     if let crate::schema::identity_config::Identity::Coordinator { workers, .. } = id_obj {
         for worker in workers {
             let reader = crate::events::reader::Reader::new(repo, worker.did.clone());
             if let Ok(iter) = reader.iter_events() {
                 for env_result in iter {
-                    let env = match env_result { Ok(e) => e, Err(_) => continue };
+                    let env = match env_result {
+                        Ok(e) => e,
+                        Err(_) => continue,
+                    };
                     match env.payload {
-                        crate::schema::registry::EventPayload::LlmPrompt(_) | 
-                        crate::schema::registry::EventPayload::LlmToolCall(_) | 
-                        crate::schema::registry::EventPayload::LlmToolResponse(_) | 
-                        crate::schema::registry::EventPayload::LlmResponse(_) => {
+                        crate::schema::registry::EventPayload::LlmPrompt(_)
+                        | crate::schema::registry::EventPayload::LlmToolCall(_)
+                        | crate::schema::registry::EventPayload::LlmToolResponse(_)
+                        | crate::schema::registry::EventPayload::LlmResponse(_) => {
                             traces.push(env.payload);
                         }
                         _ => {}
@@ -103,23 +110,32 @@ impl EvalRunner {
         let repo_path = temp_dir.path();
 
         crate::commands::init::init(&repo_path, 1).await?;
-        
+
         let identity_content = std::fs::read_to_string(repo_path.join(".nancy/identity.json"))?;
-        let id_obj: crate::schema::identity_config::Identity = serde_json::from_str(&identity_content)?;
+        let id_obj: crate::schema::identity_config::Identity =
+            serde_json::from_str(&identity_content)?;
         let coord = id_obj.get_did_owner().did.clone();
-
-
 
         let bg_dir = repo_path.to_path_buf();
         let explicit_coord = coord.clone();
-        let explicit_grinder = if let crate::schema::identity_config::Identity::Coordinator { workers, .. } = &id_obj {
-            workers.first().map(|w| crate::schema::identity_config::Identity::Grinder(w.clone()))
+        let explicit_grinder = if let crate::schema::identity_config::Identity::Coordinator {
+            workers,
+            ..
+        } = &id_obj
+        {
+            workers
+                .first()
+                .map(|w| crate::schema::identity_config::Identity::Grinder(w.clone()))
         } else {
             None
         };
         let grinder_handle = std::thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().unwrap();
-            let _ = rt.block_on(crate::commands::grind::grind(bg_dir, Some(explicit_coord), explicit_grinder));
+            let _ = rt.block_on(crate::commands::grind::grind(
+                bg_dir,
+                Some(explicit_coord),
+                explicit_grinder,
+            ));
         });
 
         Ok(Self {
@@ -136,15 +152,16 @@ impl EvalRunner {
         Ok(())
     }
 
-    pub async fn wait_for_completion<F>(&self, condition: F) -> anyhow::Result<()> 
-    where F: FnMut(&crate::coordinator::appview::AppView) -> bool 
+    pub async fn wait_for_completion<F>(&self, condition: F) -> anyhow::Result<()>
+    where
+        F: FnMut(&crate::coordinator::appview::AppView) -> bool,
     {
         let mut coordinator = crate::commands::coordinator::Coordinator::new(self.temp_dir.path())?;
         coordinator.run_until(condition).await?;
         crate::commands::grind::SHUTDOWN.store(true, std::sync::atomic::Ordering::SeqCst);
         Ok(())
     }
-    
+
     pub fn extract_traces(&self) -> Vec<crate::schema::registry::EventPayload> {
         extract_traces(&self.repo, &self.id_obj)
     }
@@ -158,8 +175,13 @@ impl EvalRunner {
                 appview.apply_event(&env.payload, &env.id);
             }
         }
-        
-        let hash = appview.tasks.keys().next().context("Failed to register organically sourced request hash")?.clone();
+
+        let hash = appview
+            .tasks
+            .keys()
+            .next()
+            .context("Failed to register organically sourced request hash")?
+            .clone();
         Ok(hash)
     }
 }
