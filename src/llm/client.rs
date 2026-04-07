@@ -95,27 +95,41 @@ impl<T: DeserializeOwned + JsonSchema + 'static> LlmClient<T> {
             let tool_name = fc.name();
             let args = fc.args().clone().unwrap_or(serde_json::Value::Null);
             
+            let call_id = uuid::Uuid::new_v4().to_string();
             let timestamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+            
             let _ = self.trace_tx.send(crate::schema::registry::EventPayload::LlmToolCall(
                 crate::schema::llm::LlmToolCallPayload {
                     subagent: self.subagent.clone(),
                     timestamp,
+                    call_id: call_id.clone(),
                     function_name: tool_name.to_string(),
                     args: args.clone(),
                 }
             ));
 
-            if let Some(tool) = self.tools.iter().find(|t| t.name() == tool_name) {
+            let response_payload = if let Some(tool) = self.tools.iter().find(|t| t.name() == tool_name) {
                 let result = tool.call(args).await;
                 match result {
-                    Ok(res) => responses.push((tool_name.to_string(), res)),
-                    Err(err) => responses.push((tool_name.to_string(), serde_json::json!({ "error": err.to_string() }))),
+                    Ok(res) => res,
+                    Err(err) => serde_json::json!({ "error": err.to_string() }),
                 }
             } else {
                 let valid_names: Vec<&str> = self.tools.iter().map(|t| t.name()).collect();
-                let error_payload = build_unknown_tool_error(tool_name, &valid_names);
-                responses.push((tool_name.to_string(), error_payload));
-            }
+                build_unknown_tool_error(tool_name, &valid_names)
+            };
+            
+            let response_timestamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+            let _ = self.trace_tx.send(crate::schema::registry::EventPayload::LlmToolResponse(
+                crate::schema::llm::LlmToolResponsePayload {
+                    subagent: self.subagent.clone(),
+                    timestamp: response_timestamp,
+                    call_id: call_id.clone(),
+                    response: serde_json::to_string(&response_payload).unwrap_or_else(|_| "{}".to_string()),
+                }
+            ));
+
+            responses.push((tool_name.to_string(), response_payload));
         }
         responses
     }

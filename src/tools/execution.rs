@@ -15,7 +15,6 @@ pub struct RunCommandArgs {
 }
 
 /// A specific executor wrapping tool bindings explicitly inside closure scopes
-/// avoiding global mutable state constraints securely natively!
 #[derive(Clone)]
 pub struct RunCommand {
     pub terminals: Arc<Mutex<HashMap<String, Child>>>,
@@ -55,7 +54,7 @@ impl LlmTool for RunCommand {
                 anyhow::bail!("Execution denied. Please use the native `list_dir` tool to view directory contents instead of `{}`. It provides critical recursion protection natively.", cmd_base);
             }
             "cat" | "less" | "more" | "head" | "tail" => {
-                anyhow::bail!("Execution denied. Please use the native `view_files` tool (or `read_file` natively) to read contents instead of `{}`. It bounds massive files protecting token context windows.", cmd_base);
+                anyhow::bail!("Execution denied. Please use the native `view_files` tool (or `read_file`) to read contents instead of `{}`. It bounds massive files protecting token context windows.", cmd_base);
             }
             "grep" | "rg" | "ag" | "ack" | "find" => {
                 anyhow::bail!("Execution denied. Please use the native `grep_search` tool instead of `{}`. It recursively respects .gitignore implicitly.", cmd_base);
@@ -76,10 +75,10 @@ impl LlmTool for RunCommand {
                 anyhow::bail!("Execution denied. Do not provision architecture layouts via bash! Use the native `manage_paths` tool with the action 'mkdir'.");
             }
             "touch" => {
-                anyhow::bail!("Execution denied. Use the native `write_file` tool to generate an explicit empty artifact natively without bounding bash!");
+                anyhow::bail!("Execution denied. Use the native `write_file` tool to generate an explicit empty artifact without bounding bash!");
             }
             "vi" | "vim" | "nano" | "emacs" => {
-                anyhow::bail!("Execution denied. TTY interactive terminal applications like `{}` cannot be provisioned securely! Map direct writes natively utilizing `write_file` or `multi_replace_file_content`.", cmd_base);
+                anyhow::bail!("Execution denied. TTY interactive terminal applications like `{}` cannot be provisioned securely! Map direct writes utilizing `write_file` or `multi_replace_file_content`.", cmd_base);
             }
             _ => {
                 if cmd.starts_with("echo") && (cmd.contains(" > ") || cmd.contains(" >> ")) {
@@ -114,7 +113,7 @@ impl LlmTool for RunCommand {
             }));
         }
 
-        // Standard execution mapping bounds safely natively
+        // Standard execution mapping bounds safely
         let output = cmd.output().await?;
         let stdout = String::from_utf8_lossy(&output.stdout).to_string();
         let stderr = String::from_utf8_lossy(&output.stderr).to_string();

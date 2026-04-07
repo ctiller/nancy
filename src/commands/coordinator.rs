@@ -44,11 +44,11 @@ impl Coordinator {
     where
         F: FnMut(&AppView) -> bool,
     {
-        println!("Coordinator {} polling root ledger natively...", self.identity.get_did_owner().did);
+        println!("Coordinator {} polling root ledger...", self.identity.get_did_owner().did);
 
         let did = self.identity.get_did_owner().did.clone();
         
-        // Setup cross-loop app state gracefully decoupled mapping natively!
+        // Setup cross-loop app state
         let mut processed_request_ids = std::collections::HashSet::new();
 
         while !condition(&AppView::new()) && !SHUTDOWN.load(Ordering::SeqCst) {
@@ -64,7 +64,7 @@ impl Coordinator {
                 }
             }
 
-            // Sync with grinders to receive their AssignmentCompletes mapping!
+            // Sync with grinders to receive their AssignmentCompletes
             if let Identity::Coordinator { workers, .. } = &self.identity {
                 for worker in workers {
                     let local_reader = Reader::new(&self.repo, worker.did.clone());
@@ -78,23 +78,23 @@ impl Coordinator {
                 }
             }
 
-            // Test loop condition against dynamically synced view organically
+            // Test loop condition against synced view
             if condition(&appview) {
                 break;
             }
 
             let mut mapped_assignments = Vec::new();
             
-            // Extract unassigned items cleanly cleanly decoupled targeting tasks efficiently
+            // Extract unassigned items to map to workers
             if let Identity::Coordinator { workers, .. } = &self.identity {
                 if workers.is_empty() {
-                    println!("Coordinator has no workers provisioned cleanly structurally!");
+                    println!("Coordinator has no workers provisioned!");
                 } else {
                     for (task_id, payload) in &appview.tasks {
                         if !appview.assignments.contains_key(task_id) && !processed_request_ids.contains(task_id) {
                             processed_request_ids.insert(task_id.clone());
                             
-                            // Pick sequential target generically!
+                            // Pick sequential target
                             if let Some(target) = workers.first() {
                                 let assignment = if matches!(payload, EventPayload::TaskRequest(_)) {
                                     CoordinatorAssignmentPayload::PlanTask {
@@ -125,14 +125,14 @@ impl Coordinator {
             }
         }
 
-        println!("Coordinator safely halted dynamically mapping.");
+        println!("Coordinator halted.");
         Ok(())
     }
 }
 
 pub async fn run<P: AsRef<Path>>(dir: P) -> Result<()> {
     ctrlc::set_handler(move || {
-        println!("Received interrupt signal. Shutting down Coordinator safely...");
+        println!("Received interrupt signal. Shutting down Coordinator...");
         SHUTDOWN.store(true, Ordering::SeqCst);
     }).unwrap_or_else(|e| eprintln!("Error setting Ctrl-C handler: {}", e));
 

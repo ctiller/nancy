@@ -4,7 +4,7 @@ use crate::eval::EvalDefinition;
 
 pub async fn eval_plan(path: &str, output_path: &std::path::Path) -> Result<()> {
     let def: EvalDefinition = serde_yaml::from_slice(&fs::read(path).context("Failed to read eval yaml mapping")?)?;
-    if def.action != "plan" { bail!("Only 'plan' natively supported"); }
+    if def.action != "plan" { bail!("Only 'plan' supported"); }
     
     let runner = crate::eval::EvalRunner::setup(&def).await?;
     runner.push_task(def.task_description.clone()).await?;
@@ -28,7 +28,7 @@ pub async fn eval_plan(path: &str, output_path: &std::path::Path) -> Result<()> 
 
     let result_yaml = serde_yaml::to_string(&result)?;
     fs::write(output_path, result_yaml)?;
-    println!("Eval finalized dynamically correctly mapped into eval_out.yaml natively at: {}", output_path.display());
+    println!("Eval finalized and mapped into eval_out.yaml at: {}", output_path.display());
 
     Ok(())
 }

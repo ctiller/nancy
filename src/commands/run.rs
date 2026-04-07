@@ -39,7 +39,7 @@ pub async fn run<P: AsRef<Path>>(dir: P) -> Result<()> {
         }
     }
     if !has_nancy {
-        bail!(".nancy is practically not in .gitignore! You must gitignore the .nancy directory natively to protect your identity files.");
+        bail!(".nancy is practically not in .gitignore! You must gitignore the .nancy directory to protect your identity files.");
     }
     
     let nancy_dir = workdir.join(".nancy");
@@ -145,7 +145,7 @@ pub async fn run<P: AsRef<Path>>(dir: P) -> Result<()> {
             // Run container
             let env_vars = build_worker_env_vars(&root_did);
 
-            // Setup mapping mounting the specific targeted path string safely to the /worktree internal
+            // Setup mapping mounting the specific targeted path string securely to the /worktree internal
             let binds = vec![
                 format!("{}:/worktree", target_path.canonicalize().unwrap().display())
             ];
@@ -261,7 +261,7 @@ mod tests {
         let rt = tokio::runtime::Runtime::new().unwrap();
         
         let init_cmd = rt.block_on(init::init(temp_dir.path(), 2));
-        assert!(init_cmd.is_ok(), "Coordinator Init inherently failed");
+        assert!(init_cmd.is_ok(), "Coordinator Init failed");
 
         let identity_file = temp_dir.path().join(".nancy").join("identity.json");
         let mut id_obj: crate::schema::identity_config::Identity = serde_json::from_str(&fs::read_to_string(&identity_file).unwrap()).unwrap();
@@ -279,19 +279,19 @@ mod tests {
         std::fs::write(&identity_file, serde_json::to_string(&id_obj).unwrap()).unwrap();
 
         let task_add = rt.block_on(add_task::add_task(temp_dir.path(), Some("E2E_Mapping_Objective".to_string()), None));
-        assert!(task_add.is_ok(), "Task Injection inherently failed");
+        assert!(task_add.is_ok(), "Task Injection failed");
         
         let result = rt.block_on(run(temp_dir.path()));
         
         // Note: Running true Docker operations demands root DAEMON connectivity which our CI might not have locally, 
         // We assert if `bollard` connects and throws NO internal parser errors!
         match result {
-            Ok(_) => println!("Successfully deployed bollard bindings locally natively."),
+            Ok(_) => println!("Successfully deployed bollard bindings locally."),
             Err(e) => {
                 if format!("{}", e).contains("connect") || format!("{}", e).contains("No such file or directory") {
-                    println!("Bypassing native Daemon timeout dynamically: {}", e);
+                    println!("Bypassing Daemon timeout: {}", e);
                 } else {
-                    panic!("Bollard payload injection unexpectedly failed mapping traits: {}", e);
+                    panic!("Bollard payload injection unexpectedly failed: {}", e);
                 }
             }
         }

@@ -15,7 +15,7 @@ pub async fn run(action: Option<String>, file: Option<String>) -> Result<()> {
                 anyhow::bail!("Missing path to yaml eval definition!");
             }
         }
-        _ => anyhow::bail!("Unsupported eval action natively securely decoupled."),
+        _ => anyhow::bail!("Unsupported eval action."),
     }
     Ok(())
 }
@@ -53,13 +53,13 @@ mod tests {
         let result_fut = run(Some("plan".to_string()), Some(yaml_path.to_str().unwrap().to_string()));
         let result = tokio::runtime::Runtime::new().unwrap().block_on(result_fut);
         if let Err(e) = &result {
-            println!("Eval runner natively explicitly failed natively: {:?}", e);
+            println!("Eval runner explicitly failed: {:?}", e);
         }
         result.unwrap();
         
         let expected_path = temp_dir.path().join("eval_out.yaml");
-        println!("Asserting expected path seamlessly uniquely strictly natively: {}", expected_path.display());
-        assert!(expected_path.exists(), "eval_out.yaml organic validation properly executed the harness safely natively!");
+        println!("Asserting expected path: {}", expected_path.display());
+        assert!(expected_path.exists(), "eval_out.yaml successfully generated!");
         crate::commands::grind::SHUTDOWN.store(true, std::sync::atomic::Ordering::SeqCst);
         
         std::env::set_current_dir(current_dir_backup).unwrap();

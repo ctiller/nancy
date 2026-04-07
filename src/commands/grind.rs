@@ -45,7 +45,10 @@ pub async fn grind<P: AsRef<Path>>(dir: P, explicit_coordinator_did: Option<Stri
         SHUTDOWN.store(true, Ordering::SeqCst);
     }).unwrap_or_else(|e| eprintln!("Error setting Ctrl-C handler: {}", e));
 
-    println!("Grinder {} natively polling root ledger {}...", worker_did, coordinator_did);
+    println!("Grinder {} polling root ledger {}...", worker_did, coordinator_did);
+
+    let global_writer = crate::events::writer::Writer::new(&repo, id_obj.clone())?;
+    crate::events::logger::init_global_writer(global_writer.tracer());
 
     while !SHUTDOWN.load(Ordering::SeqCst) {
         let mut tasks_assigned = Vec::new();
@@ -102,7 +105,8 @@ pub async fn grind<P: AsRef<Path>>(dir: P, explicit_coordinator_did: Option<Stri
                             &repo, 
                             &id_obj, 
                             &task_id, 
-                            &task_request_ref
+                            &task_request_ref,
+                            &coordinator_did
                         ).await?;
                     }
                 }
@@ -114,6 +118,8 @@ pub async fn grind<P: AsRef<Path>>(dir: P, explicit_coordinator_did: Option<Stri
         if !processed {
             std::thread::sleep(Duration::from_millis(500));
         }
+        
+        let _ = global_writer.commit_batch();
     }
 
     println!("Grinder {} gracefully shut down.", worker_did);

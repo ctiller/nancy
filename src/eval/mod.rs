@@ -76,6 +76,7 @@ pub fn extract_traces(repo: &git2::Repository, id_obj: &crate::schema::identity_
                     match env.payload {
                         crate::schema::registry::EventPayload::LlmPrompt(_) | 
                         crate::schema::registry::EventPayload::LlmToolCall(_) | 
+                        crate::schema::registry::EventPayload::LlmToolResponse(_) | 
                         crate::schema::registry::EventPayload::LlmResponse(_) => {
                             traces.push(env.payload);
                         }
@@ -107,7 +108,7 @@ impl EvalRunner {
         let id_obj: crate::schema::identity_config::Identity = serde_json::from_str(&identity_content)?;
         let coord = id_obj.get_did_owner().did.clone();
 
-        crate::events::logger::init_global_writer(tokio::sync::mpsc::unbounded_channel().0);
+
 
         let bg_dir = repo_path.to_path_buf();
         let explicit_coord = coord.clone();
