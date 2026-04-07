@@ -1,7 +1,7 @@
 use proc_macro::TokenStream;
-use quote::{quote, format_ident};
-use syn::{parse_macro_input, ItemFn, LitStr, ExprClosure, Token, Pat};
+use quote::{format_ident, quote};
 use syn::parse::{Parse, ParseStream};
+use syn::{ExprClosure, ItemFn, LitStr, Pat, Token, parse_macro_input};
 /// Parses `#[llm_tool]` on a function.
 /// It keeps the function exactly as is, but generates a companion struct Named `{FnName}Tool`
 /// which implements `LlmTool`.
@@ -33,7 +33,7 @@ pub fn llm_tool(_attr: TokenStream, item: TokenStream) -> TokenStream {
             }
         }
     }
-    
+
     let description = desc_lines.join("\n");
     // Ensure properly capitalized camel case Tool struct
     let tool_struct_str = fn_name.to_string();
@@ -102,12 +102,12 @@ pub fn llm_tool(_attr: TokenStream, item: TokenStream) -> TokenStream {
                         #arg_names: #arg_types,
                     )*
                 }
-                
+
                 let input_args: Args = ::serde_json::from_value(args)?;
                 #call_expr
             }
         }
-        
+
         #[allow(non_snake_case)]
         #vis mod #fn_name {
             pub fn tool() -> Box<dyn crate::llm::tool::LlmTool> {
@@ -143,7 +143,11 @@ impl Parse for MakeToolInput {
 /// Parses a closure and returns an instantiated LlmTool trait object via Box<dyn LlmTool>.
 #[proc_macro]
 pub fn make_tool(input: TokenStream) -> TokenStream {
-    let MakeToolInput { name, description, closure } = parse_macro_input!(input as MakeToolInput);
+    let MakeToolInput {
+        name,
+        description,
+        closure,
+    } = parse_macro_input!(input as MakeToolInput);
 
     let mut args = Vec::new();
     for pat in &closure.inputs {
@@ -160,7 +164,7 @@ pub fn make_tool(input: TokenStream) -> TokenStream {
     let arg_types = args.iter().map(|(_, ty)| ty).collect::<Vec<_>>();
 
     let closure_is_async = closure.asyncness.is_some();
-    
+
     let closure_call = if closure_is_async {
         quote! { closure(#( input_args.#arg_names ),*).await }
     } else {
@@ -208,7 +212,7 @@ pub fn make_tool(input: TokenStream) -> TokenStream {
             }
 
             let closure = #closure;
-            
+
             let async_wrap = |#( #arg_names: #arg_types ),*| async move { #closure_call };
 
             Box::new(ClosureTool {
@@ -220,4 +224,15 @@ pub fn make_tool(input: TokenStream) -> TokenStream {
     };
 
     TokenStream::from(expanded)
+}
+
+mod md;
+#[proc_macro_attribute]
+pub fn md_defined(attr: TokenStream, item: TokenStream) -> TokenStream {
+    md::md_defined(attr, item)
+}
+
+#[proc_macro]
+pub fn include_md(input: TokenStream) -> TokenStream {
+    md::include_md(input)
 }
