@@ -10,27 +10,31 @@ use crate::events::reader::Reader;
 use crate::schema::identity_config::Identity;
 use crate::schema::registry::EventPayload;
 
-static SHUTDOWN: AtomicBool = AtomicBool::new(false);
+pub static SHUTDOWN: AtomicBool = AtomicBool::new(false);
 
-pub async fn grind<P: AsRef<Path>>(dir: P) -> Result<()> {
+pub async fn grind<P: AsRef<Path>>(dir: P, explicit_coordinator_did: Option<String>, identity_override: Option<Identity>) -> Result<()> {
     let dir = dir.as_ref();
     let repo = Repository::discover(dir).context("Not a git repository")?;
     let workdir = repo.workdir().context("Bare repository")?.to_path_buf();
 
     let identity_file = workdir.join(".nancy").join("identity.json");
-    if !identity_file.exists() {
-        bail!("nancy not initialized");
-    }
-
-    let identity_content = fs::read_to_string(&identity_file)?;
-    let id_obj: Identity = serde_json::from_str(&identity_content)?;
+    let id_obj = match identity_override {
+        Some(override_id) => override_id,
+        None => {
+            if !identity_file.exists() {
+                bail!("nancy not initialized");
+            }
+            let identity_content = fs::read_to_string(&identity_file)?;
+            serde_json::from_str(&identity_content)?
+        }
+    };
     let worker_did = id_obj.get_did_owner().did.clone();
 
     if !matches!(id_obj, Identity::Grinder(_)) {
         bail!("'nancy grind' must be executed within an Identity::Grinder context.");
     }
 
-    let coordinator_did = std::env::var("COORDINATOR_DID").unwrap_or_default();
+    let coordinator_did = explicit_coordinator_did.unwrap_or_else(|| std::env::var("COORDINATOR_DID").unwrap_or_default());
     if coordinator_did.is_empty() {
         println!("No explicit Coordinator DID set. Grinder loop idling.");
         return Ok(());
@@ -167,7 +171,7 @@ mod tests {
         let dir = temp_dir.path().to_path_buf();
         let handle = std::thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().unwrap();
-            rt.block_on(grind(dir)).unwrap();
+            rt.block_on(grind(dir, None, None)).unwrap();
         });
 
         // Let the grinder loop cycle against our mapped mock events!

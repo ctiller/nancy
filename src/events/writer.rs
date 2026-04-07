@@ -12,15 +12,24 @@ pub struct Writer<'a> {
     repo: &'a Repository,
     identity: Identity,
     pending_events: RefCell<Vec<String>>,
+    trace_tx: tokio::sync::mpsc::UnboundedSender<EventPayload>,
+    trace_rx: RefCell<tokio::sync::mpsc::UnboundedReceiver<EventPayload>>,
 }
 
 impl<'a> Writer<'a> {
     pub fn new(repo: &'a Repository, identity: Identity) -> Result<Self> {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         Ok(Writer {
             repo,
             identity,
             pending_events: RefCell::new(Vec::new()),
+            trace_tx: tx,
+            trace_rx: RefCell::new(rx),
         })
+    }
+
+    pub fn tracer(&self) -> tokio::sync::mpsc::UnboundedSender<EventPayload> {
+        self.trace_tx.clone()
     }
 
     pub fn log_event(&self, payload: EventPayload) -> Result<()> {
@@ -63,12 +72,18 @@ impl<'a> Writer<'a> {
     }
 
     pub fn commit_batch(&self) -> Result<()> {
+        let mut rx = self.trace_rx.borrow_mut();
+        while let Ok(event) = rx.try_recv() {
+            self.log_event(event)?;
+        }
+
         let mut pending = self.pending_events.borrow_mut();
         if pending.is_empty() {
             return Ok(());
         }
 
-        let branch_name = format!("refs/heads/nancy/{}", self.identity.get_did_owner().did);
+        let safe_did = self.identity.get_did_owner().did.replace(":", "_");
+        let branch_name = format!("refs/heads/nancy/{}", safe_did);
         let branch_ref = self.repo.find_reference(&branch_name);
         let sig = self.repo.signature()?;
 
@@ -172,7 +187,7 @@ impl<'a> Writer<'a> {
         let parents_refs: Vec<&git2::Commit> = parents.iter().collect();
 
         self.repo.commit(
-            Some(&format!("refs/heads/nancy/{}", self.identity.get_did_owner().did)),
+            Some(&format!("refs/heads/nancy/{}", safe_did)),
             &sig,
             &sig,
             "Batched append event logs",

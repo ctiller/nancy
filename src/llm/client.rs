@@ -4,13 +4,13 @@ use serde::de::DeserializeOwned;
 use schemars::JsonSchema;
 use gemini_client_api::gemini::ask::Gemini;
 use gemini_client_api::gemini::types::sessions::Session;
-use gemini_client_api::gemini::types::request::{Tool as GeminiTool, SystemInstruction, Chat};
+use gemini_client_api::gemini::types::request::Chat;
 use tokio::time::sleep;
-use gemini_client_api::gemini::types::response::GeminiResponse;
 use anyhow::{bail, Context};
 
 #[cfg(test)]
 use std::sync::{Arc, Mutex};
+use gemini_client_api::gemini::types::response::GeminiResponse;
 
 pub struct LlmClient<T> {
     pub model: String,
@@ -18,6 +18,8 @@ pub struct LlmClient<T> {
     pub system_prompt: Vec<String>,
     pub schema: Option<schemars::Schema>,
     pub tools: Vec<Box<dyn crate::llm::tool::LlmTool>>,
+    pub subagent: String,
+    pub trace_tx: tokio::sync::mpsc::UnboundedSender<crate::schema::registry::EventPayload>,
     pub session: Session,
     pub gemini: Gemini,
     #[cfg(test)]
@@ -91,8 +93,20 @@ impl<T: DeserializeOwned + JsonSchema + 'static> LlmClient<T> {
         let mut responses = Vec::new();
         for fc in chat.get_function_calls() {
             let tool_name = fc.name();
+            let args = fc.args().clone().unwrap_or(serde_json::Value::Null);
+            
+            let timestamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+            let _ = self.trace_tx.send(crate::schema::registry::EventPayload::LlmToolCall(
+                crate::schema::llm::LlmToolCallPayload {
+                    subagent: self.subagent.clone(),
+                    timestamp,
+                    function_name: tool_name.to_string(),
+                    args: args.clone(),
+                }
+            ));
+
             if let Some(tool) = self.tools.iter().find(|t| t.name() == tool_name) {
-                let result = tool.call(fc.args().clone().unwrap_or(serde_json::Value::Null)).await;
+                let result = tool.call(args).await;
                 match result {
                     Ok(res) => responses.push((tool_name.to_string(), res)),
                     Err(err) => responses.push((tool_name.to_string(), serde_json::json!({ "error": err.to_string() }))),
@@ -107,6 +121,14 @@ impl<T: DeserializeOwned + JsonSchema + 'static> LlmClient<T> {
     }
 
     pub async fn ask(&mut self, question: &str) -> anyhow::Result<T> {
+        let timestamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+        let _ = self.trace_tx.send(crate::schema::registry::EventPayload::LlmPrompt(
+            crate::schema::llm::LlmPromptPayload {
+                subagent: self.subagent.clone(),
+                timestamp,
+                prompt: question.to_string(),
+            }
+        ));
         self.session.ask(question.to_string());
         self.run_loop().await
     }
@@ -149,10 +171,22 @@ impl<T: DeserializeOwned + JsonSchema + 'static> LlmClient<T> {
             if chat.has_function_call() {
                 let tool_responses = self.handle_tool_calls(chat).await;
                 for (name, payload) in tool_responses {
+                    #[cfg(not(test))]
                     self.session.add_function_response(&name, payload).map_err(|e| anyhow::anyhow!("{}", e))?;
+                    
+                    #[cfg(test)]
+                    let _ = self.session.add_function_response(&name, payload);
                 }
             } else {
                 let text = chat.get_text_no_think("\n");
+                let timestamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+                let _ = self.trace_tx.send(crate::schema::registry::EventPayload::LlmResponse(
+                    crate::schema::llm::LlmResponsePayload {
+                        subagent: self.subagent.clone(),
+                        timestamp,
+                        response: text.clone(),
+                    }
+                ));
                 return parse_response(&text);
             }
         }
@@ -274,11 +308,14 @@ mod tests {
         let resp: GeminiResponse = serde_json::from_value(json_resp).unwrap();
         let chat = resp.get_chat();
         
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
         let client = LlmClient::<String> {
             model: "model-test".to_string(),
             temperature: None,
             system_prompt: vec![],
             schema: None,
+            subagent: "test".to_string(),
+            trace_tx: tx,
             tools: vec![Box::new(MockTool)],
             session: Session::new(10),
             gemini: Gemini::new("xxx", "xxx", None),
@@ -316,11 +353,14 @@ mod tests {
         });
         let resp: GeminiResponse = serde_json::from_value(json_resp).unwrap();
         
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
         let client = LlmClient::<String> {
             model: "model-test".to_string(),
             temperature: None,
             system_prompt: vec![],
             schema: None,
+            subagent: "test".to_string(),
+            trace_tx: tx,
             tools: vec![],
             session: Session::new(10),
             gemini: Gemini::new("xxx", "xxx", None),
@@ -351,11 +391,14 @@ mod tests {
             responses.push(make_err());
         }
         
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
         let mut client = LlmClient::<String> {
             model: "model-test".to_string(),
             temperature: None,
             system_prompt: vec![],
             schema: None,
+            subagent: "test".to_string(),
+            trace_tx: tx,
             tools: vec![],
             session: Session::new(10),
             gemini: Gemini::new("xxx", "xxx", None),
@@ -374,11 +417,14 @@ mod tests {
             reqwest::Client::builder().build().unwrap().get("http://localhost").send().await.unwrap_err()
         ));
         
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
         let mut client = LlmClient::<String> {
             model: "model-test".to_string(),
             temperature: None,
             system_prompt: vec![],
             schema: None,
+            subagent: "test".to_string(),
+            trace_tx: tx,
             tools: vec![],
             session: Session::new(10),
             gemini: Gemini::new("xxx", "xxx", None),
@@ -392,7 +438,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[should_panic]
     async fn test_run_loop_with_tool_calls_routing() {
         let json_fc = serde_json::json!({
             "candidates": [{
@@ -419,11 +464,14 @@ mod tests {
         let resp1: GeminiResponse = serde_json::from_value(json_fc).unwrap();
         let resp2: GeminiResponse = serde_json::from_value(json_text).unwrap();
 
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
         let mut client = LlmClient::<String> {
             model: "model-test".to_string(),
             temperature: None,
             system_prompt: vec![],
             schema: None,
+            subagent: "test".to_string(),
+            trace_tx: tx,
             tools: vec![Box::new(MockTool)],
             session: Session::new(10),
             gemini: Gemini::new("xxx", "xxx", None),

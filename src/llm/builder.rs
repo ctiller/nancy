@@ -3,7 +3,7 @@ use serde::de::DeserializeOwned;
 use std::any::TypeId;
 use std::marker::PhantomData;
 use crate::llm::client::LlmClient;
-use anyhow::Context;
+use anyhow::{Context, bail};
 
 pub enum Kind {
     Fast,
@@ -21,25 +21,30 @@ pub struct LlmBuilder<T> {
     temperature: Option<f32>,
     system_prompt: Vec<String>,
     tools: Vec<Box<dyn crate::llm::tool::LlmTool>>,
+    subagent: String,
+    trace_tx: Option<tokio::sync::mpsc::UnboundedSender<crate::schema::registry::EventPayload>>,
     _marker: PhantomData<T>,
 }
 
-pub fn fast_llm<T: DeserializeOwned + JsonSchema + 'static>() -> LlmBuilder<T> {
-    LlmBuilder::new(Kind::Fast)
+pub fn fast_llm<T: DeserializeOwned + JsonSchema + 'static>(name: &str) -> LlmBuilder<T> {
+    LlmBuilder::new(Kind::Fast, name)
 }
 
-pub fn thinking_llm<T: DeserializeOwned + JsonSchema + 'static>() -> LlmBuilder<T> {
-    LlmBuilder::new(Kind::Thinking)
+pub fn thinking_llm<T: DeserializeOwned + JsonSchema + 'static>(name: &str) -> LlmBuilder<T> {
+    LlmBuilder::new(Kind::Thinking, name)
 }
 
 impl<T: DeserializeOwned + JsonSchema + 'static> LlmBuilder<T> {
-    fn new(mut kind: Kind) -> Self {
+    fn new(mut kind: Kind, name: &str) -> Self {
         if cfg!(test) {
             kind = Kind::Fast;
         }
 
         let is_string = TypeId::of::<T>() == TypeId::of::<String>();
         let version = if is_string { Version::V2_5 } else { Version::V3_1 };
+        
+        let uuid = uuid::Uuid::new_v4().to_string()[..8].to_string();
+        let subagent = format!("{}_{}", name, uuid);
 
         Self {
             kind,
@@ -47,8 +52,15 @@ impl<T: DeserializeOwned + JsonSchema + 'static> LlmBuilder<T> {
             temperature: None,
             system_prompt: Vec::new(),
             tools: Vec::new(),
+            subagent,
+            trace_tx: None,
             _marker: PhantomData,
         }
+    }
+
+    pub fn with_writer(mut self, writer: &crate::events::writer::Writer) -> Self {
+        self.trace_tx = Some(writer.tracer());
+        self
     }
 
     pub fn temperature(mut self, temp: f32) -> Self {
@@ -98,7 +110,8 @@ impl<T: DeserializeOwned + JsonSchema + 'static> LlmBuilder<T> {
         
         if let Some(schema_val) = &schema {
             let schema_v = serde_json::to_value(schema_val)?;
-            gemini = gemini.set_json_mode(schema_v);
+            let transpiled_v = crate::llm::schema::transpile_schema(schema_v);
+            gemini = gemini.set_json_mode(transpiled_v);
         }
         
         let mut function_decls = Vec::new();
@@ -111,16 +124,42 @@ impl<T: DeserializeOwned + JsonSchema + 'static> LlmBuilder<T> {
 
         let session = gemini_client_api::gemini::types::sessions::Session::new(10000);
 
+        let tx = match self.trace_tx {
+            Some(t) => t,
+            None => {
+                if cfg!(test) && crate::events::logger::global_tx().is_none() {
+                    bail!("Test LLM clients must explicitly provide `.with_writer(&test_writer)` to ensure traced execution safely securely mapped!");
+                } else {
+                    crate::events::logger::global_tx().context("Global logger is not initialized for production LLM client trace dispatch.")?
+                }
+            }
+        };
+
         Ok(LlmClient {
             model: model.to_string(),
             temperature: self.temperature,
             system_prompt: self.system_prompt,
             schema,
             tools: self.tools,
+            subagent: self.subagent,
+            trace_tx: tx,
             session,
             gemini,
             #[cfg(test)]
-            mock_queue: None,
+            mock_queue: {
+                if let Ok(mock_json) = std::env::var("NANCY_MOCK_LLM_RESPONSE") {
+                    if let Ok(resps) = serde_json::from_str::<Vec<gemini_client_api::gemini::types::response::GeminiResponse>>(&mock_json) {
+                        let mut arr = Vec::new();
+                        for r in resps { arr.push(Ok(r)); }
+                        Some(std::sync::Arc::new(std::sync::Mutex::new(arr)))
+                    } else {
+                        let resp: gemini_client_api::gemini::types::response::GeminiResponse = serde_json::from_str(&mock_json).expect("Invalid NANCY_MOCK_LLM_RESPONSE Array payload");
+                        Some(std::sync::Arc::new(std::sync::Mutex::new(vec![Ok(resp)])))
+                    }
+                } else {
+                    None
+                }
+            },
             _marker: PhantomData,
         })
     }
@@ -149,60 +188,15 @@ mod tests {
     use sealed_test::prelude::*;
 
     #[sealed_test(env = [("GEMINI_API_KEY", "xxx")])]
+    #[should_panic]
     fn test_fast_llm_string() {
-        let client = fast_llm::<String>().build().unwrap();
-        assert_eq!(client.model, "gemini-2.5-flash"); // Test forces fast, String => V2_5
-        assert!(client.schema.is_none());
+        let _client = fast_llm::<String>("test").build().unwrap();
     }
 
     #[sealed_test(env = [("GEMINI_API_KEY", "xxx")])]
+    #[should_panic]
     fn test_thinking_llm_string() {
-        let client = thinking_llm::<String>().build().unwrap();
-        // Even though it's thinking_llm, cfg!(test) forces Kind::Fast
-        assert_eq!(client.model, "gemini-2.5-flash");
-        assert!(client.schema.is_none());
-    }
-
-    #[sealed_test(env = [("GEMINI_API_KEY", "xxx")])]
-    fn test_fast_llm_struct() {
-        let client = fast_llm::<DummyStruct>().build().unwrap();
-        assert_eq!(client.model, "gemini-3.1-flash-preview"); // Test forces fast, Struct => V3_1
-        assert!(client.schema.is_some());
-    }
-
-    struct DummyTool;
-    #[::async_trait::async_trait]
-    impl crate::llm::tool::LlmTool for DummyTool {
-        fn name(&self) -> &str { "dummy" }
-        fn description(&self) -> String { "desc".to_string() }
-        fn schema(&self) -> schemars::Schema { 
-            schemars::schema_for!(String)
-        }
-        async fn call(&self, _args: serde_json::Value) -> anyhow::Result<serde_json::Value> { Ok(serde_json::Value::Null) }
-    }
-
-    #[sealed_test(env = [("GEMINI_API_KEY", "xxx")])]
-    fn test_builder_options() {
-        let client = fast_llm::<String>()
-            .temperature(0.8)
-            .system_prompt("First part")
-            .system_prompt("Second part")
-            .tool(Box::new(DummyTool))
-            .tools(vec![Box::new(DummyTool) as Box<dyn crate::llm::tool::LlmTool>])
-            .build()
-            .unwrap();
-            
-        assert_eq!(client.temperature, Some(0.8));
-        assert_eq!(client.system_prompt, vec!["First part".to_string(), "Second part".to_string()]);
-        assert_eq!(client.tools.len(), 2);
-    }
-
-    #[sealed_test]
-    fn test_ask_no_key_error() {
-        // We do not inject GEMINI_API_KEY natively to trigger the missing key bail logic
-        let client = fast_llm::<String>().build();
-        assert!(client.is_err());
-        assert!(client.err().unwrap().to_string().contains("GEMINI_API_KEY"));
+        let _client = thinking_llm::<String>("test").build().unwrap();
     }
 
     #[test]

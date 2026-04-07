@@ -1,0 +1,25 @@
+action: "plan"
+task_description: |
+  Build an agent that takes a set of git commits and splits them into a
+  new set of git commits that are easier to review.
+  
+  We often build software in an adhoc fashion, and once a feature is done,
+  it's nice to step back and rework a change so that it's presented to our
+  reviewers in a more logical, easy to understand way.
+  
+  Ideally we'd like commits to be self contained. They should make one atomic
+  change to the codebase. Note that an atomic change includes any documentation
+  and test artifacts that go along with an implementation change -- you should
+  never split implementation and documentation changes into different commits,
+  or implementation and test changes into different commits.
+  
+  File deletions are always easy to review.
+  
+  Assume that the project has a testing story that we can figure out how to
+  use. We should test the before and after state passes all tests, and our
+  generated commits should pass all tests at every commit boundary.
+  
+  The input set of commits may include broken states along the way.
+  
+  This is a new project, so your workspace is empty.
+commits: []

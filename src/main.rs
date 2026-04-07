@@ -19,8 +19,17 @@ enum Commands {
     AddTask(AddTaskArgs),
     /// Run the main agentic runloop
     Grind,
+    /// Run the coordinator dispatch queue loop
+    Coordinator,
     /// Provision orchestration environments natively locally
     Run,
+    /// Evaluate a task request tailored to a yaml definition natively
+    Eval {
+        #[arg(index = 1)]
+        action: Option<String>,
+        #[arg(index = 2)]
+        file: Option<String>,
+    },
 }
 
 #[derive(clap::Args, Debug)]
@@ -56,10 +65,16 @@ async fn main() -> Result<()> {
             ).await?;
         }
         Commands::Grind => {
-            nancy::commands::grind::grind(std::env::current_dir()?).await?;
+            nancy::commands::grind::grind(std::env::current_dir()?, None, None).await?;
+        }
+        Commands::Coordinator => {
+            nancy::commands::coordinator::run(std::env::current_dir()?).await?;
         }
         Commands::Run => {
             nancy::commands::run::run(std::env::current_dir()?).await?;
+        }
+        Commands::Eval { action, file } => {
+            nancy::commands::eval::run(action.clone(), file.clone()).await?;
         }
     }
     
@@ -82,6 +97,7 @@ mod tests {
         }
         assert!(Args::try_parse_from(["nancy", "add-task"]).is_err()); // Correctly bails without file/task payload constraints
         assert!(Args::try_parse_from(["nancy", "grind"]).is_ok());
+        assert!(Args::try_parse_from(["nancy", "coordinator"]).is_ok());
         assert!(Args::try_parse_from(["nancy", "run"]).is_ok());
         assert!(Args::try_parse_from(["nancy", "add-task", "--task", "test"]).is_ok());
         assert!(Args::try_parse_from(["nancy", "add-task", "--file", "test.txt"]).is_ok());

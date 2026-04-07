@@ -8,10 +8,12 @@ pub trait LlmTool: Send + Sync {
     fn schema(&self) -> schemars::Schema;
     
     fn declaration(&self) -> Value {
+        let raw_schema = serde_json::to_value(self.schema()).unwrap();
+        let transpiled = crate::llm::schema::transpile_schema(raw_schema);
         json!({
             "name": self.name(),
             "description": self.description(),
-            "parameters": self.schema()
+            "parameters": transpiled
         })
     }
 

@@ -22,7 +22,7 @@ impl AppView {
 
     pub fn apply_event(&mut self, payload: &EventPayload, event_id: &str) {
         match payload {
-            EventPayload::Task(_) => {
+            EventPayload::Task(_) | EventPayload::TaskRequest(_) => {
                 self.tasks.insert(event_id.to_string(), payload.clone());
             }
             EventPayload::BlockedBy(b) => {

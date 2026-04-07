@@ -5,6 +5,7 @@ use super::task::{
     BlockedByPayload, CoordinatorAssignmentPayload, TaskPayload,
     TaskRequestPayload, AssignmentCompletePayload, PlanPayload,
 };
+use super::llm::{LlmPromptPayload, LlmToolCallPayload, LlmResponsePayload};
 
 /// Enum describing all understood schema payloads in the event log.
 /// `serde(tag = "$type")` injects `{ "$type": "identity", "did": ... }` automatically.
@@ -25,4 +26,10 @@ pub enum EventPayload {
     AssignmentComplete(AssignmentCompletePayload),
     #[serde(rename = "blocked_by")]
     BlockedBy(BlockedByPayload),
+    #[serde(rename = "llm_prompt")]
+    LlmPrompt(LlmPromptPayload),
+    #[serde(rename = "llm_tool_call")]
+    LlmToolCall(LlmToolCallPayload),
+    #[serde(rename = "llm_response")]
+    LlmResponse(LlmResponsePayload),
 }

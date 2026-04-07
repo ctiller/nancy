@@ -1,6 +1,7 @@
 pub mod index;
 pub mod reader;
 pub mod writer;
+pub mod logger;
 
 use serde::{Deserialize, Serialize};
 

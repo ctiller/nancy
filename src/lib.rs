@@ -2,6 +2,7 @@ pub mod commands;
 pub mod events;
 pub mod schema;
 pub mod tasks;
+pub mod eval;
 pub mod coordinator;
 pub mod grind;
 pub mod llm;

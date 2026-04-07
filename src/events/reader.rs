@@ -15,7 +15,8 @@ impl<'a> Reader<'a> {
     }
 
     pub fn iter_events(&self) -> Result<impl Iterator<Item = Result<EventEnvelope>>> {
-        let branch_name = format!("refs/heads/nancy/{}", self.did);
+        let safe_did = self.did.replace(":", "_");
+        let branch_name = format!("refs/heads/nancy/{}", safe_did);
         let branch_ref = self.repo.find_reference(&branch_name)?;
         let commit = branch_ref.peel_to_commit()?;
         let tree = commit.tree()?;
@@ -53,7 +54,8 @@ impl<'a> Reader<'a> {
     }
 
     pub fn sync_index(&self, index: &crate::events::index::LocalIndex) -> Result<()> {
-        let branch_name = format!("refs/heads/nancy/{}", self.did);
+        let safe_did = self.did.replace(":", "_");
+        let branch_name = format!("refs/heads/nancy/{}", safe_did);
         let branch_ref = self.repo.find_reference(&branch_name)?;
         let commit = branch_ref.peel_to_commit()?;
         let tree = commit.tree()?;
