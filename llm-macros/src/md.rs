@@ -3,18 +3,21 @@ use quote::{format_ident, quote};
 use std::fs;
 use std::path::PathBuf;
 use syn::{
-    Field, Ident, ItemStruct, LitStr, Pat, Token, Type,
+    Ident, ItemStruct, LitStr, Token, Type,
     parse::{Parse, ParseStream},
     parse_macro_input,
-    spanned::Spanned,
 };
 
 pub fn md_defined(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let mut ast = parse_macro_input!(item as ItemStruct);
 
+    let struct_ident = &ast.ident;
+    let mut default_fields = Vec::new();
+
     // Transform fields of type `string` or `String` into `&'static str`
     // And remove any `#[body]` attribute
     for field in &mut ast.fields {
+        let field_ident = field.ident.clone().unwrap();
         let mut attrs = Vec::new();
         for attr in field.attrs.drain(..) {
             if !attr.path().is_ident("body") {
@@ -25,45 +28,36 @@ pub fn md_defined(_attr: TokenStream, item: TokenStream) -> TokenStream {
 
         // Convert string types to &'static str
         let mut is_string = false;
-        if let Type::Path(type_path) = &field.ty {
-            if let Some(segment) = type_path.path.segments.last() {
-                if segment.ident == "String" || segment.ident == "string" {
-                    is_string = true;
-                }
-            }
-        }
-
-        if is_string {
-            let str_ty: Type = syn::parse_quote!(&'static str);
-            field.ty = str_ty;
-        }
-    }
-
-    let struct_ident = &ast.ident;
-    
-    let mut default_fields = Vec::new();
-    for field in &ast.fields {
-        let field_ident = &field.ident;
-        let mut is_string = false;
         let mut is_option = false;
-
         if let Type::Path(type_path) = &field.ty {
             if let Some(segment) = type_path.path.segments.last() {
                 if segment.ident == "String" || segment.ident == "string" {
                     is_string = true;
                 } else if segment.ident == "Option" {
                     is_option = true;
+                } else if segment.ident == "PersonaCategory" {
+                    default_fields.push(quote! { #field_ident: PersonaCategory::Technical });
                 }
             }
         }
-        
+
         if is_string {
             default_fields.push(quote! { #field_ident: "" });
+            let str_ty: Type = syn::parse_quote!(&'static str);
+            field.ty = str_ty;
         } else if is_option {
             default_fields.push(quote! { #field_ident: None });
         } else {
-            // fallback (maybe won't compile in const, but required to emit something)
-            default_fields.push(quote! { #field_ident: Default::default() });
+            // If it's PersonaCategory, it already pushed above. We check so we don't push twice!
+            let mut is_cat = false;
+            if let Type::Path(type_path) = &field.ty {
+                if let Some(segment) = type_path.path.segments.last() {
+                    if segment.ident == "PersonaCategory" { is_cat = true; }
+                }
+            }
+            if !is_cat {
+                default_fields.push(quote! { #field_ident: Default::default() });
+            }
         }
     }
 
@@ -171,7 +165,12 @@ pub fn include_md(input: TokenStream) -> TokenStream {
                     let key_ident = format_ident!("{}", k);
                     match value {
                         serde_yaml::Value::String(s) => {
-                            fields.push(quote! { #key_ident: #s });
+                            if k == "category" {
+                                let variant_ident = format_ident!("{}", s);
+                                fields.push(quote! { #key_ident: PersonaCategory::#variant_ident });
+                            } else {
+                                fields.push(quote! { #key_ident: #s });
+                            }
                         }
                         serde_yaml::Value::Number(n) => {
                             if let Some(f) = n.as_f64() {

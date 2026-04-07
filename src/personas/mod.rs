@@ -11,9 +11,18 @@ use llm_macros::{include_md, md_defined};
 pub struct Persona {
     pub name: string,
     pub description: string,
+    pub category: PersonaCategory,
     pub temperature: Option<f32>,
     #[body]
     pub persona: string,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum PersonaCategory {
+    #[default]
+    Technical,
+    Paradigm,
+    Orchestration,
 }
 
 /// Lazily returns the complete array of all internally compiled LLM review personas.
@@ -40,4 +49,31 @@ pub fn get_all_personas() -> Vec<Persona> {
         include_md!(Persona, "src/personas/testing_expert.md", persona),
         include_md!(Persona, "src/personas/ux_expert.md", persona),
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_get_all_personas() {
+        let personas = get_all_personas();
+        assert!(!personas.is_empty(), "Personas list should not be empty");
+        assert_eq!(personas.len(), 17, "There should be exactly 17 defined personas");
+        
+        // Verify Ideas Man loaded optional temperature correctly
+        let ideas_man = personas.iter().find(|p| p.name == "Ideas Man").expect("Ideas Man persona missing");
+        assert_eq!(ideas_man.category, PersonaCategory::Paradigm);
+        assert_eq!(ideas_man.temperature, Some(0.9));
+
+        // Verify Team Player category parses successfully
+        let team_player = personas.iter().find(|p| p.name == "The Team Player").expect("Team Player persona missing");
+        assert_eq!(team_player.category, PersonaCategory::Orchestration);
+        assert_eq!(team_player.temperature, Some(0.7));
+
+        // Let's verify a default persona with no temperature fallback correctly loaded
+        let pedant = personas.iter().find(|p| p.name == "The Pedant").expect("Pedant persona missing");
+        assert_eq!(pedant.category, PersonaCategory::Paradigm);
+        assert_eq!(pedant.temperature, None);
+    }
 }
