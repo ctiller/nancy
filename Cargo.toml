@@ -38,3 +38,4 @@ uuid = { version = "1.23.0", features = ["v4"] }
 
 [dev-dependencies]
 reqwest = "0.13.2"
+proptest = "1.4.0"

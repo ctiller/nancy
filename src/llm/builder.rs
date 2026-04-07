@@ -137,14 +137,16 @@ impl<T: DeserializeOwned + JsonSchema + 'static> LlmBuilder<T> {
         let session = gemini_client_api::gemini::types::sessions::Session::new(10000);
 
         let tx = match self.trace_tx {
-            Some(t) => t,
+            Some(t) => Some(t),
             None => {
-                if cfg!(test) && crate::events::logger::global_tx().is_none() {
+                if std::env::var("NANCY_NO_TRACE_EVENTS").unwrap_or_default() == "1" {
+                    None
+                } else if cfg!(test) && crate::events::logger::global_tx().is_none() {
                     bail!(
                         "Test LLM clients must explicitly provide `.with_writer(&test_writer)` to ensure traced execution safely securely mapped!"
                     );
                 } else {
-                    crate::events::logger::global_tx().context("Global logger is not initialized for production LLM client trace dispatch.")?
+                    Some(crate::events::logger::global_tx().context("Global logger is not initialized for production LLM client trace dispatch.")?)
                 }
             }
         };

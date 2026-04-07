@@ -17,7 +17,11 @@ pub struct Persona {
     pub persona: string,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+use serde::{Serialize, Deserialize};
+use schemars::JsonSchema;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
 pub enum PersonaCategory {
     #[default]
     Technical,

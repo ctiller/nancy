@@ -19,7 +19,7 @@ pub struct LlmClient<T> {
     pub schema: Option<schemars::Schema>,
     pub tools: Vec<Box<dyn crate::llm::tool::LlmTool>>,
     pub subagent: String,
-    pub trace_tx: tokio::sync::mpsc::UnboundedSender<crate::schema::registry::EventPayload>,
+    pub trace_tx: Option<tokio::sync::mpsc::UnboundedSender<crate::schema::registry::EventPayload>>,
     pub session: Session,
     pub gemini: Gemini,
     #[cfg(test)]
@@ -110,9 +110,8 @@ impl<T: DeserializeOwned + JsonSchema + 'static> LlmClient<T> {
                 .unwrap()
                 .as_secs();
 
-            let _ = self
-                .trace_tx
-                .send(crate::schema::registry::EventPayload::LlmToolCall(
+            if let Some(tx) = &self.trace_tx {
+                let _ = tx.send(crate::schema::registry::EventPayload::LlmToolCall(
                     crate::schema::llm::LlmToolCallPayload {
                         subagent: self.subagent.clone(),
                         timestamp,
@@ -121,6 +120,7 @@ impl<T: DeserializeOwned + JsonSchema + 'static> LlmClient<T> {
                         args: args.clone(),
                     },
                 ));
+            }
 
             let response_payload =
                 if let Some(tool) = self.tools.iter().find(|t| t.name() == tool_name) {
@@ -138,9 +138,9 @@ impl<T: DeserializeOwned + JsonSchema + 'static> LlmClient<T> {
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
                 .as_secs();
-            let _ = self
-                .trace_tx
-                .send(crate::schema::registry::EventPayload::LlmToolResponse(
+                
+            if let Some(tx) = &self.trace_tx {
+                let _ = tx.send(crate::schema::registry::EventPayload::LlmToolResponse(
                     crate::schema::llm::LlmToolResponsePayload {
                         subagent: self.subagent.clone(),
                         timestamp: response_timestamp,
@@ -149,6 +149,7 @@ impl<T: DeserializeOwned + JsonSchema + 'static> LlmClient<T> {
                             .unwrap_or_else(|_| "{}".to_string()),
                     },
                 ));
+            }
 
             responses.push((tool_name.to_string(), response_payload));
         }
@@ -160,15 +161,16 @@ impl<T: DeserializeOwned + JsonSchema + 'static> LlmClient<T> {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs();
-        let _ = self
-            .trace_tx
-            .send(crate::schema::registry::EventPayload::LlmPrompt(
+            
+        if let Some(tx) = &self.trace_tx {
+            let _ = tx.send(crate::schema::registry::EventPayload::LlmPrompt(
                 crate::schema::llm::LlmPromptPayload {
                     subagent: self.subagent.clone(),
                     timestamp,
                     prompt: question.to_string(),
                 },
             ));
+        }
         self.session.ask(question.to_string());
         self.run_loop().await
     }
@@ -227,15 +229,16 @@ impl<T: DeserializeOwned + JsonSchema + 'static> LlmClient<T> {
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap()
                     .as_secs();
-                let _ = self
-                    .trace_tx
-                    .send(crate::schema::registry::EventPayload::LlmResponse(
+                    
+                if let Some(tx) = &self.trace_tx {
+                    let _ = tx.send(crate::schema::registry::EventPayload::LlmResponse(
                         crate::schema::llm::LlmResponsePayload {
                             subagent: self.subagent.clone(),
                             timestamp,
                             response: text.clone(),
                         },
                     ));
+                }
                 return parse_response(&text);
             }
         }
@@ -370,7 +373,7 @@ mod tests {
             system_prompt: vec![],
             schema: None,
             subagent: "test".to_string(),
-            trace_tx: tx,
+            trace_tx: Some(tx),
             tools: vec![Box::new(MockTool)],
             session: Session::new(10),
             gemini: Gemini::new("xxx", "xxx", None),
@@ -426,7 +429,7 @@ mod tests {
             system_prompt: vec![],
             schema: None,
             subagent: "test".to_string(),
-            trace_tx: tx,
+            trace_tx: Some(tx),
             tools: vec![],
             session: Session::new(10),
             gemini: Gemini::new("xxx", "xxx", None),
@@ -464,7 +467,7 @@ mod tests {
             system_prompt: vec![],
             schema: None,
             subagent: "test".to_string(),
-            trace_tx: tx,
+            trace_tx: Some(tx),
             tools: vec![],
             session: Session::new(10),
             gemini: Gemini::new("xxx", "xxx", None),
@@ -501,7 +504,7 @@ mod tests {
             system_prompt: vec![],
             schema: None,
             subagent: "test".to_string(),
-            trace_tx: tx,
+            trace_tx: Some(tx),
             tools: vec![],
             session: Session::new(10),
             gemini: Gemini::new("xxx", "xxx", None),
@@ -548,7 +551,7 @@ mod tests {
             system_prompt: vec![],
             schema: None,
             subagent: "test".to_string(),
-            trace_tx: tx,
+            trace_tx: Some(tx),
             tools: vec![Box::new(MockTool)],
             session: Session::new(10),
             gemini: Gemini::new("xxx", "xxx", None),
