@@ -104,17 +104,38 @@ pub fn include_md(input: TokenStream) -> TokenStream {
         }
     }
 
-    // Now extract key-values from front matter
+    // Parse the yaml front matter
     let mut fields = Vec::new();
-    for line in front_matter.lines() {
-        if line.trim().is_empty() {
-            continue;
-        }
-        if let Some((key, value)) = line.split_once(':') {
-            let k = key.trim();
-            let v = value.trim();
-            let key_ident = format_ident!("{}", k);
-            fields.push(quote! { #key_ident: #v });
+    if !front_matter.trim().is_empty() {
+        let yaml_val: serde_yaml::Value = match serde_yaml::from_str(&front_matter) {
+            Ok(v) => v,
+            Err(e) => {
+                let err_msg = format!("Failed to parse YAML front matter: {}", e);
+                return syn::Error::new(filename.span(), err_msg)
+                    .to_compile_error()
+                    .into();
+            }
+        };
+
+        if let serde_yaml::Value::Mapping(map) = yaml_val {
+            for (key, value) in map {
+                if let serde_yaml::Value::String(k) = key {
+                    // Extract value as string
+                    let v = match value {
+                        serde_yaml::Value::String(s) => s,
+                        serde_yaml::Value::Number(n) => n.to_string(),
+                        serde_yaml::Value::Bool(b) => b.to_string(),
+                        _ => {
+                            let err_msg = format!("Unsupported YAML value type for key '{}'", k);
+                            return syn::Error::new(filename.span(), err_msg)
+                                .to_compile_error()
+                                .into();
+                        }
+                    };
+                    let key_ident = format_ident!("{}", k);
+                    fields.push(quote! { #key_ident: #v });
+                }
+            }
         }
     }
 

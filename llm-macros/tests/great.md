@@ -1,5 +1,8 @@
 foo: x
-bar: adfslkjafd
+bar: |
+  adfslkjafd
+  and some more
+  lines of text
 ---
 Some important docuemnt
 

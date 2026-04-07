@@ -16,4 +16,4 @@ We implemented a pair of procedural macros within the `llm-macros` crate to nati
 - Nancy can seamlessly pack and distribute extensive `.md` data arrays statically as one optimized native binary artifact without file I/O runtime penalties.
 - Data struct fields designated `String` or `string` in `md_defined` struct schemas securely mutate to `&'static str` types, cementing efficient compilation restrictions across data definitions locally. 
 - Due to early-expansion constraints in rust AST mapping, calling the procedural parser requires explicitly dictating the matching StructType alongside the filepath (e.g., `include_md!(Great, ...)`).
-- We avoid bulky dependencies like `serde` inside our runtime parsing cycle by maintaining simplistic line-by-line colon mapping natively inside the macro build-script sequence.
+- We utilize `serde` and `serde_yaml` as local build dependencies inside the `llm-macros` procedural parsing pipeline to achieve robust, nested, and multiline frontmatter YAML extraction seamlessly without penalizing the final application's production runtime binary size.
