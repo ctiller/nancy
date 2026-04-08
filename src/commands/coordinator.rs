@@ -557,7 +557,7 @@ mod tests {
             workers: vec![],
         };
         fs::write(nancy_dir.join("identity.json"), serde_json::to_string(&coord_identity)?)?;
-        let mut writer = Writer::new(&repo, coord_identity)?;
+        let writer = Writer::new(&repo, coord_identity)?;
 
         let implement_id = writer.log_event(EventPayload::Task(TaskPayload {
             action: TaskAction::Implement, description: "".to_string(), preconditions: "".to_string(),
@@ -622,7 +622,7 @@ mod tests {
         let commit1_obj = repo.find_commit(commit1)?;
         let commit2 = repo.commit(None, &sig, &sig, "Feature Advance", &tree, &[&commit1_obj])?;
 
-        let mut writer = Writer::new(&repo, coord_identity)?;
+        let writer = Writer::new(&repo, coord_identity)?;
         let implement_id = writer.log_event(EventPayload::Task(TaskPayload {
             action: TaskAction::Implement, description: "".to_string(), preconditions: "".to_string(),
             postconditions: "".to_string(), validation_strategy: "".to_string(),

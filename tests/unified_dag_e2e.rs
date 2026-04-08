@@ -527,6 +527,7 @@ async fn test_review_session_securely_serializes_state_footprints() -> Result<()
         nancy::pre_review::session::ReviewSession::new(temp_dir.path(), &c1.to_string());
     session
         .invoke_reviewers(
+            "test_task_e2e",
             1,
             &vec!["The Pedant".to_string()],
             &c1.to_string(),

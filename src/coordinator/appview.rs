@@ -187,7 +187,7 @@ impl AppView {
 mod tests {
     use super::*;
     use crate::schema::task::{
-        AssignmentCompletePayload, BlockedByPayload, CoordinatorAssignmentPayload, TaskAction,
+        BlockedByPayload, TaskAction,
         TaskPayload, TaskRequestPayload,
     };
 

@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use anyhow::{Result, bail};
+use anyhow::Result;
 use futures_util::future::join_all;
 use git2::{Repository, Oid};
 
@@ -301,7 +301,7 @@ mod tests {
     }
 
     use sealed_test::prelude::*;
-    use std::sync::Arc;
+    
 
     #[tokio::test]
     #[sealed_test(env = [

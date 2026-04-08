@@ -8,7 +8,6 @@ use std::marker::PhantomData;
 use std::time::Duration;
 use tokio::time::sleep;
 
-use gemini_client_api::gemini::types::response::GeminiResponse;
 #[cfg(test)]
 use std::sync::{Arc, Mutex};
 
@@ -339,7 +338,7 @@ mod tests {
     #[tokio::test]
     async fn test_handle_tool_calls() {
         // Construct chat containing function calls natively.
-        let json_fc = serde_json::json!({
+        let _json_fc = serde_json::json!({
             "parts": [
                 {"functionCall": {"name": "test_tool", "args": {}}},
                 {"functionCall": {"name": "test_tool", "args": {"fail": true}}},
