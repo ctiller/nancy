@@ -59,6 +59,7 @@ pub async fn grind<P: AsRef<Path>>(
     let global_writer = crate::events::writer::Writer::new(&repo, id_obj.clone())?;
     crate::events::logger::init_global_writer(global_writer.tracer());
 
+    let mut last_state_id: u64 = 0;
     while !SHUTDOWN.load(Ordering::SeqCst) {
         let mut appview = crate::coordinator::appview::AppView::new();
         let mut tasks_assigned = Vec::new();
@@ -115,15 +116,34 @@ pub async fn grind<P: AsRef<Path>>(
         if !processed {
             let socket_path = workdir.join(".nancy").join("coordinator.sock");
             if socket_path.exists() {
-                // Construct a UDS capable Reqwest client natively!
-                if let Ok(client) = reqwest::Client::builder().unix_socket(socket_path.clone()).build() {
-                    let _ = client.get("http://localhost/ready-for-poll").send().await;
+                if let Ok(client) = reqwest::Client::builder()
+                    .unix_socket(socket_path.clone())
+                    .build() 
+                {
+                    let payload = crate::schema::ipc::ReadyForPollPayload { last_state_id };
+                    let res = client.post("http://localhost/ready-for-poll")
+                        .json(&payload)
+                        .send()
+                        .await;
+                    
+                    if let Ok(resp) = res {
+                        if let Ok(data) = resp.json::<crate::schema::ipc::ReadyForPollResponse>().await {
+                            last_state_id = data.new_state_id;
+                            eprintln!("[Grinder] /ready-for-poll updated bound state: {}", last_state_id);
+                        } else {
+                            eprintln!("[Grinder] /ready-for-poll failed to decode response bounds.");
+                        }
+                    } else {
+                        eprintln!("[Grinder] /ready-for-poll HTTP error natively.");
+                    }
                 } else {
-                    std::thread::sleep(Duration::from_millis(500));
+                    panic!("Failed to build UDS client natively securely");
                 }
             } else {
-                std::thread::sleep(Duration::from_millis(500));
+                panic!("UDS socket does not exist");
             }
+        } else {
+            eprintln!("[Grinder] Processed a task in this loop. Skipping /ready-for-poll explicitly.");
         }
 
         let mut logged_any = false;
@@ -133,6 +153,7 @@ pub async fn grind<P: AsRef<Path>>(
         
         // Push our completed update statuses to the Coordinator directly asynchronously!
         if logged_any {
+            eprintln!("[Grinder] Commits made to local ledger! Dispatching to Coordinator via /updates-ready");
             let socket_path = workdir.join(".nancy").join("coordinator.sock");
             if socket_path.exists() {
                 let payload = crate::schema::ipc::UpdateReadyPayload {
@@ -140,10 +161,12 @@ pub async fn grind<P: AsRef<Path>>(
                     completed_task_ids: tasks_completed.into_iter().collect(),
                 };
                 if let Ok(client) = reqwest::Client::builder().unix_socket(socket_path.clone()).build() {
-                    let _ = client.post("http://localhost/updates-ready")
+                    eprintln!("[Grinder] Sending /updates-ready block payload...");
+                    let res = client.post("http://localhost/updates-ready")
                         .json(&payload)
                         .send()
                         .await;
+                    eprintln!("[Grinder] Unblocked from /updates-ready ping. Response: {:?}", res.map(|r| r.status()));
                 }
             }
         }

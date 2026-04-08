@@ -17,7 +17,7 @@ use tokio::sync::broadcast;
 
 #[derive(Clone)]
 pub struct IpcState {
-    tx_ready: Arc<broadcast::Sender<()>>,
+    tx_ready: Arc<tokio::sync::watch::Sender<u64>>,
     tx_updates: Arc<tokio::sync::mpsc::UnboundedSender<crate::schema::ipc::UpdateReadyPayload>>,
 }
 
@@ -65,8 +65,8 @@ impl Coordinator {
         let mut force_sync_broadcast = false;
 
         // Setup Axum IPC broadcast and updates queue
-        let (tx_ready, _rx_ready) = broadcast::channel::<()>(16);
-        let shared_tx_ready = Arc::new(tx_ready.clone());
+        let (tx_ready, _rx_ready) = tokio::sync::watch::channel::<u64>(0);
+        let shared_tx_ready = Arc::new(tx_ready);
         let (tx_updates, mut rx_updates) = tokio::sync::mpsc::unbounded_channel();
         let shared_tx_updates = Arc::new(tx_updates);
         let ipc_state = IpcState {
@@ -79,7 +79,7 @@ impl Coordinator {
         let _ = std::fs::remove_file(&socket_path);
 
         let app = Router::new()
-            .route("/ready-for-poll", get(ready_for_poll_handler))
+            .route("/ready-for-poll", axum::routing::post(ready_for_poll_handler))
             .route("/shutdown-requested", get(shutdown_requested_handler))
             .route("/updates-ready", axum::routing::post(updates_ready_handler))
             .with_state(ipc_state);
@@ -148,9 +148,9 @@ impl Coordinator {
             if logged_any {
                 writer.commit_batch()?;
                 eprintln!("[Coordinator] Successfully processed and committed Grinder events. Broadcasting tx_ready to unblock...");
-                let _ = shared_tx_ready.send(()); // unblock waiting grinders natively via UDS!
+                shared_tx_ready.send_modify(|val| *val += 1); // increment state boundary safely
             } else if force_sync_broadcast {
-                let _ = shared_tx_ready.send(()); // unblock since we successfully pulled!
+                shared_tx_ready.send_modify(|val| *val += 1); // increment state boundary cleanly
             }
 
             if !logged_any && !force_sync_broadcast {
@@ -172,7 +172,7 @@ impl Coordinator {
         }
 
         // Notify Axum listeners of shutdown securely
-        let _ = shared_tx_ready.send(());
+        shared_tx_ready.send_modify(|val| *val += 1);
         axum_server_task.abort();
 
         println!(
@@ -183,9 +183,22 @@ impl Coordinator {
     }
 }
 
-async fn ready_for_poll_handler(State(state): State<IpcState>) {
+async fn ready_for_poll_handler(
+    State(state): State<IpcState>,
+    axum::Json(payload): axum::Json<crate::schema::ipc::ReadyForPollPayload>,
+) -> axum::Json<crate::schema::ipc::ReadyForPollResponse> {
+    eprintln!("[Coordinator API] Grinder hit /ready-for-poll (last_state: {}). Subscribing...", payload.last_state_id);
     let mut rx = state.tx_ready.subscribe();
-    let _ = rx.recv().await;
+    
+    let current_state = *rx.borrow_and_update();
+    if current_state != payload.last_state_id {
+        return axum::Json(crate::schema::ipc::ReadyForPollResponse { new_state_id: current_state });
+    }
+    
+    let _ = rx.changed().await;
+    let new_state = *rx.borrow();
+    eprintln!("[Coordinator API] /ready-for-poll unblocked natively via local rx.changed! Result: {}", new_state);
+    axum::Json(crate::schema::ipc::ReadyForPollResponse { new_state_id: new_state })
 }
 
 async fn shutdown_requested_handler(State(state): State<IpcState>) {
@@ -194,7 +207,7 @@ async fn shutdown_requested_handler(State(state): State<IpcState>) {
         if SHUTDOWN.load(Ordering::SeqCst) {
             break;
         }
-        if rx.recv().await.is_err() {
+        if rx.changed().await.is_err() {
             break;
         }
     }
@@ -204,11 +217,15 @@ async fn updates_ready_handler(
     State(state): State<IpcState>,
     axum::Json(payload): axum::Json<crate::schema::ipc::UpdateReadyPayload>,
 ) {
+    eprintln!("[Coordinator API] Grinder hit /updates-ready ({} completed). Sending via tx_updates...", payload.completed_task_ids.len());
     let mut rx = state.tx_ready.subscribe();
-    eprintln!("[Coordinator API] Grinder connection hit /updates-ready. Queueing payload and blocking grinder synchronously...");
+    let _initial_val = *rx.borrow_and_update();
     let _ = state.tx_updates.send(payload);
-    let _ = rx.recv().await;
-    eprintln!("[Coordinator API] Grinder connection to /updates-ready explicitly UNBLOCKED. Disconnecting...");
+    let mut res = false;
+    if rx.changed().await.is_ok() {
+        res = true;
+    }
+    eprintln!("[Coordinator API] /updates-ready unblocked natively! Result: {:?}", res);
 }
 
 

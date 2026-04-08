@@ -3,7 +3,7 @@
 Date: 2026-04-08
 
 ## Status
-Accepted
+**DEPRECATED** natively structurally replaced by ADR 0032 and ADR 0033 limits.
 
 ## Context
 The `commands/coordinator.rs` and `commands/grind.rs` polling mechanisms originally relied on simple jittered `thread::sleep(Duration::from_millis(100))` loops to distribute tasks. This approach caused severe synchronization deadlocks during 10+ minute integration testing runs. The polling barriers introduced highly variable test outcomes and significant latency when coordinating complex, multi-node end-to-end DAG execution.
