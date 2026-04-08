@@ -89,8 +89,11 @@ impl Coordinator {
             axum::serve(listener, app).await.ok();
         });
 
+        let mut target_sync_grinder: Option<String> = None;
+
         while !condition(&AppView::new()) && !SHUTDOWN.load(Ordering::SeqCst) {
-            let mut appview = hydrate_coordinator_state(&self.repo, &self.identity);
+            let mut appview = hydrate_coordinator_state(&self.repo, &self.identity, target_sync_grinder.as_deref());
+            target_sync_grinder = None;
 
             // Test loop condition against synced view
             if condition(&appview) {
@@ -127,6 +130,7 @@ impl Coordinator {
                     Some(payload_with_tx) = rx_updates.recv() => {
                         eprintln!("[Coordinator] AWAKENED: Grinder explicitly hit /updates-ready HTTP ping. Accelerating event processor...");
                         force_sync_broadcast = true;
+                        target_sync_grinder = Some(payload_with_tx.0.grinder_did);
                         // Synchronize explicitly with the Grinder!
                         let _ = payload_with_tx.1.send(());
                     } // cleanly awoken explicitly by grinder /updates-ready
@@ -429,7 +433,7 @@ fn handle_task_requests(
     Ok(logged_any)
 }
 
-pub fn hydrate_coordinator_state(repo: &Repository, identity: &Identity) -> AppView {
+pub fn hydrate_coordinator_state(repo: &Repository, identity: &Identity, restricted_grinder_did: Option<&str>) -> AppView {
     let mut appview = AppView::new();
     let did = identity.get_did_owner().did.clone();
 
@@ -446,6 +450,11 @@ pub fn hydrate_coordinator_state(repo: &Repository, identity: &Identity) -> AppV
     // Sync with grinders to receive their AssignmentCompletes
     if let Identity::Coordinator { workers, .. } = identity {
         for worker in workers {
+            if let Some(r_did) = restricted_grinder_did {
+                if worker.did != r_did {
+                    continue;
+                }
+            }
             let local_reader = Reader::new(repo, worker.did.clone());
             if let Ok(iter) = local_reader.iter_events() {
                 for ev_res in iter {
