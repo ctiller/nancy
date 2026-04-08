@@ -6,10 +6,13 @@ pub struct TaskRequestPayload {
     pub description: String,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct PlanPayload {
-    pub request_ref: String,
-    pub branch_name: String,
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum TaskAction {
+    Plan,
+    Implement,
+    ReviewPlan,
+    ReviewImplementation,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -18,21 +21,15 @@ pub struct TaskPayload {
     pub preconditions: String,
     pub postconditions: String,
     pub validation_strategy: String,
+    pub action: TaskAction,
+    pub branch: String,
+    pub review_session_file: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-#[serde(tag = "assignment_type")]
-pub enum CoordinatorAssignmentPayload {
-    #[serde(rename = "plan_task")]
-    PlanTask {
-        task_request_ref: String,
-        assignee_did: String,
-    },
-    #[serde(rename = "perform_task")]
-    PerformTask {
-        task_ref: String,
-        assignee_did: String,
-    },
+pub struct CoordinatorAssignmentPayload {
+    pub task_ref: String,
+    pub assignee_did: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -45,4 +42,10 @@ pub struct AssignmentCompletePayload {
 pub struct BlockedByPayload {
     pub source: String,
     pub target: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ReviewFeedbackPayload {
+    pub task_ref: String,
+    pub feedback_notes: String,
 }

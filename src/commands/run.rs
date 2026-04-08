@@ -242,7 +242,7 @@ pub async fn run<P: AsRef<Path>>(dir: P) -> Result<()> {
                     let writer = crate::events::writer::Writer::new(&repo, root_id).unwrap();
                     writer
                         .log_event(EventPayload::CoordinatorAssignment(
-                            crate::schema::task::CoordinatorAssignmentPayload::PerformTask {
+                            crate::schema::task::CoordinatorAssignmentPayload {
                                 task_ref: task_ref.clone(),
                                 assignee_did: worker.did.clone(),
                             },

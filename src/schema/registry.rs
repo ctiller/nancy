@@ -5,8 +5,8 @@ use super::llm::{
     LlmPromptPayload, LlmResponsePayload, LlmToolCallPayload, LlmToolResponsePayload,
 };
 use super::task::{
-    AssignmentCompletePayload, BlockedByPayload, CoordinatorAssignmentPayload, PlanPayload,
-    TaskPayload, TaskRequestPayload,
+    AssignmentCompletePayload, BlockedByPayload, CoordinatorAssignmentPayload,
+    ReviewFeedbackPayload, TaskPayload, TaskRequestPayload,
 };
 
 /// Enum describing all understood schema payloads in the event log.
@@ -18,8 +18,6 @@ pub enum EventPayload {
     Identity(IdentityPayload),
     #[serde(rename = "task_request")]
     TaskRequest(TaskRequestPayload),
-    #[serde(rename = "plan")]
-    Plan(PlanPayload),
     #[serde(rename = "task")]
     Task(TaskPayload),
     #[serde(rename = "coordinator_assignment")]
@@ -28,6 +26,8 @@ pub enum EventPayload {
     AssignmentComplete(AssignmentCompletePayload),
     #[serde(rename = "blocked_by")]
     BlockedBy(BlockedByPayload),
+    #[serde(rename = "review_feedback")]
+    ReviewFeedback(ReviewFeedbackPayload),
     #[serde(rename = "llm_prompt")]
     LlmPrompt(LlmPromptPayload),
     #[serde(rename = "llm_tool_call")]

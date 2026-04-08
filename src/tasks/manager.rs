@@ -102,12 +102,14 @@ mod tests {
             timestamp: 100,
         }))?;
 
-        // Log a task
         writer.log_event(EventPayload::Task(TaskPayload {
             description: "A test task".to_string(),
             preconditions: "none".to_string(),
             postconditions: "none".to_string(),
             validation_strategy: "none".to_string(),
+            action: crate::schema::task::TaskAction::Implement,
+            branch: "refs/heads/nancy/tasks/test".to_string(),
+            review_session_file: None,
         }))?;
 
         writer.commit_batch()?;

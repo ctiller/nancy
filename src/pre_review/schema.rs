@@ -1,6 +1,6 @@
-use serde::{Deserialize, Serialize};
-use schemars::JsonSchema;
 use crate::personas::PersonaCategory;
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 
 /// The explicit vote options available to a Reviewer.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
@@ -33,16 +33,18 @@ pub struct GhostVeto {
     /// The original disagreement notes and proof provided for the veto.
     pub original_dissent: String,
     /// Categories that have explicitly voted to dismiss this veto so far.
-    pub clearance_ledger: Vec<PersonaCategory>, 
+    pub clearance_ledger: Vec<PersonaCategory>,
 }
 
 impl GhostVeto {
-    /// A Ghost Veto is only cleared when it receives at least one explicit dismissal 
+    /// A Ghost Veto is only cleared when it receives at least one explicit dismissal
     /// vote from each of the three primary domains.
     pub fn is_cleared(&self) -> bool {
         self.clearance_ledger.contains(&PersonaCategory::Technical)
             && self.clearance_ledger.contains(&PersonaCategory::Paradigm)
-            && self.clearance_ledger.contains(&PersonaCategory::Orchestration)
+            && self
+                .clearance_ledger
+                .contains(&PersonaCategory::Orchestration)
     }
 }
 

@@ -32,7 +32,7 @@ impl<'a> Writer<'a> {
         self.trace_tx.clone()
     }
 
-    pub fn log_event(&self, payload: EventPayload) -> Result<()> {
+    pub fn log_event(&self, payload: EventPayload) -> Result<String> {
         let priv_bytes = hex::decode(&self.identity.get_did_owner().private_key_hex)?;
         let keypair = did_key::generate::<Ed25519KeyPair>(Some(&priv_bytes));
 
@@ -59,7 +59,7 @@ impl<'a> Writer<'a> {
         let id_str = hex::encode(hash_bytes);
 
         let envelope = EventEnvelope {
-            id: id_str,
+            id: id_str.clone(),
             did: self.identity.get_did_owner().did.clone(),
             payload,
             signature,
@@ -68,7 +68,32 @@ impl<'a> Writer<'a> {
         let event_line = format!("{}\n", serde_json::to_string(&envelope)?);
         self.pending_events.borrow_mut().push(event_line);
 
-        Ok(())
+        Ok(id_str)
+    }
+
+    pub fn log_event_with_id_override(
+        &self,
+        payload: EventPayload,
+        id_override: String,
+    ) -> Result<String> {
+        let priv_bytes = hex::decode(&self.identity.get_did_owner().private_key_hex)?;
+        let keypair = did_key::generate::<did_key::Ed25519KeyPair>(Some(&priv_bytes));
+
+        let payload_str = serde_json::to_string(&payload)?;
+        let signature_bytes = keypair.sign(payload_str.as_bytes());
+        let signature = hex::encode(signature_bytes);
+
+        let envelope = EventEnvelope {
+            id: id_override.clone(),
+            did: self.identity.get_did_owner().did.clone(),
+            payload,
+            signature,
+        };
+
+        let event_line = format!("{}\n", serde_json::to_string(&envelope)?);
+        self.pending_events.borrow_mut().push(event_line);
+
+        Ok(id_override)
     }
 
     pub fn commit_batch(&self) -> Result<()> {

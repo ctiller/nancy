@@ -17,8 +17,8 @@ pub struct Persona {
     pub persona: string,
 }
 
-use serde::{Serialize, Deserialize};
 use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -63,20 +63,33 @@ mod tests {
     fn test_get_all_personas() {
         let personas = get_all_personas();
         assert!(!personas.is_empty(), "Personas list should not be empty");
-        assert_eq!(personas.len(), 17, "There should be exactly 17 defined personas");
-        
+        assert_eq!(
+            personas.len(),
+            17,
+            "There should be exactly 17 defined personas"
+        );
+
         // Verify Ideas Man loaded optional temperature correctly
-        let ideas_man = personas.iter().find(|p| p.name == "Ideas Man").expect("Ideas Man persona missing");
+        let ideas_man = personas
+            .iter()
+            .find(|p| p.name == "Ideas Man")
+            .expect("Ideas Man persona missing");
         assert_eq!(ideas_man.category, PersonaCategory::Paradigm);
         assert_eq!(ideas_man.temperature, Some(0.9));
 
         // Verify Team Player category parses successfully
-        let team_player = personas.iter().find(|p| p.name == "The Team Player").expect("Team Player persona missing");
+        let team_player = personas
+            .iter()
+            .find(|p| p.name == "The Team Player")
+            .expect("Team Player persona missing");
         assert_eq!(team_player.category, PersonaCategory::Orchestration);
         assert_eq!(team_player.temperature, Some(0.7));
 
         // Let's verify a default persona with no temperature fallback correctly loaded
-        let pedant = personas.iter().find(|p| p.name == "The Pedant").expect("Pedant persona missing");
+        let pedant = personas
+            .iter()
+            .find(|p| p.name == "The Pedant")
+            .expect("Pedant persona missing");
         assert_eq!(pedant.category, PersonaCategory::Paradigm);
         assert_eq!(pedant.temperature, None);
     }

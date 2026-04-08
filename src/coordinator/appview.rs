@@ -3,8 +3,11 @@ use std::collections::{HashMap, HashSet};
 
 pub struct AppView {
     pub tasks: HashMap<String, EventPayload>,
+    pub requests: HashMap<String, EventPayload>,
+    pub handled_requests: HashSet<String>,
     pub blocked_by: HashMap<String, HashSet<String>>,
     pub task_completions: HashSet<String>,
+    pub completed_reports: HashMap<String, String>,
     pub assignments: HashMap<String, String>, // task_ref -> assignee_did
     pub assignment_targets: HashMap<String, String>, // assignment_ref -> task_ref
 }
@@ -13,8 +16,11 @@ impl AppView {
     pub fn new() -> Self {
         Self {
             tasks: HashMap::new(),
+            requests: HashMap::new(),
+            handled_requests: HashSet::new(),
             blocked_by: HashMap::new(),
             task_completions: HashSet::new(),
+            completed_reports: HashMap::new(),
             assignments: HashMap::new(),
             assignment_targets: HashMap::new(),
         }
@@ -22,10 +28,16 @@ impl AppView {
 
     pub fn apply_event(&mut self, payload: &EventPayload, event_id: &str) {
         match payload {
-            EventPayload::Task(_) | EventPayload::TaskRequest(_) => {
+            EventPayload::Task(_) => {
                 self.tasks.insert(event_id.to_string(), payload.clone());
             }
+            EventPayload::TaskRequest(_) => {
+                self.requests.insert(event_id.to_string(), payload.clone());
+            }
             EventPayload::BlockedBy(b) => {
+                if self.requests.contains_key(&b.target) {
+                    self.handled_requests.insert(b.target.clone());
+                }
                 self.blocked_by
                     .entry(b.source.clone())
                     .or_default()
@@ -35,30 +47,19 @@ impl AppView {
                 if let Some(target_ref) = self.assignment_targets.get(&c.assignment_ref) {
                     self.assignments.remove(target_ref);
                     self.task_completions.insert(target_ref.clone());
+                    self.completed_reports
+                        .insert(target_ref.clone(), c.report.clone());
                 }
             }
             EventPayload::CoordinatorAssignment(a) => {
-                use crate::schema::task::CoordinatorAssignmentPayload;
-                match a {
-                    CoordinatorAssignmentPayload::PlanTask {
-                        task_request_ref,
-                        assignee_did,
-                    } => {
-                        self.assignments
-                            .insert(task_request_ref.clone(), assignee_did.clone());
-                        self.assignment_targets
-                            .insert(event_id.to_string(), task_request_ref.clone());
-                    }
-                    CoordinatorAssignmentPayload::PerformTask {
-                        task_ref,
-                        assignee_did,
-                    } => {
-                        self.assignments
-                            .insert(task_ref.clone(), assignee_did.clone());
-                        self.assignment_targets
-                            .insert(event_id.to_string(), task_ref.clone());
-                    }
-                }
+                let crate::schema::task::CoordinatorAssignmentPayload {
+                    task_ref,
+                    assignee_did,
+                } = a;
+                self.assignments
+                    .insert(task_ref.clone(), assignee_did.clone());
+                self.assignment_targets
+                    .insert(event_id.to_string(), task_ref.clone());
             }
             _ => {}
         }
@@ -147,12 +148,159 @@ impl AppView {
         ready.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         ready.into_iter().map(|(id, _)| id).collect()
     }
+
+    pub fn get_feature_branch(&self, task_id: &str) -> Option<String> {
+        let mut visited = HashSet::new();
+        let mut queue = vec![task_id.to_string()];
+
+        while let Some(current) = queue.pop() {
+            if !visited.insert(current.clone()) {
+                continue;
+            }
+            if let Some(EventPayload::Task(t)) = self.tasks.get(&current) {
+                if matches!(t.action, crate::schema::task::TaskAction::ReviewPlan) {
+                    return Some(format!("refs/heads/nancy/features/{}", current));
+                }
+            }
+            if let Some(blockers) = self.blocked_by.get(&current) {
+                queue.extend(blockers.iter().cloned());
+            }
+        }
+        None
+    }
+
+    pub fn get_implement_task_id(&self, review_task_id: &str) -> Option<String> {
+        if let Some(blockers) = self.blocked_by.get(review_task_id) {
+            for b in blockers {
+                if let Some(EventPayload::Task(t)) = self.tasks.get(b) {
+                    if matches!(t.action, crate::schema::task::TaskAction::Implement) {
+                        return Some(b.clone());
+                    }
+                }
+            }
+        }
+        None
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::schema::task::TaskPayload;
+    use crate::schema::task::{
+        AssignmentCompletePayload, BlockedByPayload, CoordinatorAssignmentPayload, TaskAction,
+        TaskPayload, TaskRequestPayload,
+    };
+
+    #[test]
+    fn test_appview_request_task_separation() {
+        let mut appview = AppView::new();
+
+        appview.apply_event(
+            &EventPayload::TaskRequest(TaskRequestPayload {
+                requestor: "Alice".to_string(),
+                description: "Feature foo".to_string(),
+            }),
+            "req-id",
+        );
+
+        let task_event = EventPayload::Task(TaskPayload {
+            description: "Some action".into(),
+            preconditions: "none".into(),
+            postconditions: "done".into(),
+            validation_strategy: "noop".into(),
+            action: TaskAction::Plan,
+            branch: "refs/heads/nancy/plans/test".into(),
+            review_session_file: None,
+        });
+        appview.apply_event(&task_event, "task-id");
+
+        assert_eq!(appview.requests.len(), 1);
+        assert_eq!(appview.tasks.len(), 1);
+        assert!(appview.requests.contains_key("req-id"));
+        assert!(appview.tasks.contains_key("task-id"));
+    }
+
+    #[test]
+    fn test_appview_feature_branch_traversal() {
+        let mut appview = AppView::new();
+
+        let review_plan = EventPayload::Task(TaskPayload {
+            description: "Review plan".into(),
+            preconditions: "".into(),
+            postconditions: "".into(),
+            validation_strategy: "".into(),
+            action: TaskAction::ReviewPlan,
+            branch: "refs/heads/nancy/tasks/review-id".into(),
+            review_session_file: None,
+        });
+
+        // This task depends on ReviewPlan
+        let child_task = EventPayload::Task(TaskPayload {
+            description: "Implement task".into(),
+            preconditions: "".into(),
+            postconditions: "".into(),
+            validation_strategy: "".into(),
+            action: TaskAction::Implement,
+            branch: "refs/heads/nancy/tasks/impl-id".into(),
+            review_session_file: None,
+        });
+
+        appview.apply_event(&review_plan, "review-id");
+        appview.apply_event(&child_task, "impl-id");
+
+        appview.apply_event(
+            &EventPayload::BlockedBy(BlockedByPayload {
+                source: "impl-id".to_string(),
+                target: "review-id".to_string(),
+            }),
+            "bb1",
+        );
+
+        let feature_branch = appview.get_feature_branch("impl-id");
+        assert_eq!(
+            feature_branch,
+            Some("refs/heads/nancy/features/review-id".to_string())
+        );
+    }
+
+    #[test]
+    fn test_appview_implement_task_lookup() {
+        let mut appview = AppView::new();
+
+        let implement_task = EventPayload::Task(TaskPayload {
+            description: "Worker".into(),
+            preconditions: "".into(),
+            postconditions: "".into(),
+            validation_strategy: "".into(),
+            action: TaskAction::Implement,
+            branch: "refs/heads/nancy/tasks/impl-id".into(),
+            review_session_file: None,
+        });
+
+        let review_impl = EventPayload::Task(TaskPayload {
+            description: "Review worker".into(),
+            preconditions: "".into(),
+            postconditions: "".into(),
+            validation_strategy: "".into(),
+            action: TaskAction::ReviewImplementation,
+            branch: "refs/heads/nancy/tasks/review-impl-id".into(),
+            review_session_file: None,
+        });
+
+        appview.apply_event(&implement_task, "impl-id");
+        appview.apply_event(&review_impl, "review-impl-id");
+
+        appview.apply_event(
+            &EventPayload::BlockedBy(BlockedByPayload {
+                source: "review-impl-id".to_string(),
+                target: "impl-id".to_string(),
+            }),
+            "bb2",
+        );
+
+        let implement_target = appview.get_implement_task_id("review-impl-id");
+        assert_eq!(implement_target, Some("impl-id".to_string()));
+    }
 
     #[test]
     fn test_pagerank_highest_impact() {
@@ -167,6 +315,9 @@ mod tests {
                 preconditions: default_fields().0,
                 postconditions: default_fields().1,
                 validation_strategy: default_fields().2,
+                action: crate::schema::task::TaskAction::Implement,
+                branch: "refs/heads/nancy/tasks/t1".into(),
+                review_session_file: None,
             }),
             "t1",
         );
@@ -176,6 +327,9 @@ mod tests {
                 preconditions: default_fields().0,
                 postconditions: default_fields().1,
                 validation_strategy: default_fields().2,
+                action: crate::schema::task::TaskAction::Implement,
+                branch: "refs/heads/nancy/tasks/t2".into(),
+                review_session_file: None,
             }),
             "t2",
         );
@@ -185,6 +339,9 @@ mod tests {
                 preconditions: default_fields().0,
                 postconditions: default_fields().1,
                 validation_strategy: default_fields().2,
+                action: crate::schema::task::TaskAction::Implement,
+                branch: "refs/heads/nancy/tasks/t3".into(),
+                review_session_file: None,
             }),
             "t3",
         );
@@ -211,7 +368,7 @@ mod tests {
         // Assign T1
         view.apply_event(
             &EventPayload::CoordinatorAssignment(
-                crate::schema::task::CoordinatorAssignmentPayload::PerformTask {
+                crate::schema::task::CoordinatorAssignmentPayload {
                     task_ref: "t1".into(),
                     assignee_did: "worker".into(),
                 },
@@ -228,11 +385,11 @@ mod tests {
             "e3",
         );
 
-        // Assign PlanTask
+        // Assign task
         view.apply_event(
             &EventPayload::CoordinatorAssignment(
-                crate::schema::task::CoordinatorAssignmentPayload::PlanTask {
-                    task_request_ref: "req1".into(),
+                crate::schema::task::CoordinatorAssignmentPayload {
+                    task_ref: "req1".into(),
                     assignee_did: "worker".into(),
                 },
             ),

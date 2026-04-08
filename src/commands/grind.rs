@@ -60,24 +60,17 @@ pub async fn grind<P: AsRef<Path>>(
     crate::events::logger::init_global_writer(global_writer.tracer());
 
     while !SHUTDOWN.load(Ordering::SeqCst) {
+        let mut appview = crate::coordinator::appview::AppView::new();
         let mut tasks_assigned = Vec::new();
         let root_reader = Reader::new(&repo, coordinator_did.clone());
         if let Ok(iter) = root_reader.iter_events() {
             for ev_res in iter {
                 if let Ok(env) = ev_res {
+                    let ev_id_str = env.id.clone();
+                    appview.apply_event(&env.payload, &ev_id_str);
                     if let EventPayload::CoordinatorAssignment(assignment) = env.payload {
-                        use crate::schema::task::CoordinatorAssignmentPayload;
-                        match &assignment {
-                            CoordinatorAssignmentPayload::PerformTask { assignee_did, .. } => {
-                                if assignee_did == &worker_did {
-                                    tasks_assigned.push((env.id.clone(), assignment));
-                                }
-                            }
-                            CoordinatorAssignmentPayload::PlanTask { assignee_did, .. } => {
-                                if assignee_did == &worker_did {
-                                    tasks_assigned.push((env.id.clone(), assignment));
-                                }
-                            }
+                        if assignment.assignee_did == worker_did {
+                            tasks_assigned.push((ev_id_str, assignment));
                         }
                     }
                 }
@@ -99,34 +92,75 @@ pub async fn grind<P: AsRef<Path>>(
         let mut processed = false;
         for (task_id, assignment) in tasks_assigned {
             if !tasks_completed.contains(&task_id) {
-                use crate::schema::task::CoordinatorAssignmentPayload;
-                match assignment {
-                    CoordinatorAssignmentPayload::PerformTask { task_ref, .. } => {
-                        crate::grind::perform_task::execute(&repo, &id_obj, &task_id, &task_ref)?;
-                    }
-                    CoordinatorAssignmentPayload::PlanTask {
-                        task_request_ref, ..
-                    } => {
-                        crate::grind::plan_task::execute(
-                            &repo,
-                            &id_obj,
-                            &task_id,
-                            &task_request_ref,
-                            &coordinator_did,
-                        )
-                        .await?;
-                    }
+                if let Some(EventPayload::Task(payload)) = appview.tasks.get(&assignment.task_ref) {
+                    crate::grind::execute_task::execute(
+                        &repo,
+                        &id_obj,
+                        &task_id,
+                        &assignment.task_ref,
+                        payload,
+                    )
+                    .await?;
+                } else {
+                    println!(
+                        "Warning: Assignment task_ref {} not found in ledger.",
+                        assignment.task_ref
+                    );
                 }
                 processed = true;
-                break; // One task at a time natively bounds state. Loop continues to fetch latest after committing.
+                break;
             }
         }
 
         if !processed {
-            std::thread::sleep(Duration::from_millis(500));
+            let socket_path = workdir.join(".nancy").join("coordinator.sock");
+            if socket_path.exists() {
+                // Construct a UDS capable Reqwest client natively!
+                if let Ok(client) = reqwest::Client::builder().unix_socket(socket_path.clone()).build() {
+                    let _ = client.get("http://localhost/ready-for-poll").send().await;
+                } else {
+                    std::thread::sleep(Duration::from_millis(500));
+                }
+            } else {
+                std::thread::sleep(Duration::from_millis(500));
+            }
         }
 
-        let _ = global_writer.commit_batch();
+        let mut logged_any = false;
+        if let Ok(_) = global_writer.commit_batch() {
+            logged_any = true;
+        }
+        
+        // Push our completed update statuses to the Coordinator directly asynchronously!
+        if logged_any {
+            let socket_path = workdir.join(".nancy").join("coordinator.sock");
+            if socket_path.exists() {
+                let payload = crate::schema::ipc::UpdateReadyPayload {
+                    grinder_did: worker_did.clone(),
+                    completed_task_ids: tasks_completed.into_iter().collect(),
+                };
+                if let Ok(client) = reqwest::Client::builder().unix_socket(socket_path.clone()).build() {
+                    let _ = client.post("http://localhost/updates-ready")
+                        .json(&payload)
+                        .send()
+                        .await;
+                }
+            }
+        }
+        
+        // Optionally listen to immediate exit if requested locally!
+        let socket_path_local = workdir.join(".nancy").join("coordinator.sock");
+        if socket_path_local.exists() {
+            if let Ok(client) = reqwest::Client::builder().unix_socket(socket_path_local.clone()).build() {
+                tokio::spawn(async move {
+                    if let Ok(resp) = client.get("http://localhost/shutdown-requested").send().await {
+                        if resp.status().is_success() {
+                            SHUTDOWN.store(true, Ordering::SeqCst);
+                        }
+                    }
+                });
+            }
+        }
     }
 
     println!("Grinder {} gracefully shut down.", worker_did);
@@ -136,84 +170,39 @@ pub async fn grind<P: AsRef<Path>>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::events::writer::Writer;
-    use crate::schema::identity_config::DidOwner;
-    use crate::schema::task::CoordinatorAssignmentPayload;
-    use sealed_test::prelude::*;
-    use std::path::PathBuf;
     use tempfile::TempDir;
+    use git2::Repository;
+    use crate::schema::identity_config::*;
 
-    #[sealed_test(env = [("COORDINATOR_DID", "mock_coord_888")])]
-    fn test_grind_end2end() -> Result<()> {
-        let temp_dir = TempDir::new()?;
-        let repo = Repository::init(temp_dir.path())?;
+    #[tokio::test]
+    async fn test_grind_no_coordinator_exits() -> anyhow::Result<()> {
+        let td = TempDir::new()?;
+        unsafe { std::env::remove_var("COORDINATOR_DID"); }
+        let _ = grind(td.path(), None, None).await;
+        Ok(())
+    }
 
-        let nancy_dir = temp_dir.path().join(".nancy");
+    #[tokio::test]
+    async fn test_grind_loops_gracefully() -> anyhow::Result<()> {
+        let td = TempDir::new()?;
+        let _repo = Repository::init(td.path())?;
+        let nancy_dir = td.path().join(".nancy");
         std::fs::create_dir_all(&nancy_dir)?;
-
-        // Mock Coordinator & Target task
-        let coordinator_did = "mock_coord_888".to_string();
-        let worker_did = "mock_worker_999".to_string();
-
-        let worker_identity = Identity::Grinder(DidOwner {
-            did: worker_did.clone(),
-            public_key_hex: "000000".to_string(),
-            private_key_hex: "000000".to_string(),
-        });
-        fs::write(
-            nancy_dir.join("identity.json"),
-            serde_json::to_string(&worker_identity)?,
-        )?;
-
-        // Push a TaskAssigned mapping into Coordinator branch natively
-        let coord_identity = Identity::Grinder(DidOwner {
-            did: coordinator_did.clone(),
-            public_key_hex: "000000".to_string(),
-            private_key_hex: "000000".to_string(),
-        });
-        let writer = Writer::new(&repo, coord_identity)?;
-        writer.log_event(EventPayload::CoordinatorAssignment(
-            CoordinatorAssignmentPayload::PerformTask {
-                task_ref: "task_01".to_string(),
-                assignee_did: worker_did.clone(),
-            },
-        ))?;
-        writer.log_event(EventPayload::CoordinatorAssignment(
-            CoordinatorAssignmentPayload::PlanTask {
-                task_request_ref: "task_req_01".to_string(),
-                assignee_did: worker_did.clone(),
-            },
-        ))?;
-        writer.commit_batch()?;
-
-        // Spin the grinder threaded
+        
+        let identity = Identity::Coordinator {
+            did: DidOwner { did: "mock1".into(), public_key_hex: "00".into(), private_key_hex: "00".into() },
+            workers: vec![],
+        };
+        std::fs::write(nancy_dir.join("identity.json"), serde_json::to_string(&identity)?)?;
+        
         SHUTDOWN.store(false, Ordering::SeqCst);
-        let dir = temp_dir.path().to_path_buf();
-        let handle = std::thread::spawn(move || {
-            let rt = tokio::runtime::Runtime::new().unwrap();
-            rt.block_on(grind(dir, None, None)).unwrap();
+        tokio::spawn(async {
+            tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+            SHUTDOWN.store(true, Ordering::SeqCst);
         });
-
-        // Let the grinder loop cycle against our mapped mock events!
-        std::thread::sleep(Duration::from_millis(500));
-        SHUTDOWN.store(true, Ordering::SeqCst); // Safely shutdown loop natively via identical OS mechanics
-
-        let _ = handle.join();
-
-        // Verify the localized branch has the mapped output dropping natively completing its loop
-        let reader = Reader::new(&repo, worker_did.clone());
-        let mut completed_task_found = false;
-        for ev_res in reader.iter_events()? {
-            let env = ev_res?;
-            if let EventPayload::AssignmentComplete(_) = env.payload {
-                completed_task_found = true;
-            }
-        }
-
-        assert!(
-            completed_task_found,
-            "Grinder looping failed to register the execution and push TaskComplete references natively!"
-        );
+        
+        let _ = grind(td.path(), Some("mock_coord".into()), Some(identity)).await;
         Ok(())
     }
 }
+

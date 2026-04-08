@@ -42,3 +42,23 @@ pub async fn eval_plan(path: &str, output_path: &std::path::Path) -> Result<()> 
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    #[test]
+    fn test_eval_plan_rejects_non_plan() {
+        let td = TempDir::new().unwrap();
+        let plan_file = td.path().join("def.yaml");
+        let yaml = "action: implement\ntask_description: foo\ncommits: []";
+        std::fs::write(&plan_file, yaml).unwrap();
+        
+        let res = tokio::runtime::Runtime::new().unwrap().block_on(eval_plan(
+            plan_file.to_str().unwrap(),
+            &td.path().join("out.yaml"),
+        ));
+        assert!(res.is_err());
+    }
+}
