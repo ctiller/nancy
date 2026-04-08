@@ -86,15 +86,15 @@ pub async fn run<P: AsRef<Path>>(dir: P) -> Result<()> {
         Identity::Grinder(_) => bail!("'nancy run' must be executed using a Coordinator identity."),
     };
 
-    println!("Initializing AppView state...");
+    tracing::info!("Initializing AppView state...");
     let local_index = LocalIndex::new(&nancy_dir)?;
 
     // Sync local index using the root branch
     let reader = Reader::new(&repo, root_did.clone());
     if let Err(e) = reader.sync_index(&local_index) {
-        eprintln!(
-            "Warning: could not sync index for root DID {}: {}",
-            root_did, e
+        tracing::warn!(
+            "AppView skipped events organically due to parsing mismatches: {}",
+            e
         );
     }
 
@@ -109,10 +109,10 @@ pub async fn run<P: AsRef<Path>>(dir: P) -> Result<()> {
     }
 
     let ready_tasks = app_view.get_highest_impact_ready_tasks();
-    println!("Found {} ready tasks via PageRank.", ready_tasks.len());
+    tracing::info!("Found {} ready tasks via PageRank.", ready_tasks.len());
 
     if ready_tasks.is_empty() || workers.is_empty() {
-        println!("No ready jobs or workers available. Exiting runloop.");
+        tracing::info!("No ready jobs or workers available. Exiting runloop.");
         return Ok(());
     }
 
@@ -122,7 +122,7 @@ pub async fn run<P: AsRef<Path>>(dir: P) -> Result<()> {
     let docker = Docker::connect_with_local_defaults().expect("Failed to connect to local Docker");
 
     let rt_image = "ubuntu:latest";
-    println!("Ensuring base image {} is present...", rt_image);
+    tracing::info!("Ensuring base image {} is present...", rt_image);
     let mut pull_stream = docker.create_image(
         Some(CreateImageOptions {
             from_image: Some(rt_image.to_string()),
@@ -133,7 +133,7 @@ pub async fn run<P: AsRef<Path>>(dir: P) -> Result<()> {
     );
     while let Some(res) = pull_stream.next().await {
         if let Err(e) = res {
-            eprintln!("Docker image pull partial error: {}", e);
+            tracing::warn!("Docker image pull partial error: {}", e);
         }
     }
 
@@ -162,8 +162,8 @@ pub async fn run<P: AsRef<Path>>(dir: P) -> Result<()> {
     }
 
     for (task_ref, worker) in assignments {
-        println!(
-            "Provisioning container for Task {} with Worker {}",
+        tracing::info!(
+            "Deploying job {} to worker {}",
             task_ref, worker.did
         );
 
@@ -193,7 +193,7 @@ pub async fn run<P: AsRef<Path>>(dir: P) -> Result<()> {
                 .unwrap();
 
             if !status.success() {
-                eprintln!("Failed applying git worktree command: {}", shell_cmd);
+                tracing::error!("Failed applying git worktree command: {}", shell_cmd);
                 continue;
             }
         }
@@ -257,10 +257,7 @@ pub async fn run<P: AsRef<Path>>(dir: P) -> Result<()> {
                                 )
                                 .await
                             {
-                                eprintln!(
-                                    "Failed uploading specific binary execution payloads via tar: {}",
-                                    e
-                                );
+                                tracing::error!("Execution Stream Error locally: {}", e);
                             }
                         }
                     }
@@ -270,11 +267,11 @@ pub async fn run<P: AsRef<Path>>(dir: P) -> Result<()> {
                     .start_container(&response.id, None::<StartContainerOptions>)
                     .await
                 {
-                    eprintln!("Failed to start container {}: {}", response.id, e);
+                    tracing::error!("Failed to start container {}: {}", response.id, e);
                 } else {
-                    println!(
-                        "Container {} explicitly initiated successfully.",
-                        response.id
+                    tracing::info!(
+                        "Container worker {} for {} launched.",
+                        response.id, task_ref
                     );
 
                     let root_id_obj = fs::read_to_string(&identity_file).unwrap();
@@ -292,7 +289,7 @@ pub async fn run<P: AsRef<Path>>(dir: P) -> Result<()> {
                 }
             }
             Err(e) => {
-                eprintln!("Failed to build container node structure: {}", e);
+                tracing::error!("Failed to build container node structure: {}", e);
             }
         }
     }
@@ -397,12 +394,12 @@ mod tests {
         // Note: Running true Docker operations demands root DAEMON connectivity which our CI might not have locally,
         // We assert if `bollard` connects and throws NO internal parser errors!
         match result {
-            Ok(_) => println!("Successfully deployed bollard bindings locally."),
+            Ok(_) => tracing::info!("Successfully deployed bollard bindings locally."),
             Err(e) => {
                 if format!("{}", e).contains("connect")
                     || format!("{}", e).contains("No such file or directory")
                 {
-                    println!("Bypassing Daemon timeout: {}", e);
+                    tracing::info!("Bypassing Daemon timeout: {}", e);
 
                     // Mock the Docker server natively to run coverage cleanly iteratively!
                     let app = axum::Router::new()

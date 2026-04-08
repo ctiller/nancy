@@ -233,7 +233,7 @@ impl<'a> Drop for Writer<'a> {
     fn drop(&mut self) {
         if !self.pending_events.borrow().is_empty() {
             if let Err(e) = self.commit_batch() {
-                eprintln!("nancy: Failed to auto-commit batch writer: {}", e);
+                tracing::error!("nancy: Failed to auto-commit batch writer: {}", e);
             }
         }
     }

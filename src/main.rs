@@ -79,6 +79,16 @@ pub async fn execute_command(args: &Args, cwd: PathBuf) -> Result<()> {
 #[tokio::main]
 async fn main() -> Result<()> {
     dotenvy::dotenv().ok();
+    
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::builder()
+                .with_default_directive(tracing::Level::INFO.into())
+                .from_env_lossy(),
+        )
+        .with_timer(tracing_subscriber::fmt::time::LocalTime::rfc_3339())
+        .init();
+
     let args = Args::parse();
     execute_command(&args, std::env::current_dir()?).await
 }

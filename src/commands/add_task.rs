@@ -48,7 +48,7 @@ pub async fn add_task<P: AsRef<Path>>(
     let writer = Writer::new(&repo, id_obj)?;
     writer.log_event(payload)?;
 
-    println!("Task added successfully!");
+    tracing::info!("Task added successfully!");
 
     Ok(())
 }

@@ -80,7 +80,7 @@ impl ReviewSession {
             return panel.into_iter().collect();
         }
 
-        println!("Coordinator stagnated on an invalid quorum. Backend forcefully establishing K=2 requirements.");
+        tracing::warn!("Coordinator stagnated on an invalid quorum. Backend forcefully establishing K=2 requirements.");
 
         // We need to backfill
         let mut add_missing = |cat: PersonaCategory, current: &mut usize| {
@@ -148,7 +148,7 @@ impl ReviewSession {
 
         if let Ok(repo) = Repository::open(&self.worktree_path) {
             if let Err(e) = self.persist_states(&repo, round, task_ref) {
-                eprintln!("Warning: Failed to persist agent states to the nancy/agents branch: {}", e);
+                tracing::warn!("Failed to persist agent states to the nancy/agents branch: {}", e);
             }
         }
 

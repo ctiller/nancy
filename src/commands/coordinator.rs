@@ -51,7 +51,7 @@ impl Coordinator {
     where
         F: FnMut(&AppView) -> bool,
     {
-        println!(
+        tracing::info!(
             "Coordinator {} polling root ledger...",
             self.identity.get_did_owner().did
         );
@@ -110,7 +110,7 @@ impl Coordinator {
             let mut will_sleep = false;
 
             if logged_any {
-                eprintln!("[Coordinator] Successfully processed and committed Grinder events. Broadcasting tx_ready to unblock...");
+                tracing::debug!("[Coordinator] Successfully processed and committed Grinder events. Broadcasting tx_ready to unblock...");
                 shared_tx_ready.send_modify(|val| *val += 1); // increment state boundary safely
             } else if force_sync_broadcast {
                 shared_tx_ready.send_modify(|val| *val += 1); // increment state boundary cleanly
@@ -127,7 +127,7 @@ impl Coordinator {
                 tokio::select! {
                     _ = sleep(Duration::from_millis(1500)) => {} // safety loop
                     Some(payload_with_tx) = rx_updates.recv() => {
-                        eprintln!("[Coordinator] AWAKENED: Grinder explicitly hit /updates-ready HTTP ping. Accelerating event processor...");
+                        tracing::info!("[Coordinator] AWAKENED: Grinder explicitly hit /updates-ready HTTP ping. Accelerating event processor...");
                         force_sync_broadcast = true;
                         target_sync_grinder = Some(payload_with_tx.0.grinder_did);
                         // Synchronize explicitly with the Grinder!
@@ -141,7 +141,7 @@ impl Coordinator {
         shared_tx_ready.send_modify(|val| *val += 1);
         axum_server_task.abort();
 
-        println!(
+        tracing::info!(
             "Coordinator halted. SHUTDOWN: {}",
             SHUTDOWN.load(Ordering::SeqCst)
         );
@@ -153,7 +153,7 @@ async fn ready_for_poll_handler(
     State(state): State<IpcState>,
     axum::Json(payload): axum::Json<crate::schema::ipc::ReadyForPollPayload>,
 ) -> axum::Json<crate::schema::ipc::ReadyForPollResponse> {
-    eprintln!("[Coordinator API] Grinder hit /ready-for-poll (last_state: {}). Subscribing...", payload.last_state_id);
+    tracing::debug!("[Coordinator API] Grinder hit /ready-for-poll (last_state: {}). Subscribing...", payload.last_state_id);
     let mut rx = state.tx_ready.subscribe();
     
     let current_state = *rx.borrow_and_update();
@@ -163,7 +163,7 @@ async fn ready_for_poll_handler(
     
     let _ = rx.changed().await;
     let new_state = *rx.borrow();
-    eprintln!("[Coordinator API] /ready-for-poll unblocked natively via local rx.changed! Result: {}", new_state);
+    tracing::debug!("[Coordinator API] /ready-for-poll unblocked natively via local rx.changed! Result: {}", new_state);
     axum::Json(crate::schema::ipc::ReadyForPollResponse { new_state_id: new_state })
 }
 
@@ -290,13 +290,13 @@ fn handle_review_approval(
     let task_commit = task_ref.peel_to_commit().unwrap();
 
     if repo.graph_descendant_of(task_commit.id(), feat_commit.id()).unwrap_or(false) {
-        println!("Coordinator fast-forwarding {} to {}", feature_ref_name, task_commit.id());
+        tracing::info!("Coordinator fast-forwarding {} to {}", feature_ref_name, task_commit.id());
         let mut mutable_feat = feat_ref;
         let res = mutable_feat.set_target(task_commit.id(), "Nancy Coordinator: --ff-only acceptance");
-        println!("Set target result is_ok: {}", res.is_ok());
+        tracing::debug!("Set target result is_ok: {}", res.is_ok());
         false
     } else {
-        println!("NOT A DESCENDANT {} {}", task_commit.id(), feat_commit.id());
+        tracing::debug!("NOT A DESCENDANT {} {}", task_commit.id(), feat_commit.id());
         use crate::schema::task::{BlockedByPayload, TaskAction, TaskPayload};
         let conflict_task = EventPayload::Task(TaskPayload {
             description: format!("Resolve merge conflict on {}", implement_id),
@@ -331,10 +331,10 @@ fn handle_review_approval(
 
 pub async fn run<P: AsRef<Path>>(dir: P) -> Result<()> {
     ctrlc::set_handler(move || {
-        println!("Received interrupt signal. Shutting down Coordinator...");
+        tracing::info!("Received interrupt signal. Shutting down Coordinator...");
         SHUTDOWN.store(true, Ordering::SeqCst);
     })
-    .unwrap_or_else(|e| eprintln!("Error setting Ctrl-C handler: {}", e));
+    .unwrap_or_else(|e| tracing::error!("Error setting Ctrl-C handler: {}", e));
 
     let mut coord = Coordinator::new(dir)?;
     coord.run_until(|_| false).await
@@ -501,7 +501,7 @@ pub fn process_app_view_events(
     // Extract unassigned items to map to workers
     if let Identity::Coordinator { workers, .. } = identity {
         if workers.is_empty() {
-            println!("Coordinator has no workers provisioned!");
+            tracing::warn!("Coordinator has no workers provisioned!");
         } else {
             logged_any |= handle_work_assignments(repo, appview, &writer, workers, processed_request_ids).unwrap_or(false);
             logged_any |= handle_task_requests(repo, appview, &writer, processed_request_ids).unwrap_or(false);
@@ -631,7 +631,7 @@ mod tests {
 
     #[sealed_test]
     fn test_coordinator_handles_review_changes_required() -> Result<()> {
-        eprintln!("Starting test_coordinator_handles_review_changes_required");
+        tracing::info!("Starting test_coordinator_handles_review_changes_required");
         let mut _tr = crate::debug::test_repo::TestRepo::new()?;
         let temp_dir = &_tr.td;
         let repo = &_tr.repo;
@@ -688,7 +688,7 @@ mod tests {
 
     #[sealed_test]
     fn test_coordinator_handles_fast_forward_merge_parent_advanced() -> Result<()> {
-        eprintln!("Starting test_coordinator_handles_fast_forward_merge_parent_advanced");
+        tracing::info!("Starting test_coordinator_handles_fast_forward_merge_parent_advanced");
         let mut _tr = crate::debug::test_repo::TestRepo::new()?;
         let temp_dir = &_tr.td;
         let repo = &_tr.repo;

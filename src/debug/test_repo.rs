@@ -22,17 +22,17 @@ impl TestRepo {
 impl Drop for TestRepo {
     fn drop(&mut self) {
         if !self.silenced {
-            eprintln!("--- TestRepo Event Traces on Drop ---");
+            tracing::debug!("--- TestRepo Event Traces on Drop ---");
             for (branch, _) in self.repo.branches(Some(git2::BranchType::Local)).ok().into_iter().flatten().filter_map(|b| b.ok()) {
                 let name = branch.name().unwrap_or(None).unwrap_or("");
                 if name.starts_with("nancy/") && !name.contains("features/") && !name.contains("plans/") && !name.contains("tasks/") {
                     let did = name.replace("nancy/", "");
-                    eprintln!("== Traces for Identity: {} ==", did);
+                    tracing::debug!("== Traces for Identity: {} ==", did);
                     let reader = crate::events::reader::Reader::new(&self.repo, did);
                     for ev_res in reader.iter_events().ok().into_iter().flatten() {
                         if let Ok(ev) = ev_res {
-                            eprintln!("  - Event [{}]", ev.id);
-                            eprintln!("    Payload: {:?}", ev.payload); 
+                            tracing::debug!("  - Event [{}]", ev.id);
+                            tracing::debug!("    Payload: {:?}", ev.payload); 
                         }
                     }
                 }

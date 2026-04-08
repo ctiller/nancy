@@ -136,7 +136,7 @@ pub async fn execute(
     task_ref: &str,
     task_payload: &TaskPayload,
 ) -> Result<()> {
-    println!("Executing {:?} task: {}", task_payload.action, task_ref);
+    tracing::info!("Executing {:?} task: {}", task_payload.action, task_ref);
 
     let workdir = repo.workdir().context("Bare repository missing WorkDir")?;
     let safe_ref = task_ref.replace(":", "_").replace("/", "_");
@@ -156,7 +156,7 @@ pub async fn execute(
     }
 
     if task_payload.action == TaskAction::Plan {
-        println!("Provisioning localized dual-worktree for planning evaluation bounds...");
+        tracing::info!("Provisioning localized dual-worktree for planning evaluation bounds...");
         let plan_exec_path = target_path.join("codebase_checkout");
         std::process::Command::new("git")
             .arg("worktree")
@@ -189,7 +189,7 @@ pub async fn execute(
     ))?;
     writer.commit_batch()?;
 
-    println!("Cleaning up worktrees safely bounded securely natively...");
+    tracing::info!("Cleaning up worktrees safely bounded securely natively...");
 
     if task_payload.action == TaskAction::Plan {
         let plan_exec_path = target_path.join("codebase_checkout");
@@ -210,7 +210,7 @@ pub async fn execute(
         .current_dir(workdir)
         .status()?;
 
-    println!("Completed Task: {}", task_ref);
+    tracing::info!("Completed Task: {}", task_ref);
     Ok(())
 }
 
