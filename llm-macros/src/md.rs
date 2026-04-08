@@ -52,7 +52,9 @@ pub fn md_defined(_attr: TokenStream, item: TokenStream) -> TokenStream {
             let mut is_cat = false;
             if let Type::Path(type_path) = &field.ty {
                 if let Some(segment) = type_path.path.segments.last() {
-                    if segment.ident == "PersonaCategory" { is_cat = true; }
+                    if segment.ident == "PersonaCategory" {
+                        is_cat = true;
+                    }
                 }
             }
             if !is_cat {
@@ -63,7 +65,7 @@ pub fn md_defined(_attr: TokenStream, item: TokenStream) -> TokenStream {
 
     TokenStream::from(quote! {
         #ast
-        
+
         impl #struct_ident {
             #[doc(hidden)]
             pub const __MD_DEFAULT: Self = Self {
@@ -85,13 +87,13 @@ impl Parse for IncludeMdInput {
         let struct_name = input.parse()?;
         let _comma = input.parse()?;
         let filename = input.parse()?;
-        
+
         let body_field = if input.peek(Token![,]) {
             Some((input.parse()?, input.parse()?))
         } else {
             None
         };
-        
+
         Ok(IncludeMdInput {
             struct_name,
             _comma,
