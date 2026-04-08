@@ -132,9 +132,10 @@ pub async fn execute(
         std::process::Command::new("git")
             .arg("worktree")
             .arg("add")
+            .arg("-d") // Detach securely to avoid branching conflicts
             .arg("-f")
             .arg(&plan_exec_path)
-            .arg("refs/heads/main")
+            .arg("HEAD")
             .current_dir(workdir)
             .status()?;
     }

@@ -356,10 +356,10 @@ mod tests {
         let sig = git2::Signature::now("Test", "test@test.com").unwrap();
         repo.commit(Some("HEAD"), &sig, &sig, "Initial empty commit", &tree, &[])
             .unwrap();
-        let _ = std::process::Command::new("git")
-            .args(["branch", "-m", "main"])
-            .current_dir(temp_dir.path())
-            .output();
+            
+        if let Ok(mut r) = repo.find_reference("refs/heads/master") {
+            let _ = r.rename("refs/heads/main", true, "Rename explicitly");
+        }
 
         // Ensure root operations run robustly mapping Docker container states actively
         let rt = tokio::runtime::Runtime::new().unwrap();

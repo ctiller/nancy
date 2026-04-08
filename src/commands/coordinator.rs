@@ -395,6 +395,7 @@ fn ensure_task_branch(repo: &Repository, appview: &AppView, task_id: &String) {
 }
 
 fn handle_task_requests(
+    repo: &Repository,
     appview: &AppView,
     writer: &Writer,
     processed_request_ids: &mut std::collections::HashSet<String>,
@@ -413,6 +414,17 @@ fn handle_task_requests(
 
         use crate::schema::task::{BlockedByPayload, TaskAction, TaskPayload};
         let orphaned_branch = format!("refs/heads/nancy/plans/{}", request_id);
+        
+        if repo.find_reference(&orphaned_branch).is_err() {
+            let sig = git2::Signature::now("Nancy Coordinator", "nancy@localhost").unwrap();
+            if let Ok(mut tb) = repo.treebuilder(None) {
+                if let Ok(tree_id) = tb.write() {
+                    if let Ok(tree_obj) = repo.find_tree(tree_id) {
+                        let _ = repo.commit(Some(&orphaned_branch), &sig, &sig, "Init plan branch", &tree_obj, &[]);
+                    }
+                }
+            }
+        }
         
         let plan_task = EventPayload::Task(TaskPayload {
             description: r.description.clone(),
@@ -493,7 +505,7 @@ pub fn process_app_view_events(
             println!("Coordinator has no workers provisioned!");
         } else {
             logged_any |= handle_work_assignments(repo, appview, &writer, workers, processed_request_ids).unwrap_or(false);
-            logged_any |= handle_task_requests(appview, &writer, processed_request_ids).unwrap_or(false);
+            logged_any |= handle_task_requests(repo, appview, &writer, processed_request_ids).unwrap_or(false);
         }
     }
     
@@ -1094,6 +1106,43 @@ mod tests {
         let _ = shutdown_req.await?;
 
         super::SHUTDOWN.store(false, std::sync::atomic::Ordering::SeqCst);
+        Ok(())
+    }
+
+    #[sealed_test]
+    fn test_handle_task_requests_creates_plan_branch() -> Result<()> {
+        let mut _tr = crate::debug::test_repo::TestRepo::new()?;
+        let temp_dir = &_tr.td;
+        let repo = &_tr.repo;
+        let nancy_dir = temp_dir.path().join(".nancy");
+        std::fs::create_dir_all(&nancy_dir)?;
+
+        let coord_identity = Identity::Coordinator {
+            did: DidOwner { did: "mock1".to_string(), public_key_hex: "00".to_string(), private_key_hex: "00".to_string() },
+            workers: vec![],
+        };
+        fs::write(nancy_dir.join("identity.json"), serde_json::to_string(&coord_identity)?)?;
+        
+        let writer = Writer::new(&repo, coord_identity)?;
+        let mut appview = AppView::new();
+        
+        // Mock a TaskRequest in the ledger AppView structure.
+        let request_id = "mock_request_id_123".to_string();
+        appview.requests.insert(request_id.clone(), EventPayload::TaskRequest(crate::schema::task::TaskRequestPayload {
+            description: "Implement a feature".to_string(),
+        }));
+        
+        // Emulate loop execution parsing events!
+        let mut processed_request_ids = std::collections::HashSet::new();
+        let logged_any = super::handle_task_requests(repo, &appview, &writer, &mut processed_request_ids).unwrap();
+        
+        assert!(logged_any, "Expected to log a task plan dynamically natively.");
+        
+        // Validate native orphaned branch generation!
+        let orphaned_branch = format!("refs/heads/nancy/plans/{}", request_id);
+        let branch_result = repo.find_reference(&orphaned_branch);
+        assert!(branch_result.is_ok(), "The orphaned branch {} MUST be initialized for Grinder worktree bounds natively!", orphaned_branch);
+        
         Ok(())
     }
 }

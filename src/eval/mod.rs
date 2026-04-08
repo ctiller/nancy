@@ -17,8 +17,8 @@ impl EvalDefinition {
         std::env::set_current_dir(repo_path)?;
 
         let repo = git2::Repository::init(repo_path)?;
-        let _empty_tree_id = {
-            let tb = repo.treebuilder(None)?;
+        let empty_tree_id = {
+            let mut tb = repo.treebuilder(None)?;
             tb.write()?
         };
         let sig = git2::Signature::now("Eval Orchestrator", "eval@nancy.com")?;
@@ -48,6 +48,11 @@ impl EvalDefinition {
             let commit_id =
                 repo.commit(Some("HEAD"), &sig, &sig, &commit.message, &tree, &parents)?;
             parent_commit_id = Some(commit_id);
+        }
+
+        if self.commits.is_empty() {
+            let empty_tree = repo.find_tree(empty_tree_id)?;
+            repo.commit(Some("HEAD"), &sig, &sig, "Initial empty commit", &empty_tree, &[])?;
         }
 
         Ok((temp_dir, repo))

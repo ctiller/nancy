@@ -109,12 +109,19 @@ mod tests {
     async fn test_execute_command_dispatch_loops() -> Result<()> {
         let td = tempfile::tempdir()?;
         let td_path = td.path().to_path_buf();
-        
-        let _ = std::process::Command::new("git").args(["init"]).current_dir(&td_path).output();
-        let _ = std::process::Command::new("git").args(["branch", "-m", "main"]).current_dir(&td_path).output();
-        std::fs::write(td_path.join("README.md"), "INIT").unwrap();
-        let _ = std::process::Command::new("git").args(["add", "."]).current_dir(&td_path).output();
-        let _ = std::process::Command::new("git").args(["commit", "-m", "init"]).current_dir(&td_path).output();
+        // Initialize mock repo gracefully securely
+        let repo = git2::Repository::init(&td_path).expect("Failed to init git repository natively");
+        if let Ok(mut index) = repo.index() {
+            let tree_id = index.write_tree().unwrap();
+            let sig = git2::Signature::now("Mock", "mock@localhost").unwrap();
+            let tree = repo.find_tree(tree_id).unwrap();
+            if let Ok(commit) = repo.commit(Some("HEAD"), &sig, &sig, "Init", &tree, &[]) {
+                // Rename master to main natively gracefully
+                if let Ok(mut r) = repo.find_reference("refs/heads/master") {
+                    let _ = r.rename("refs/heads/main", true, "Rename branch explicitly to main");
+                }
+            }
+        }
 
         let grind_dir = td_path.clone();
         
