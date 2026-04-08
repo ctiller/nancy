@@ -439,9 +439,21 @@ async fn test_coordinator_inherits_task_parent_from_feature_branch() -> Result<(
     writer.log_event_with_id_override(task_payload, "work_088".into())?;
     // Bind relationship correctly tracing AppView blocks mapping Feature bounds gracefully
     writer.log_event(EventPayload::BlockedBy(BlockedByPayload {
-        source: "work_088".into(),
-        target: "parent_feat".into(),
+        source: "parent_feat".into(),
+        target: "work_088".into(),
     }))?;
+    
+    // Unblock the execution boundary mock cleanly
+    let pre_review = nancy::schema::task::AssignmentCompletePayload {
+        assignment_ref: "dummy_assign".into(),
+        report: r#"{"vote":"approve","agree_notes":"","disagree_notes":""}"#.into(),
+    };
+    // Mock the assignment natively then completion to clear the block
+    writer.log_event_with_id_override(EventPayload::CoordinatorAssignment(nancy::schema::task::CoordinatorAssignmentPayload {
+        task_ref: "parent_feat".into(), assignee_did: "worker".into()
+    }), "dummy_assign".into())?;
+    writer.log_event(EventPayload::AssignmentComplete(pre_review))?;
+    
     writer.commit_batch()?;
 
     let mut coord = Coordinator::new(temp_dir.path())?;
