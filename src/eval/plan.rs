@@ -60,5 +60,20 @@ mod tests {
             &td.path().join("out.yaml"),
         ));
         assert!(res.is_err());
+        assert!(res.unwrap_err().to_string().contains("Only 'plan' supported"));
+    }
+
+    #[test]
+    fn test_eval_plan_rejects_invalid_yaml() {
+        let td = TempDir::new().unwrap();
+        let plan_file = td.path().join("invalid.yaml");
+        let yaml = "action: plan\ncommits: [{broken_list:"; // Malformed structurally
+        std::fs::write(&plan_file, yaml).unwrap();
+        
+        let res = tokio::runtime::Runtime::new().unwrap().block_on(eval_plan(
+            plan_file.to_str().unwrap(),
+            &td.path().join("out.yaml"),
+        ));
+        assert!(res.is_err()); // Serde handles mapping errors cleanly natively safely!
     }
 }

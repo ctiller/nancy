@@ -243,4 +243,31 @@ mod tests {
         let traces = extract_traces(&repo, &id_obj);
         assert!(traces.is_empty(), "Traces mapping failed to handle 0 worker constraints safely natively");
     }
+
+    #[tokio::test]
+    async fn test_eval_runner_wait_for_completion_limits() -> anyhow::Result<()> {
+        let def = EvalDefinition {
+            commits: vec![],
+            action: "plan".to_string(),
+            task_description: Some("mock wait completion bounds".to_string()),
+        };
+
+        // Create the setup environment mapping successfully naturally
+        let runner = EvalRunner::setup(&def).await?;
+        
+        let condition_met = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let condition_met_clone = condition_met.clone();
+        
+        // Timeout safe validation mapping inherently cleanly
+        let res = tokio::time::timeout(std::time::Duration::from_millis(500), async move {
+            runner.wait_for_completion(move |_| {
+                condition_met_clone.store(true, std::sync::atomic::Ordering::SeqCst);
+                true // Satisfy the wait loop immediately to assert cleanly
+            }).await
+        }).await;
+        
+        assert!(res.is_ok(), "Native wait loop natively failed or deadlocked structurally");
+        assert!(condition_met.load(std::sync::atomic::Ordering::SeqCst));
+        Ok(())
+    }
 }
