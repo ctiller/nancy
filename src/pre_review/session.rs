@@ -275,4 +275,51 @@ mod tests {
         // Gracefully strips invalid mock, evaluates the valid Grace Round (yielding just 1 reviewer inherently)
         assert_eq!(outputs.len(), 1);
     }
+
+    #[tokio::test]
+    #[sealed_test(env = [
+        ("NANCY_MOCK_LLM_RESPONSE", r#"{"candidates": [{"content": {"parts": [{"text": "{\"vote\": \"changes_required\", \"agree_notes\": \"\", \"disagree_notes\": \"Refactor breaks backward compatibility precisely.\"}"}], "role": "model"}, "finishReason": "STOP", "index": 0}], "usageMetadata": {}, "modelVersion": "test"}"#),
+        ("GEMINI_API_KEY", "mock"),
+        ("NANCY_NO_TRACE_EVENTS", "1")
+    ])]
+    async fn test_invoke_reviewers_changes_required_fallback() {
+        let (td, c1, c2) = setup_test_repo().unwrap();
+        let mut session = ReviewSession::new(td.path().to_str().unwrap(), &c1);
+
+        let experts = vec!["The Pedant".to_string()];
+        
+        let res = session.invoke_reviewers(6, &experts, &c2, "Task description", "{}").await;
+        
+        assert!(res.is_ok());
+        let outputs = res.unwrap();
+        assert_eq!(outputs.len(), 1);
+        
+        let out = outputs.into_iter().next().unwrap().expect("Parse failed");
+        assert_eq!(serde_json::to_string(&out.vote).unwrap(), "\"changes_required\"");
+        assert!(out.disagree_notes.contains("backward compatibility"));
+    }
+
+    #[tokio::test]
+    #[sealed_test(env = [
+        ("NANCY_MOCK_LLM_RESPONSE", r#"{"candidates": [{"content": {"parts": [{"text": "{\"vote\": \"veto\", \"agree_notes\": \"\", \"disagree_notes\": \"Insecure architecture actively denied.\"}"}], "role": "model"}, "finishReason": "STOP", "index": 0}], "usageMetadata": {}, "modelVersion": "test"}"#),
+        ("GEMINI_API_KEY", "mock"),
+        ("NANCY_NO_TRACE_EVENTS", "1")
+    ])]
+    async fn test_invoke_reviewers_veto_fallback() {
+        let (td, c1, c2) = setup_test_repo().unwrap();
+        let mut session = ReviewSession::new(td.path().to_str().unwrap(), &c1);
+
+        let experts = vec!["The Pedant".to_string()];
+        
+        // Final Round 7 triggering harsh bounds
+        let res = session.invoke_reviewers(7, &experts, &c2, "Task description", "{}").await;
+        
+        assert!(res.is_ok());
+        let outputs = res.unwrap();
+        assert_eq!(outputs.len(), 1);
+        
+        let out = outputs.into_iter().next().unwrap().expect("Parse failed");
+        assert_eq!(serde_json::to_string(&out.vote).unwrap(), "\"veto\"");
+        assert!(out.disagree_notes.contains("actively denied"));
+    }
 }
