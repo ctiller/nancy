@@ -107,22 +107,9 @@ impl LlmBuilder {
             trace_tx: tx,
             session,
             mock_queue: {
-                if let Ok(mock_json) = std::env::var("NANCY_MOCK_LLM_RESPONSE") {
-                    if let Ok(resps) = serde_json::from_str::<
-                        Vec<gemini_client_api::gemini::types::response::GeminiResponse>,
-                    >(&mock_json)
-                    {
-                        let mut arr = Vec::new();
-                        for r in resps {
-                            arr.push(Ok(r));
-                        }
-                        Some(std::sync::Arc::new(std::sync::Mutex::new(arr)))
-                    } else {
-                        let resp: gemini_client_api::gemini::types::response::GeminiResponse =
-                            serde_json::from_str(&mock_json)
-                                .expect("Invalid NANCY_MOCK_LLM_RESPONSE Array payload");
-                        Some(std::sync::Arc::new(std::sync::Mutex::new(vec![Ok(resp)])))
-                    }
+                let lock = crate::llm::mock::builder::MOCK_LLM_QUEUE.lock().unwrap();
+                if let Some(queue) = lock.as_ref() {
+                    Some(std::sync::Arc::clone(queue))
                 } else {
                     None
                 }
@@ -143,7 +130,7 @@ impl LlmBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sealed_test::prelude::*;
+    
 
     #[test]
     fn test_resolve_model() {

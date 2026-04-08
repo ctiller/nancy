@@ -217,11 +217,14 @@ impl LlmClient {
             let mut retry_count = 0;
             let resp: GeminiResponse = loop {
                 let ask_res = if let Some(queue) = &self.mock_queue {
-                    let mut lock = queue.lock().unwrap();
-                    if lock.is_empty() {
-                        panic!("Mock queue exhausted during test");
-                    }
-                    lock.remove(0)
+                    let mock_resp = {
+                        let mut lock = queue.lock().unwrap();
+                        if lock.is_empty() {
+                            panic!("Mock queue exhausted during test");
+                        }
+                        lock.remove(0)
+                    };
+                    mock_resp
                 } else {
                     Gemini::ask(gemini, &mut self.session).await
                 };

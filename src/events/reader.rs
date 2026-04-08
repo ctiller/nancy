@@ -111,7 +111,7 @@ mod tests {
     use crate::schema::identity_config::{DidOwner, Identity};
     use crate::schema::registry::EventPayload;
     use did_key::{Ed25519KeyPair, Fingerprint, KeyMaterial};
-    use tempfile::TempDir;
+    
 
     #[test]
     fn test_reader_iter_events() -> Result<()> {

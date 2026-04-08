@@ -9,7 +9,6 @@ use git2::Repository;
 use std::fs;
 use std::path::Path;
 use std::process::Command;
-use std::sync::Arc;
 
 use crate::coordinator::appview::AppView;
 use crate::events::index::LocalIndex;
@@ -304,7 +303,7 @@ mod tests {
     use super::*;
     use crate::commands::add_task;
     use crate::commands::init;
-    use tempfile::TempDir;
+    
 
     use sealed_test::prelude::*;
 

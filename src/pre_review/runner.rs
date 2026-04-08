@@ -59,7 +59,7 @@ pub fn coordinator_system_prompt() -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::llm::thinking_llm;
+    
     use crate::personas::get_all_personas;
     use crate::pre_review::schema::ReviewOutput;
 

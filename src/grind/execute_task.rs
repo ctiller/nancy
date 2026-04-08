@@ -13,21 +13,50 @@ struct TeamSelectionPayload {
 }
 
 async fn handle_plan_task(
-    _target_path: &std::path::Path,
+    target_path: &std::path::Path,
     task_payload: &TaskPayload,
     writer: &Writer<'_>,
 ) -> Result<String> {
     let mut client = crate::llm::thinking_llm("planner")
         .with_writer(writer)
+        .tools(crate::tools::agent_tools())
         .system_prompt(crate::grind::prompts::planner_system_prompt())
         .build()?;
 
-    let review_prompt = format!(
-        "Task Description: {}\nPreconditions: {}",
-        task_payload.description, task_payload.preconditions
+    let mut review_prompt = format!(
+        "Task Description: {}\nPreconditions: {}\n\nCRITICAL: You MUST use your filesystem tools to fully write your generated plan cleanly to the physical file explicitly located at: {}/plan.md",
+        task_payload.description, task_payload.preconditions, target_path.display()
     );
-    let out = client.ask::<String>(&review_prompt).await?;
-    Ok(format!("Plan generation outputs length: {}", out.len()))
+    
+    let mut final_out = String::new();
+    let plan_file = target_path.join("plan.md");
+    
+    for _attempt in 0..3 {
+        let out = client.ask::<String>(&review_prompt).await?;
+        final_out.push_str(&out);
+        
+        if plan_file.exists() {
+            // Commit the natively persisted plan to the worktree branch natively
+            std::process::Command::new("git")
+                .arg("add")
+                .arg("plan.md")
+                .current_dir(target_path)
+                .status()?;
+                
+            std::process::Command::new("git")
+                .arg("commit")
+                .arg("-m")
+                .arg("Generated architectural plan natively")
+                .current_dir(target_path)
+                .status()?;
+                
+            return Ok(format!("Plan successfully generated natively. Outputs length: {}", final_out.len()));
+        } else {
+            review_prompt = format!("You generated a response but FAILED to actually create and write to the file {}/plan.md. Please formulate your data into markdown and physically execute your write tool onto that exact path now.", target_path.display());
+        }
+    }
+
+    anyhow::bail!("Planner agent failed to persist plan.md persistently across bounds!")
 }
 
 async fn handle_implement_task(
@@ -189,12 +218,12 @@ pub async fn execute(
 mod tests {
     use super::*;
     use crate::schema::identity_config::DidOwner;
-    use tempfile::TempDir;
+    
 
     #[tokio::test]
     async fn test_execute_failure_bounds() -> anyhow::Result<()> {
         let mut _tr = crate::debug::test_repo::TestRepo::new()?;
-        let td = &_tr.td;
+        let _td = &_tr.td;
         let repo = &_tr.repo;
 
         let identity = Identity::Grinder(DidOwner {
@@ -224,7 +253,6 @@ mod tests {
 
     #[tokio::test]
     #[sealed_test(env = [
-        ("NANCY_MOCK_LLM_RESPONSE", r#"{"candidates": [{"content": {"parts": [{"text": "Completed explicitly safely in logic bound tests"}], "role": "model"}, "finishReason": "STOP", "index": 0}], "usageMetadata": {}, "modelVersion": "test"}"#),
         ("GEMINI_API_KEY", "mock"),
         ("NANCY_NO_TRACE_EVENTS", "1")
     ])]
@@ -237,7 +265,7 @@ mod tests {
         let tree_id = index.write_tree()?;
         let tree = repo.find_tree(tree_id)?;
         let sig = git2::Signature::now("Mock", "mock@mock.com")?;
-        let commit_id = repo.commit(Some("refs/heads/main"), &sig, &sig, "init", &tree, &[])?;
+        let commit_id = repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])?;
         let commit = repo.find_commit(commit_id)?;
         repo.branch("working_branch", &commit, false)?;
 
@@ -263,6 +291,18 @@ mod tests {
             review_session_file: None,
         };
 
+        let worktrees_dir = repo.workdir().unwrap().join("worktrees").join("task_ref_success");
+        let plan_file = worktrees_dir.join("plan.md");
+        crate::llm::mock::builder::MockChatBuilder::new()
+            .respond_tool_call("write_file", serde_json::json!({
+                "target_file": plan_file.to_string_lossy(),
+                "content": "Mock explicit layout physically",
+                "overwrite": true
+            }))
+            .respond("Completed explicitly safely in logic bound tests")
+            .respond(r#"{"experts": ["Pedant"], "vote": "approve", "agree_notes": "", "disagree_notes": "", "overridden_vetoes": [], "consensus": "approve", "new_vetoes": [], "cleared_vetoes": ["v_123"], "recommended_tasks": [], "general_notes": ""}"#)
+            .commit();
+
         let res = execute(
             &repo,
             &identity,
@@ -279,7 +319,6 @@ mod tests {
 
     #[tokio::test]
     #[sealed_test(env = [
-        ("NANCY_MOCK_LLM_RESPONSE", r#"{"candidates": [{"content": {"parts": [{"text": "{\"experts\": [\"Pedant\"], \"vote\": \"approve\", \"agree_notes\": \"\", \"disagree_notes\": \"\", \"overridden_vetoes\": [], \"consensus\": \"approve\", \"new_vetoes\": [], \"cleared_vetoes\": [\"v_123\"], \"recommended_tasks\": [], \"general_notes\": \"\"}"}], "role": "model"}, "finishReason": "STOP", "index": 0}], "usageMetadata": {}, "modelVersion": "test"}"#),
         ("GEMINI_API_KEY", "mock"),
         ("NANCY_NO_TRACE_EVENTS", "1")
     ])]
@@ -300,6 +339,12 @@ mod tests {
 
         let nancy_dir = td.path().join(".nancy");
         std::fs::create_dir_all(&nancy_dir)?;
+
+        crate::llm::mock::builder::MockChatBuilder::new()
+            .respond(r#"{"experts": ["The Pedant"]}"#) // TeamSelection
+            .respond(r#"{"vote": "approve", "agree_notes": "", "disagree_notes": ""}"#) // The Pedant Output
+            .respond(r#"{"experts": ["The Pedant"], "vote": "approve", "agree_notes": "", "disagree_notes": "", "overridden_vetoes": [], "consensus": "approve", "new_vetoes": [], "cleared_vetoes": ["v_123"], "recommended_tasks": [], "general_notes": ""}"#) // Synthesis
+            .commit();
 
         let identity = Identity::Grinder(DidOwner {
             did: "mock1".into(),
@@ -335,9 +380,6 @@ mod tests {
 
     #[tokio::test]
     #[sealed_test(env = [
-        ("NANCY_MOCK_LLM_RESPONSE", r#"{
-            "candidates": [{"content": {"parts": [{"text": "Implemented safely bounded!"}], "role": "model"}, "finishReason": "STOP", "index": 0}], "usageMetadata": {}, "modelVersion": "test"
-        }"#),
         ("GEMINI_API_KEY", "mock"),
         ("NANCY_NO_TRACE_EVENTS", "1")
     ])]
@@ -356,6 +398,10 @@ mod tests {
 
         let nancy_dir = td.path().join(".nancy");
         std::fs::create_dir_all(&nancy_dir)?;
+
+        crate::llm::mock::builder::MockChatBuilder::new()
+            .respond("Implemented safely bounded!")
+            .commit();
 
         let identity = Identity::Grinder(DidOwner {
             did: "mock1".into(),
@@ -385,6 +431,66 @@ mod tests {
         ).await;
         
         assert!(res.is_ok());
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[sealed_test(env = [
+        ("GEMINI_API_KEY", "mock"),
+        ("NANCY_NO_TRACE_EVENTS", "1")
+    ])]
+    async fn test_execute_plan_retries_bounds() -> anyhow::Result<()> {
+        let mut _tr = crate::debug::test_repo::TestRepo::new()?;
+        let td = &_tr.td;
+        let repo = &_tr.repo;
+
+        let mut index = repo.index()?;
+        let tree_id = index.write_tree()?;
+        let tree = repo.find_tree(tree_id)?;
+        let sig = git2::Signature::now("Mock", "mock@mock.com")?;
+        let commit_id = repo.commit(Some("refs/heads/main"), &sig, &sig, "init", &tree, &[])?;
+        let commit = repo.find_commit(commit_id)?;
+        repo.branch("working_branch", &commit, false)?;
+
+        let nancy_dir = td.path().join(".nancy");
+        std::fs::create_dir_all(&nancy_dir)?;
+
+        crate::llm::mock::builder::MockChatBuilder::new()
+            .respond("I tried to plan but forgot my tools!")
+            .respond("Oops I forgot again!")
+            .respond("Still forgot!")
+            .commit();
+
+        let identity = Identity::Grinder(DidOwner {
+            did: "mock1".into(),
+            public_key_hex: "00".into(),
+            private_key_hex: "00".into(),
+        });
+
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        crate::events::logger::init_global_writer(tx);
+
+        let payload = TaskPayload {
+            description: "fake".into(),
+            preconditions: "fake".into(),
+            postconditions: "fake".into(),
+            validation_strategy: "fake".into(),
+            action: TaskAction::Plan,
+            branch: "working_branch".into(),
+            review_session_file: None,
+        };
+
+        let res = execute(
+            &repo,
+            &identity,
+            "assign_retry",
+            "task_ref_retry",
+            &payload,
+        ).await;
+        
+        assert!(res.is_err());
+        assert!(res.unwrap_err().to_string().contains("Planner agent failed to persist plan.md persistently"));
 
         Ok(())
     }

@@ -245,12 +245,12 @@ mod tests {
     use crate::schema::identity::IdentityPayload;
     use crate::schema::identity_config::DidOwner;
     use did_key::{Ed25519KeyPair, Fingerprint, KeyMaterial};
-    use tempfile::TempDir;
+    
 
     #[test]
     fn test_writer_creates_events() -> Result<()> {
         let mut _tr = crate::debug::test_repo::TestRepo::new()?;
-        let temp_dir = &_tr.td;
+        let _temp_dir = &_tr.td;
         let repo = &_tr.repo;
 
         let key = did_key::generate::<Ed25519KeyPair>(None);
@@ -315,7 +315,7 @@ mod tests {
     #[test]
     fn test_writer_appends_to_existing_log() -> Result<()> {
         let mut _tr = crate::debug::test_repo::TestRepo::new()?;
-        let temp_dir = &_tr.td;
+        let _temp_dir = &_tr.td;
         let repo = &_tr.repo;
 
         let key = did_key::generate::<Ed25519KeyPair>(None);
@@ -382,7 +382,7 @@ mod tests {
     #[test]
     fn test_writer_log_rollover_boundaries() -> Result<()> {
         let mut _tr = crate::debug::test_repo::TestRepo::new()?;
-        let temp_dir = &_tr.td;
+        let _temp_dir = &_tr.td;
         let repo = &_tr.repo;
 
         let key = did_key::generate::<Ed25519KeyPair>(None);

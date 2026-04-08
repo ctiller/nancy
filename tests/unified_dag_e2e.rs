@@ -13,10 +13,13 @@ use nancy::schema::task::{BlockedByPayload, TaskAction, TaskRequestPayload};
 
 #[tokio::test]
 #[sealed_test(env = [
-    ("NANCY_MOCK_LLM_RESPONSE", r#"{"candidates": [{"content": {"parts": [{"text": "{\"vote\": \"approve\", \"agree_notes\": \"Good\", \"disagree_notes\": \"\"}"}], "role": "model"}, "finishReason": "STOP", "index": 0}], "usageMetadata": {}, "modelVersion": "test"}"#),
     ("GEMINI_API_KEY", "mock")
 ])]
 async fn test_coordinator_generates_plan_from_task_request() -> Result<()> {
+    nancy::llm::mock::builder::MockChatBuilder::new()
+        .respond(r#"{"vote": "approve", "agree_notes": "Good", "disagree_notes": ""}"#)
+        .commit();
+        
     // -------------------------------------------------------------------------
     // Phase 1: Context & Identities
     // -------------------------------------------------------------------------
@@ -90,11 +93,14 @@ async fn test_coordinator_generates_plan_from_task_request() -> Result<()> {
 
 #[tokio::test]
 #[sealed_test(env = [
-    ("NANCY_MOCK_LLM_RESPONSE", r#"{"candidates": [{"content": {"parts": [{"text": "{\"vote\": \"approve\"}"}], "role": "model"} }], "usageMetadata": {}, "modelVersion": "test"}"#),
     ("GEMINI_API_KEY", "mock")
 ])]
 // Validates that the Coordinator binds isolated planning environments structurally correctly.
 async fn test_coordinator_creates_expected_plan_target_branch() -> Result<()> {
+    nancy::llm::mock::builder::MockChatBuilder::new()
+        .respond(r#"{"vote": "approve"}"#)
+        .commit();
+
     let temp_dir = TempDir::new()?;
     let repo = Repository::init(temp_dir.path())?;
     let nancy_dir = temp_dir.path().join(".nancy");
@@ -159,12 +165,20 @@ async fn test_coordinator_creates_expected_plan_target_branch() -> Result<()> {
 
 #[tokio::test]
 #[sealed_test(env = [
-    ("NANCY_MOCK_LLM_RESPONSE", r#"{"candidates": [{"content": {"parts": [{"text": "{\"vote\": \"approve\"}"}], "role": "model"} }], "usageMetadata": {}, "modelVersion": "test"}"#),
     ("GEMINI_API_KEY", "mock")
 ])]
 // Validates the explicit Dual-Worktree execution bounds natively creating physical branch maps cleanly spanning.
 async fn test_grinder_dual_worktree_provisioning_for_plans() -> Result<()> {
     let temp_dir = TempDir::new()?;
+    let path = temp_dir.path().join("worktrees/req_id_01/plan.md");
+    nancy::llm::mock::builder::MockChatBuilder::new()
+        .respond_tool_call("write_file", serde_json::json!({
+            "target_file": path.to_string_lossy(),
+            "content": "Mock layout physically",
+            "overwrite": true
+        }))
+        .respond(r#"{"vote": "approve"}"#)
+        .commit();
     let repo = Repository::init(temp_dir.path())?;
     let nancy_dir = temp_dir.path().join(".nancy");
     fs::create_dir_all(&nancy_dir)?;
@@ -214,11 +228,14 @@ async fn test_grinder_dual_worktree_provisioning_for_plans() -> Result<()> {
 
 #[tokio::test]
 #[sealed_test(env = [
-    ("NANCY_MOCK_LLM_RESPONSE", r#"{"candidates": [{"content": {"parts": [{"text": "{\"vote\": \"approve\"}"}], "role": "model"} }], "usageMetadata": {}, "modelVersion": "test"}"#),
     ("GEMINI_API_KEY", "mock")
 ])]
 // Validates the Coordinator tracking completed Plans seamlessly shifting to generating Review bounds safely tracking natively.
 async fn test_coordinator_generates_review_plan_task_upon_plan_completion() -> Result<()> {
+    nancy::llm::mock::builder::MockChatBuilder::new()
+        .respond(r#"{"vote": "approve"}"#)
+        .commit();
+
     let temp_dir = TempDir::new()?;
     let repo = Repository::init(temp_dir.path())?;
     let nancy_dir = temp_dir.path().join(".nancy");
@@ -292,11 +309,14 @@ async fn test_coordinator_generates_review_plan_task_upon_plan_completion() -> R
 
 #[tokio::test]
 #[sealed_test(env = [
-    ("NANCY_MOCK_LLM_RESPONSE", r#"{"candidates": [{"content": {"parts": [{"text": "{\"vote\": \"approve\"}"}], "role": "model"} }], "usageMetadata": {}, "modelVersion": "test"}"#),
     ("GEMINI_API_KEY", "mock")
 ])]
 // Validates successful Review Plans tracking cleanly shifting into registering base Feature tracking natively bound over Main!
 async fn test_coordinator_registers_base_feature_branch_upon_review_plan_approval() -> Result<()> {
+    nancy::llm::mock::builder::MockChatBuilder::new()
+        .respond(r#"{"vote": "approve"}"#)
+        .commit();
+
     // Tests feature bounds natively matching equivalent tests over appview tests natively.
     let temp_dir = TempDir::new()?;
     let repo = Repository::init(temp_dir.path())?;
@@ -372,11 +392,14 @@ async fn test_coordinator_registers_base_feature_branch_upon_review_plan_approva
 
 #[tokio::test]
 #[sealed_test(env = [
-    ("NANCY_MOCK_LLM_RESPONSE", r#"{"candidates": [{"content": {"parts": [{"text": "{\"vote\": \"approve\"}"}], "role": "model"} }], "usageMetadata": {}, "modelVersion": "test"}"#),
     ("GEMINI_API_KEY", "mock")
 ])]
 // Validates that execution boundaries executing Work natively trace their Parent Feature branches tracking correctly seamlessly.
 async fn test_coordinator_inherits_task_parent_from_feature_branch() -> Result<()> {
+    nancy::llm::mock::builder::MockChatBuilder::new()
+        .respond(r#"{"vote": "approve"}"#)
+        .commit();
+
     let temp_dir = TempDir::new()?;
     let repo = Repository::init(temp_dir.path())?;
     let nancy_dir = temp_dir.path().join(".nancy");
@@ -472,11 +495,14 @@ async fn test_coordinator_inherits_task_parent_from_feature_branch() -> Result<(
 
 #[tokio::test]
 #[sealed_test(env = [
-    ("NANCY_MOCK_LLM_RESPONSE", r#"{"candidates": [{"content": {"parts": [{"text": "{\"vote\": \"approve\"}"}], "role": "model"} }], "usageMetadata": {}, "modelVersion": "test"}"#),
     ("GEMINI_API_KEY", "mock")
 ])]
 // Validates that dependency injection and resolution blocks downstream target allocations accurately bounding AppView states smoothly.
 async fn test_appview_pagerank_drops_blocked_tasks() -> Result<()> {
+    nancy::llm::mock::builder::MockChatBuilder::new()
+        .respond(r#"{"vote": "approve"}"#)
+        .commit();
+
     let mut appview = AppView::new();
     let task_ev = EventPayload::Task(nancy::schema::task::TaskPayload {
         description: "".into(),
@@ -509,12 +535,15 @@ async fn test_appview_pagerank_drops_blocked_tasks() -> Result<()> {
 
 #[tokio::test]
 #[sealed_test(env = [
-    ("NANCY_MOCK_LLM_RESPONSE", r#"{"candidates": [{"content": {"parts": [{"text": "{\"vote\": \"approve\", \"agree_notes\": \"Good\", \"disagree_notes\": \"\"}"}], "role": "model"}, "finishReason": "STOP", "index": 0}], "usageMetadata": {}, "modelVersion": "test"}"#),
     ("GEMINI_API_KEY", "mock"),
     ("NANCY_NO_TRACE_EVENTS", "1")
 ])]
 // Validates seamless native bindings storing Gemini structural representations natively out of SQLite directly tracking state properly.
 async fn test_review_session_securely_serializes_state_footprints() -> Result<()> {
+    nancy::llm::mock::builder::MockChatBuilder::new()
+        .respond(r#"{"vote": "approve", "agree_notes": "Good", "disagree_notes": ""}"#)
+        .commit();
+
     let temp_dir = TempDir::new()?;
     let repo = Repository::init(temp_dir.path())?;
     let mut index = repo.index()?;
@@ -544,12 +573,15 @@ async fn test_review_session_securely_serializes_state_footprints() -> Result<()
 
 #[tokio::test]
 #[sealed_test(env = [
-    ("NANCY_MOCK_LLM_RESPONSE", r#"{"candidates": [{"content": {"parts": [{"text": "{\"vote\": \"changes_required\", \"agree_notes\": \"\", \"disagree_notes\": \"Bad\"}"}], "role": "model"}, "finishReason": "STOP", "index": 0}], "usageMetadata": {}, "modelVersion": "test"}"#),
     ("GEMINI_API_KEY", "mock"),
     ("NANCY_NO_TRACE_EVENTS", "1")
 ])]
 // Validates state constraints generating mapped Implementation dependencies safely matching Dissent constraints physically overriding bounds correctly gracefully.
 async fn test_coordinator_generates_rework_implementation_upon_dissent() -> Result<()> {
+    nancy::llm::mock::builder::MockChatBuilder::new()
+        .respond(r#"{"vote": "changes_required", "agree_notes": "", "disagree_notes": "Bad"}"#)
+        .commit();
+
     let temp_dir = TempDir::new()?;
     let repo = Repository::init(temp_dir.path())?;
     let nancy_dir = temp_dir.path().join(".nancy");
@@ -659,11 +691,14 @@ async fn test_coordinator_generates_rework_implementation_upon_dissent() -> Resu
 
 #[tokio::test]
 #[sealed_test(env = [
-    ("NANCY_MOCK_LLM_RESPONSE", r#"{"candidates": [{"content": {"parts": [{"text": "{\"vote\": \"approve\", \"agree_notes\": \"Good\", \"disagree_notes\": \"\"}"}], "role": "model"}, "finishReason": "STOP", "index": 0}], "usageMetadata": {}, "modelVersion": "test"}"#),
     ("GEMINI_API_KEY", "mock")
 ])]
 // Validates linear trace limits guaranteeing explicit commit bounds overriding correctly matching natively constraints natively bounds.
 async fn test_coordinator_applies_fast_forward_merge_to_feature_branch() -> Result<()> {
+    nancy::llm::mock::builder::MockChatBuilder::new()
+        .respond(r#"{"vote": "approve", "agree_notes": "Good", "disagree_notes": ""}"#)
+        .commit();
+
     let temp_dir = TempDir::new()?;
     let repo = Repository::init(temp_dir.path())?;
     let nancy_dir = temp_dir.path().join(".nancy");
@@ -790,11 +825,14 @@ async fn test_coordinator_applies_fast_forward_merge_to_feature_branch() -> Resu
 
 #[tokio::test]
 #[sealed_test(env = [
-    ("NANCY_MOCK_LLM_RESPONSE", r#"{"candidates": [{"content": {"parts": [{"text": "{\"vote\": \"approve\"}"}], "role": "model"} }], "usageMetadata": {}, "modelVersion": "test"}"#),
     ("GEMINI_API_KEY", "mock")
 ])]
 // Validates exterminator loop bounds natively dropping execution constraints structurally while mapping equivalency checking identically tracking constraints!
 async fn test_worktree_extermination_and_ledger_consistency() -> Result<()> {
+    nancy::llm::mock::builder::MockChatBuilder::new()
+        .respond(r#"{"vote": "approve"}"#)
+        .commit();
+
     // 14 & 15: We're dynamically asserting Coordinator graph resolution loops bound by Rework constraints mapped seamlessly
     // 16: Physical limits extermination limits:
     let temp_dir = TempDir::new()?;

@@ -115,7 +115,7 @@ mod tests {
             let tree_id = index.write_tree().unwrap();
             let sig = git2::Signature::now("Mock", "mock@localhost").unwrap();
             let tree = repo.find_tree(tree_id).unwrap();
-            if let Ok(commit) = repo.commit(Some("HEAD"), &sig, &sig, "Init", &tree, &[]) {
+            if let Ok(_commit) = repo.commit(Some("HEAD"), &sig, &sig, "Init", &tree, &[]) {
                 // Rename master to main natively gracefully
                 if let Ok(mut r) = repo.find_reference("refs/heads/master") {
                     let _ = r.rename("refs/heads/main", true, "Rename branch explicitly to main");

@@ -264,7 +264,7 @@ mod tests {
     }
 
     fn setup_test_repo() -> Result<(crate::debug::test_repo::TestRepo, String, String)> {
-        let mut tr = crate::debug::test_repo::TestRepo::new()?;
+        let tr = crate::debug::test_repo::TestRepo::new()?;
         let (c1_str, c2_str) = {
             let repo = &tr.repo;
             let mut index = repo.index()?;
@@ -305,12 +305,18 @@ mod tests {
 
     #[tokio::test]
     #[sealed_test(env = [
-        ("NANCY_MOCK_LLM_RESPONSE", r#"{"candidates": [{"content": {"parts": [{"text": "{\"vote\": \"approve\", \"agree_notes\": \"Good\", \"disagree_notes\": \"\"}"}], "role": "model"}, "finishReason": "STOP", "index": 0}], "usageMetadata": {}, "modelVersion": "test"}"#),
         ("GEMINI_API_KEY", "mock")
     ])]
     async fn test_invoke_reviewers_mock() {
         let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
         crate::events::logger::init_global_writer(tx);
+        
+        let mut mock_chat = crate::llm::mock::builder::MockChatBuilder::new();
+        // Quorum targets exactly 6 reviewers iteratively naturally
+        for _ in 0..6 {
+            mock_chat = mock_chat.respond(r#"{"vote": "approve", "agree_notes": "Good", "disagree_notes": ""}"#);
+        }
+        mock_chat.commit();
         
         let (tr, c1, c2) = setup_test_repo().unwrap();
         let mut session = ReviewSession::new(tr.td.path().to_str().unwrap(), &c1);
@@ -337,13 +343,16 @@ mod tests {
 
     #[tokio::test]
     #[sealed_test(env = [
-        ("NANCY_MOCK_LLM_RESPONSE", r#"{"candidates": [{"content": {"parts": [{"text": "{\"vote\": \"approve\", \"agree_notes\": \"Good\", \"disagree_notes\": \"\"}"}], "role": "model"}, "finishReason": "STOP", "index": 0}], "usageMetadata": {}, "modelVersion": "test"}"#),
         ("GEMINI_API_KEY", "mock"),
         ("NANCY_NO_TRACE_EVENTS", "1")
     ])]
     async fn test_invoke_reviewers_invalid_id_ignored() {
         let (tr, c1, c2) = setup_test_repo().unwrap();
         let mut session = ReviewSession::new(tr.td.path().to_str().unwrap(), &c1);
+
+        crate::llm::mock::builder::MockChatBuilder::new()
+            .respond(r#"{"vote": "approve", "agree_notes": "Good", "disagree_notes": ""}"#)
+            .commit();
 
         let experts = vec!["Invalid Name That Drops Off Coverage".to_string(), "The Pedant".to_string()];
         
@@ -357,13 +366,16 @@ mod tests {
 
     #[tokio::test]
     #[sealed_test(env = [
-        ("NANCY_MOCK_LLM_RESPONSE", r#"{"candidates": [{"content": {"parts": [{"text": "{\"vote\": \"changes_required\", \"agree_notes\": \"\", \"disagree_notes\": \"Refactor breaks backward compatibility precisely.\"}"}], "role": "model"}, "finishReason": "STOP", "index": 0}], "usageMetadata": {}, "modelVersion": "test"}"#),
         ("GEMINI_API_KEY", "mock"),
         ("NANCY_NO_TRACE_EVENTS", "1")
     ])]
     async fn test_invoke_reviewers_changes_required_fallback() {
         let (tr, c1, c2) = setup_test_repo().unwrap();
         let mut session = ReviewSession::new(tr.td.path().to_str().unwrap(), &c1);
+
+        crate::llm::mock::builder::MockChatBuilder::new()
+            .respond(r#"{"vote": "changes_required", "agree_notes": "", "disagree_notes": "Refactor breaks backward compatibility precisely."}"#)
+            .commit();
 
         let experts = vec!["The Pedant".to_string()];
         
@@ -380,13 +392,16 @@ mod tests {
 
     #[tokio::test]
     #[sealed_test(env = [
-        ("NANCY_MOCK_LLM_RESPONSE", r#"{"candidates": [{"content": {"parts": [{"text": "{\"vote\": \"veto\", \"agree_notes\": \"\", \"disagree_notes\": \"Insecure architecture actively denied.\"}"}], "role": "model"}, "finishReason": "STOP", "index": 0}], "usageMetadata": {}, "modelVersion": "test"}"#),
         ("GEMINI_API_KEY", "mock"),
         ("NANCY_NO_TRACE_EVENTS", "1")
     ])]
     async fn test_invoke_reviewers_veto_fallback() {
         let (tr, c1, c2) = setup_test_repo().unwrap();
         let mut session = ReviewSession::new(tr.td.path().to_str().unwrap(), &c1);
+
+        crate::llm::mock::builder::MockChatBuilder::new()
+            .respond(r#"{"vote": "veto", "agree_notes": "", "disagree_notes": "Insecure architecture actively denied."}"#)
+            .commit();
 
         let experts = vec!["The Pedant".to_string()];
         

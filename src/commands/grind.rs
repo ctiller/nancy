@@ -1,14 +1,10 @@
 use anyhow::{Context, Result, bail};
 use git2::Repository;
-use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
 
-use crate::events::reader::Reader;
 use crate::schema::identity_config::Identity;
-use crate::schema::registry::EventPayload;
 
 pub static SHUTDOWN: AtomicBool = AtomicBool::new(false);
 
@@ -214,7 +210,7 @@ pub fn identify_assigned_task(
 mod tests {
     use super::*;
     use tempfile::TempDir;
-    use git2::Repository;
+    
     use crate::schema::identity_config::*;
 
     #[tokio::test]

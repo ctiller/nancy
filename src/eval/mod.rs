@@ -18,7 +18,7 @@ impl EvalDefinition {
 
         let repo = git2::Repository::init(repo_path)?;
         let empty_tree_id = {
-            let mut tb = repo.treebuilder(None)?;
+            let tb = repo.treebuilder(None)?;
             tb.write()?
         };
         let sig = git2::Signature::now("Eval Orchestrator", "eval@nancy.com")?;

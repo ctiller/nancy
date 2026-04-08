@@ -13,7 +13,6 @@ use crate::schema::registry::EventPayload;
 use axum::{extract::State, routing::get, Router};
 use std::sync::Arc;
 use tokio::net::UnixListener;
-use tokio::sync::broadcast;
 
 #[derive(Clone)]
 pub struct IpcState {
@@ -57,7 +56,7 @@ impl Coordinator {
             self.identity.get_did_owner().did
         );
 
-        let did = self.identity.get_did_owner().did.clone();
+        let _did = self.identity.get_did_owner().did.clone();
 
         // Setup cross-loop app state
         let mut processed_request_ids = std::collections::HashSet::new();
@@ -92,7 +91,7 @@ impl Coordinator {
         let mut target_sync_grinder: Option<String> = None;
 
         while !condition(&AppView::new()) && !SHUTDOWN.load(Ordering::SeqCst) {
-            let mut appview = hydrate_coordinator_state(&self.repo, &self.identity, target_sync_grinder.as_deref());
+            let appview = hydrate_coordinator_state(&self.repo, &self.identity, target_sync_grinder.as_deref());
             target_sync_grinder = None;
 
             // Test loop condition against synced view
@@ -100,7 +99,7 @@ impl Coordinator {
                 break;
             }
 
-            let mut logged_any = process_app_view_events(
+            let logged_any = process_app_view_events(
                 &self.repo, 
                 &appview, 
                 &self.identity, 
@@ -417,7 +416,7 @@ fn handle_task_requests(
         
         if repo.find_reference(&orphaned_branch).is_err() {
             let sig = git2::Signature::now("Nancy Coordinator", "nancy@localhost").unwrap();
-            if let Ok(mut tb) = repo.treebuilder(None) {
+            if let Ok(tb) = repo.treebuilder(None) {
                 if let Ok(tree_id) = tb.write() {
                     if let Ok(tree_obj) = repo.find_tree(tree_id) {
                         let _ = repo.commit(Some(&orphaned_branch), &sig, &sig, "Init plan branch", &tree_obj, &[]);
@@ -551,7 +550,7 @@ mod tests {
         AssignmentCompletePayload, BlockedByPayload, TaskAction, TaskPayload, TaskRequestPayload,
     };
     use sealed_test::prelude::*;
-    use tempfile::TempDir;
+    
 
     #[sealed_test]
     fn test_coordinator_intercepts_requests() -> Result<()> {
@@ -922,7 +921,7 @@ mod tests {
         appview.apply_event(&req_payload, "req1");
         
         let mut processed = std::collections::HashSet::new();
-        let handled = handle_task_requests(&appview, &writer, &mut processed)?;
+        let handled = handle_task_requests(&repo, &appview, &writer, &mut processed)?;
         assert!(handled, "Task requests should log Plan events");
         writer.commit_batch()?;
 
@@ -1130,6 +1129,7 @@ mod tests {
         let request_id = "mock_request_id_123".to_string();
         appview.requests.insert(request_id.clone(), EventPayload::TaskRequest(crate::schema::task::TaskRequestPayload {
             description: "Implement a feature".to_string(),
+            requestor: "test_user".to_string(),
         }));
         
         // Emulate loop execution parsing events!

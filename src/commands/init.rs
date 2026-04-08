@@ -129,7 +129,7 @@ pub async fn init<P: AsRef<Path>>(dir: P, grinders: usize) -> Result<()> {
 mod tests {
     use super::*;
     use serde_json::Value;
-    use tempfile::TempDir;
+    
 
     #[test]
     fn test_init_command() -> Result<()> {

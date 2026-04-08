@@ -22,19 +22,16 @@ pub async fn eval_plan(path: &str, output_path: &std::path::Path) -> Result<()> 
 
     let traces = runner.extract_traces();
     let req_hash = runner.get_request_hash()?;
-    let safe_ref = req_hash.replace(":", "_").replace("/", "_");
-    let plan_path = runner
-        .temp_dir
-        .path()
-        .join("plans")
-        .join(safe_ref)
-        .join("plan.md");
-
-    let final_plan = if plan_path.exists() {
-        Some(fs::read_to_string(plan_path)?)
-    } else {
-        None
-    };
+    let branch_name = format!("refs/heads/nancy/plans/{}", req_hash);
+    let final_plan = if let Ok(r) = runner.repo.find_reference(&branch_name) {
+        if let Ok(tree) = r.peel_to_tree() {
+            if let Some(entry) = tree.get_name("plan.md") {
+                if let Ok(blob) = runner.repo.find_blob(entry.id()) {
+                    Some(String::from_utf8_lossy(blob.content()).to_string())
+                } else { None }
+            } else { None }
+        } else { None }
+    } else { None };
 
     let result = crate::eval::EvalResult { final_plan, traces };
 
