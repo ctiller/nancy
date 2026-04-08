@@ -24,6 +24,33 @@ fn build_worker_env_vars(coordinator_did: &str) -> Vec<String> {
     env_vars
 }
 
+pub fn build_container_config(
+    rt_image: &str,
+    target_path: &Path,
+    env_vars: Vec<String>,
+) -> Config {
+    let canonical_path = target_path
+        .canonicalize()
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|_| target_path.display().to_string());
+        
+    let binds = vec![format!("{}:/worktree", canonical_path)];
+
+    let host_config = HostConfig {
+        binds: Some(binds),
+        ..Default::default()
+    };
+
+    Config {
+        image: Some(rt_image.to_string()),
+        cmd: Some(vec!["./nancy".to_string(), "grind".to_string()]),
+        env: Some(env_vars),
+        host_config: Some(host_config),
+        working_dir: Some("/worktree".to_string()),
+        ..Default::default()
+    }
+}
+
 pub async fn run<P: AsRef<Path>>(dir: P) -> Result<()> {
     let dir = dir.as_ref();
     let repo = Repository::discover(dir).context("Failed to find git repository")?;
@@ -160,25 +187,7 @@ pub async fn run<P: AsRef<Path>>(dir: P) -> Result<()> {
         // Run container
         let env_vars = build_worker_env_vars(&root_did);
 
-        // Setup mapping mounting the specific targeted path string securely to the /worktree internal
-        let binds = vec![format!(
-            "{}:/worktree",
-            target_path.canonicalize().unwrap().display()
-        )];
-
-        let host_config = HostConfig {
-            binds: Some(binds),
-            ..Default::default()
-        };
-
-        let config = Config {
-            image: Some(rt_image.to_string()),
-            cmd: Some(vec!["./nancy".to_string(), "grind".to_string()]),
-            env: Some(env_vars),
-            host_config: Some(host_config),
-            working_dir: Some("/worktree".to_string()),
-            ..Default::default()
-        };
+        let config = build_container_config(rt_image, &target_path, env_vars);
 
         let container_name = format!("nancy-worker-{}", safe_task_ref);
         match docker
@@ -284,6 +293,23 @@ mod tests {
                 "GEMINI_API_KEY=dummy_key".to_string()
             ]
         );
+    }
+
+    #[test]
+    fn test_build_container_config() {
+        let dummy_path = std::path::PathBuf::from("/tmp/dummy_mock_worktree");
+        let envs = vec!["COORDINATOR_DID=test".to_string()];
+        
+        let config = build_container_config("ubuntu:latest", &dummy_path, envs.clone());
+        
+        assert_eq!(config.image, Some("ubuntu:latest".to_string()));
+        assert_eq!(config.cmd, Some(vec!["./nancy".to_string(), "grind".to_string()]));
+        assert_eq!(config.env, Some(envs));
+        assert_eq!(config.working_dir, Some("/worktree".to_string()));
+        
+        let binds = config.host_config.unwrap().binds.unwrap();
+        assert_eq!(binds.len(), 1);
+        assert!(binds[0].ends_with("dummy_mock_worktree:/worktree"));
     }
 
     #[test]
