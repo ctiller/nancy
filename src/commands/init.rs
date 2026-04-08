@@ -134,9 +134,9 @@ mod tests {
     #[test]
     fn test_init_command() -> Result<()> {
         // Setup temporary directory structure and initialize git
-        let temp_dir = TempDir::new()?;
-        let repo_path = temp_dir.path();
-        let repo = Repository::init(repo_path)?;
+        let mut _tr = crate::debug::test_repo::TestRepo::new()?;
+        let repo_path = _tr.td.path();
+        let repo = &_tr.repo;
 
         // Run the init command with 2 grinders
         let rt = tokio::runtime::Runtime::new()?;
@@ -244,8 +244,9 @@ mod tests {
 
     #[test]
     fn test_init_double_fails() {
-        let temp_dir = TempDir::new().unwrap();
-        let _repo = git2::Repository::init(temp_dir.path()).unwrap();
+        let mut _tr = crate::debug::test_repo::TestRepo::new().unwrap();
+        let temp_dir = &_tr.td;
+        let _repo = &_tr.repo;
         let rt = tokio::runtime::Runtime::new().unwrap();
         rt.block_on(crate::commands::init::init(temp_dir.path(), 6))
             .unwrap();

@@ -263,38 +263,38 @@ mod tests {
         assert!(final_panel.contains(&"The Pedant".to_string())); // Pedant must be retained
     }
 
-    fn setup_test_repo() -> Result<(tempfile::TempDir, String, String)> {
-        let td = tempfile::TempDir::new()?;
-        let repo = Repository::init(td.path())?;
-        
-        let mut index = repo.index()?;
-        
-        let file_path = td.path().join("test.txt");
-        std::fs::write(&file_path, "Hello world\n")?;
-        index.add_path(std::path::Path::new("test.txt"))?;
-        
-        let tree_id = index.write_tree()?;
-        let tree = repo.find_tree(tree_id)?;
-        
-        let sig = git2::Signature::now("Test", "test@test.com")?;
-        let c1 = repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])?;
-        let commit1 = repo.find_commit(c1)?;
-        
-        std::fs::write(&file_path, "Hello world\nModified patch!\n")?;
-        index.add_path(std::path::Path::new("test.txt"))?;
-        
-        let tree_id2 = index.write_tree()?;
-        let tree2 = repo.find_tree(tree_id2)?;
-        
-        let c2 = repo.commit(Some("HEAD"), &sig, &sig, "second", &tree2, &[&commit1])?;
-        
-        Ok((td, c1.to_string(), c2.to_string()))
+    fn setup_test_repo() -> Result<(crate::debug::test_repo::TestRepo, String, String)> {
+        let mut tr = crate::debug::test_repo::TestRepo::new()?;
+        let (c1_str, c2_str) = {
+            let repo = &tr.repo;
+            let mut index = repo.index()?;
+            let file_path = tr.td.path().join("test.txt");
+            std::fs::write(&file_path, "Hello world\n")?;
+            index.add_path(std::path::Path::new("test.txt"))?;
+            
+            let tree_id = index.write_tree()?;
+            let tree = repo.find_tree(tree_id)?;
+            
+            let sig = git2::Signature::now("Test", "test@test.com")?;
+            let c1 = repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])?;
+            let commit1 = repo.find_commit(c1)?;
+            
+            std::fs::write(&file_path, "Hello world\nModified patch!\n")?;
+            index.add_path(std::path::Path::new("test.txt"))?;
+            
+            let tree_id2 = index.write_tree()?;
+            let tree2 = repo.find_tree(tree_id2)?;
+            
+            let c2 = repo.commit(Some("HEAD"), &sig, &sig, "second", &tree2, &[&commit1])?;
+            (c1.to_string(), c2.to_string())
+        };
+        Ok((tr, c1_str, c2_str))
     }
 
     #[test]
     fn test_generate_diff() {
-        let (td, c1, c2) = setup_test_repo().unwrap();
-        let session = ReviewSession::new(td.path(), &c1);
+        let (tr, c1, c2) = setup_test_repo().unwrap();
+        let session = ReviewSession::new(tr.td.path(), &c1);
         let diff = session.generate_diff(&c2).unwrap();
         assert!(!diff.is_empty(), "Generated diff payload is natively empty!");
         assert!(diff.contains("+Modified patch!"));
@@ -312,8 +312,8 @@ mod tests {
         let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
         crate::events::logger::init_global_writer(tx);
         
-        let (td, c1, c2) = setup_test_repo().unwrap();
-        let mut session = ReviewSession::new(td.path().to_str().unwrap(), &c1);
+        let (tr, c1, c2) = setup_test_repo().unwrap();
+        let mut session = ReviewSession::new(tr.td.path().to_str().unwrap(), &c1);
 
         let experts = vec!["The Pedant".to_string()];
         
@@ -342,8 +342,8 @@ mod tests {
         ("NANCY_NO_TRACE_EVENTS", "1")
     ])]
     async fn test_invoke_reviewers_invalid_id_ignored() {
-        let (td, c1, c2) = setup_test_repo().unwrap();
-        let mut session = ReviewSession::new(td.path().to_str().unwrap(), &c1);
+        let (tr, c1, c2) = setup_test_repo().unwrap();
+        let mut session = ReviewSession::new(tr.td.path().to_str().unwrap(), &c1);
 
         let experts = vec!["Invalid Name That Drops Off Coverage".to_string(), "The Pedant".to_string()];
         
@@ -362,8 +362,8 @@ mod tests {
         ("NANCY_NO_TRACE_EVENTS", "1")
     ])]
     async fn test_invoke_reviewers_changes_required_fallback() {
-        let (td, c1, c2) = setup_test_repo().unwrap();
-        let mut session = ReviewSession::new(td.path().to_str().unwrap(), &c1);
+        let (tr, c1, c2) = setup_test_repo().unwrap();
+        let mut session = ReviewSession::new(tr.td.path().to_str().unwrap(), &c1);
 
         let experts = vec!["The Pedant".to_string()];
         
@@ -385,8 +385,8 @@ mod tests {
         ("NANCY_NO_TRACE_EVENTS", "1")
     ])]
     async fn test_invoke_reviewers_veto_fallback() {
-        let (td, c1, c2) = setup_test_repo().unwrap();
-        let mut session = ReviewSession::new(td.path().to_str().unwrap(), &c1);
+        let (tr, c1, c2) = setup_test_repo().unwrap();
+        let mut session = ReviewSession::new(tr.td.path().to_str().unwrap(), &c1);
 
         let experts = vec!["The Pedant".to_string()];
         
@@ -408,8 +408,8 @@ mod tests {
         ("NANCY_NO_TRACE_EVENTS", "1")
     ])]
     async fn test_persist_states_saves_state_to_agents_branch() {
-        let (td, c1, _c2) = setup_test_repo().unwrap();
-        let mut session = ReviewSession::new(td.path().to_str().unwrap(), &c1);
+        let (tr, c1, _c2) = setup_test_repo().unwrap();
+        let mut session = ReviewSession::new(tr.td.path().to_str().unwrap(), &c1);
 
         let expert_id = "test_expert_persona".to_string();
         let mut client = thinking_llm("reviewer_test")
@@ -421,7 +421,7 @@ mod tests {
         client.session.ask("Test history insertion".to_string());
         session.reviewers.insert(expert_id, client);
 
-        let repo = Repository::open(td.path()).unwrap();
+        let repo = Repository::open(tr.td.path()).unwrap();
         
         let res = session.persist_states(&repo, 1, "test_session_task");
         assert!(res.is_ok(), "Writing the state securely cleanly failed explicitly");

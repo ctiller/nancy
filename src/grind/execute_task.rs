@@ -47,7 +47,7 @@ async fn handle_implement_task(
 
 async fn handle_review_task(
     target_path: &std::path::Path,
-    repo: &Repository,
+    _repo: &Repository,
     task_ref: &str,
     task_payload: &TaskPayload,
     writer: &Writer<'_>,
@@ -192,8 +192,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_execute_failure_bounds() -> anyhow::Result<()> {
-        let td = TempDir::new()?;
-        let repo = Repository::init(td.path())?;
+        let mut _tr = crate::debug::test_repo::TestRepo::new()?;
+        let td = &_tr.td;
+        let repo = &_tr.repo;
 
         let identity = Identity::Grinder(DidOwner {
             did: "mock1".into(),
@@ -227,8 +228,9 @@ mod tests {
         ("NANCY_NO_TRACE_EVENTS", "1")
     ])]
     async fn test_execute_success_bounds() -> anyhow::Result<()> {
-        let td = TempDir::new()?;
-        let repo = Repository::init(td.path())?;
+        let mut _tr = crate::debug::test_repo::TestRepo::new()?;
+        let td = &_tr.td;
+        let repo = &_tr.repo;
 
         let mut index = repo.index()?;
         let tree_id = index.write_tree()?;
@@ -281,8 +283,9 @@ mod tests {
         ("NANCY_NO_TRACE_EVENTS", "1")
     ])]
     async fn test_execute_review_bounds() -> anyhow::Result<()> {
-        let td = TempDir::new()?;
-        let repo = Repository::init(td.path())?;
+        let mut _tr = crate::debug::test_repo::TestRepo::new()?;
+        let td = &_tr.td;
+        let repo = &_tr.repo;
 
         let mut index = repo.index()?;
         let tree_id = index.write_tree()?;
@@ -338,8 +341,9 @@ mod tests {
         ("NANCY_NO_TRACE_EVENTS", "1")
     ])]
     async fn test_execute_implement_bounds() -> anyhow::Result<()> {
-        let td = TempDir::new()?;
-        let repo = Repository::init(td.path())?;
+        let mut _tr = crate::debug::test_repo::TestRepo::new()?;
+        let td = &_tr.td;
+        let repo = &_tr.repo;
 
         let mut index = repo.index()?;
         let tree_id = index.write_tree()?;

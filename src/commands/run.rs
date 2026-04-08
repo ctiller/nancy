@@ -315,8 +315,9 @@ mod tests {
 
     #[test]
     fn test_run_coordinator_end2end() {
-        let temp_dir = TempDir::new().unwrap();
-        let repo = git2::Repository::init(temp_dir.path()).unwrap();
+        let mut _tr = crate::debug::test_repo::TestRepo::new().unwrap();
+        let temp_dir = &_tr.td;
+        let repo = &_tr.repo;
 
         let mut index = repo.index().unwrap();
         let tree_id = index.write_tree().unwrap();

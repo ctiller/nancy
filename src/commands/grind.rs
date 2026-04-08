@@ -184,8 +184,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_grind_loops_gracefully() -> anyhow::Result<()> {
-        let td = TempDir::new()?;
-        let _repo = Repository::init(td.path())?;
+        let mut _tr = crate::debug::test_repo::TestRepo::new()?;
+        let td = &_tr.td;
+        let _repo = &_tr.repo;
         let nancy_dir = td.path().join(".nancy");
         std::fs::create_dir_all(&nancy_dir)?;
         
@@ -206,8 +207,9 @@ mod tests {
     }
     #[tokio::test]
     async fn test_grind_socket_exists_coverage() -> anyhow::Result<()> {
-        let td = TempDir::new()?;
-        let _repo = Repository::init(td.path())?;
+        let mut _tr = crate::debug::test_repo::TestRepo::new()?;
+        let td = &_tr.td;
+        let _repo = &_tr.repo;
         let nancy_dir = td.path().join(".nancy");
         std::fs::create_dir_all(&nancy_dir)?;
         

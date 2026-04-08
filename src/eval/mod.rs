@@ -231,8 +231,8 @@ mod tests {
     fn test_extract_traces_filters_unrelated_events_safely() {
         use crate::schema::identity_config::*;
 
-        let temp_dir = tempfile::tempdir().unwrap();
-        let repo = git2::Repository::init(temp_dir.path()).unwrap();
+        let mut _tr = crate::debug::test_repo::TestRepo::new().unwrap();
+        let repo = &_tr.repo;
         
         let id_obj = Identity::Coordinator {
             did: DidOwner { did: "coord".into(), public_key_hex: "00".into(), private_key_hex: "00".into() },

@@ -249,8 +249,9 @@ mod tests {
 
     #[test]
     fn test_writer_creates_events() -> Result<()> {
-        let temp_dir = TempDir::new()?;
-        let repo = Repository::init(temp_dir.path())?;
+        let mut _tr = crate::debug::test_repo::TestRepo::new()?;
+        let temp_dir = &_tr.td;
+        let repo = &_tr.repo;
 
         let key = did_key::generate::<Ed25519KeyPair>(None);
         let did = key.fingerprint();
@@ -313,8 +314,9 @@ mod tests {
 
     #[test]
     fn test_writer_appends_to_existing_log() -> Result<()> {
-        let temp_dir = TempDir::new()?;
-        let repo = Repository::init(temp_dir.path())?;
+        let mut _tr = crate::debug::test_repo::TestRepo::new()?;
+        let temp_dir = &_tr.td;
+        let repo = &_tr.repo;
 
         let key = did_key::generate::<Ed25519KeyPair>(None);
         let did = key.fingerprint();
@@ -379,8 +381,9 @@ mod tests {
 
     #[test]
     fn test_writer_log_rollover_boundaries() -> Result<()> {
-        let temp_dir = TempDir::new()?;
-        let repo = Repository::init(temp_dir.path())?;
+        let mut _tr = crate::debug::test_repo::TestRepo::new()?;
+        let temp_dir = &_tr.td;
+        let repo = &_tr.repo;
 
         let key = did_key::generate::<Ed25519KeyPair>(None);
         let did = key.fingerprint();

@@ -9,3 +9,6 @@ pub mod pre_review;
 pub mod schema;
 pub mod tasks;
 pub mod tools;
+
+#[cfg(test)]
+pub mod debug;

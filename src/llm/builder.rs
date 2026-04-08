@@ -1,6 +1,5 @@
 use crate::llm::client::LlmClient;
 use anyhow::{Context, bail};
-use std::marker::PhantomData;
 
 #[derive(Clone, Copy)]
 pub enum Kind {

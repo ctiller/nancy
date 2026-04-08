@@ -9,7 +9,6 @@ use crate::events::reader::Reader;
 use crate::events::writer::Writer;
 use crate::schema::identity_config::Identity;
 use crate::schema::registry::EventPayload;
-use crate::schema::task::CoordinatorAssignmentPayload;
 
 use axum::{extract::State, routing::get, Router};
 use std::sync::Arc;
@@ -148,6 +147,7 @@ impl Coordinator {
 
             if logged_any {
                 writer.commit_batch()?;
+                eprintln!("[Coordinator] Successfully processed and committed Grinder events. Broadcasting tx_ready to unblock...");
                 let _ = shared_tx_ready.send(()); // unblock waiting grinders natively via UDS!
             } else if force_sync_broadcast {
                 let _ = shared_tx_ready.send(()); // unblock since we successfully pulled!
@@ -164,6 +164,7 @@ impl Coordinator {
                 tokio::select! {
                     _ = sleep(Duration::from_millis(1500)) => {} // safety loop
                     _ = rx_updates.recv() => {
+                        eprintln!("[Coordinator] AWAKENED: Grinder explicitly hit /updates-ready HTTP ping. Accelerating event processor...");
                         force_sync_broadcast = true;
                     } // cleanly awoken explicitly by grinder /updates-ready
                 }
@@ -204,8 +205,10 @@ async fn updates_ready_handler(
     axum::Json(payload): axum::Json<crate::schema::ipc::UpdateReadyPayload>,
 ) {
     let mut rx = state.tx_ready.subscribe();
+    eprintln!("[Coordinator API] Grinder connection hit /updates-ready. Queueing payload and blocking grinder synchronously...");
     let _ = state.tx_updates.send(payload);
     let _ = rx.recv().await;
+    eprintln!("[Coordinator API] Grinder connection to /updates-ready explicitly UNBLOCKED. Disconnecting...");
 }
 
 
@@ -491,8 +494,9 @@ mod tests {
 
     #[sealed_test]
     fn test_coordinator_intercepts_requests() -> Result<()> {
-        let temp_dir = TempDir::new()?;
-        let repo = Repository::init(temp_dir.path())?;
+        let mut _tr = crate::debug::test_repo::TestRepo::new()?;
+        let temp_dir = &_tr.td;
+        let repo = &_tr.repo;
 
         let nancy_dir = temp_dir.path().join(".nancy");
         std::fs::create_dir_all(&nancy_dir)?;
@@ -568,8 +572,9 @@ mod tests {
     #[sealed_test]
     fn test_coordinator_handles_review_changes_required() -> Result<()> {
         eprintln!("Starting test_coordinator_handles_review_changes_required");
-        let temp_dir = TempDir::new()?;
-        let repo = Repository::init(temp_dir.path())?;
+        let mut _tr = crate::debug::test_repo::TestRepo::new()?;
+        let temp_dir = &_tr.td;
+        let repo = &_tr.repo;
         let nancy_dir = temp_dir.path().join(".nancy");
         std::fs::create_dir_all(&nancy_dir)?;
 
@@ -624,8 +629,9 @@ mod tests {
     #[sealed_test]
     fn test_coordinator_handles_fast_forward_merge_parent_advanced() -> Result<()> {
         eprintln!("Starting test_coordinator_handles_fast_forward_merge_parent_advanced");
-        let temp_dir = TempDir::new()?;
-        let repo = Repository::init(temp_dir.path())?;
+        let mut _tr = crate::debug::test_repo::TestRepo::new()?;
+        let temp_dir = &_tr.td;
+        let repo = &_tr.repo;
         let nancy_dir = temp_dir.path().join(".nancy");
         std::fs::create_dir_all(&nancy_dir)?;
 
@@ -697,8 +703,9 @@ mod tests {
 
     #[sealed_test]
     fn test_handle_review_rejection_direct() -> Result<()> {
-        let temp_dir = TempDir::new()?;
-        let repo = Repository::init(temp_dir.path())?;
+        let mut _tr = crate::debug::test_repo::TestRepo::new()?;
+        let temp_dir = &_tr.td;
+        let repo = &_tr.repo;
         let nancy_dir = temp_dir.path().join(".nancy");
         std::fs::create_dir_all(&nancy_dir)?;
 
@@ -758,8 +765,9 @@ mod tests {
 
     #[sealed_test]
     fn test_handle_review_approval_direct_conflict_generation() -> Result<()> {
-        let temp_dir = TempDir::new()?;
-        let repo = Repository::init(temp_dir.path())?;
+        let mut _tr = crate::debug::test_repo::TestRepo::new()?;
+        let temp_dir = &_tr.td;
+        let repo = &_tr.repo;
         let nancy_dir = temp_dir.path().join(".nancy");
         std::fs::create_dir_all(&nancy_dir)?;
 
@@ -832,8 +840,9 @@ mod tests {
 
     #[sealed_test]
     fn test_handle_task_requests_direct() -> Result<()> {
-        let temp_dir = TempDir::new()?;
-        let repo = Repository::init(temp_dir.path())?;
+        let mut _tr = crate::debug::test_repo::TestRepo::new()?;
+        let temp_dir = &_tr.td;
+        let repo = &_tr.repo;
         let nancy_dir = temp_dir.path().join(".nancy");
         std::fs::create_dir_all(&nancy_dir)?;
 
@@ -869,8 +878,9 @@ mod tests {
 
     #[sealed_test]
     fn test_handle_plan_direct() -> Result<()> {
-        let temp_dir = TempDir::new()?;
-        let repo = Repository::init(temp_dir.path())?;
+        let mut _tr = crate::debug::test_repo::TestRepo::new()?;
+        let temp_dir = &_tr.td;
+        let repo = &_tr.repo;
         let nancy_dir = temp_dir.path().join(".nancy");
         std::fs::create_dir_all(&nancy_dir)?;
 
@@ -898,8 +908,9 @@ mod tests {
 
     #[sealed_test]
     fn test_handle_work_assignments_direct() -> Result<()> {
-        let temp_dir = TempDir::new()?;
-        let repo = Repository::init(temp_dir.path())?;
+        let mut _tr = crate::debug::test_repo::TestRepo::new()?;
+        let temp_dir = &_tr.td;
+        let repo = &_tr.repo;
         let nancy_dir = temp_dir.path().join(".nancy");
         std::fs::create_dir_all(&nancy_dir)?;
 

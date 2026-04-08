@@ -62,10 +62,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_add_task_inline() -> Result<()> {
-        let temp_dir = TempDir::new()?;
-        let repo_path = temp_dir.path();
-
-        Repository::init(repo_path)?;
+        let mut _tr = crate::debug::test_repo::TestRepo::new()?;
+        let repo_path = _tr.td.path();
         init(repo_path, 2).await?;
 
         add_task(repo_path, Some("Test task 1".to_string()), None).await?;
@@ -112,10 +110,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_add_task_file() -> Result<()> {
-        let temp_dir = TempDir::new()?;
-        let repo_path = temp_dir.path();
-
-        Repository::init(repo_path)?;
+        let mut _tr = crate::debug::test_repo::TestRepo::new()?;
+        let repo_path = _tr.td.path();
         init(repo_path, 2).await?;
 
         let task_file = repo_path.join("task.txt");
