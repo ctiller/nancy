@@ -120,10 +120,13 @@ impl LlmClient {
 
             let response_payload =
                 if let Some(tool) = self.tools.iter().find(|t| t.name() == tool_name) {
-                    let result = tool.call(args).await;
+                    tracing::info!("==== [LLM Client] Executing tool: {} ====", tool_name);
+                    let result = tokio::time::timeout(std::time::Duration::from_secs(30), tool.call(args)).await;
+                    tracing::info!("==== [LLM Client] Finished executing tool: {} ====", tool_name);
                     match result {
-                        Ok(res) => res,
-                        Err(err) => serde_json::json!({ "error": err.to_string() }),
+                        Ok(Ok(res)) => res,
+                        Ok(Err(err)) => serde_json::json!({ "error": err.to_string() }),
+                        Err(_) => serde_json::json!({ "error": "Tool execution timed out natively securely bounded!" }),
                     }
                 } else {
                     let valid_names: Vec<&str> = self.tools.iter().map(|t| t.name()).collect();
@@ -226,7 +229,17 @@ impl LlmClient {
                     };
                     mock_resp
                 } else {
-                    Gemini::ask(gemini, &mut self.session).await
+                    tracing::info!("==== [LLM Client] Sending request to Gemini API. Waiting... ====");
+                    let timeout_res = tokio::time::timeout(
+                        std::time::Duration::from_secs(45),
+                        Gemini::ask(gemini, &mut self.session)
+                    ).await;
+                    
+                    tracing::info!("==== [LLM Client] Received response successfully natively! ====");
+                    match timeout_res {
+                        Ok(res) => res,
+                        Err(_) => return Err(anyhow::anyhow!("Gemini API network request timed out (45s deadline exceeded) organically stopping indefinitely suspended tasks natively.")),
+                    }
                 };
 
                 match ask_res {
