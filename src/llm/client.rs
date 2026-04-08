@@ -1,6 +1,7 @@
 use anyhow::{Context, bail};
 use gemini_client_api::gemini::ask::Gemini;
 use gemini_client_api::gemini::types::request::Chat;
+use gemini_client_api::gemini::types::response::GeminiResponse;
 use gemini_client_api::gemini::types::sessions::Session;
 use schemars::JsonSchema;
 use serde::de::DeserializeOwned;
@@ -178,7 +179,7 @@ impl<T: DeserializeOwned + JsonSchema + 'static> LlmClient<T> {
         loop {
             // Loop for retries
             let mut retry_count = 0;
-            let resp = loop {
+            let resp: GeminiResponse = loop {
                 #[cfg(not(test))]
                 let ask_res = Gemini::ask(&mut self.gemini, &mut self.session).await;
                 #[cfg(test)]

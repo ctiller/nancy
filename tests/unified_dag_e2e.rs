@@ -604,8 +604,8 @@ async fn test_coordinator_generates_rework_implementation_upon_dissent() -> Resu
     writer.log_event_with_id_override(implement_task, "working_sub".into())?;
     use nancy::schema::task::BlockedByPayload;
     writer.log_event(EventPayload::BlockedBy(BlockedByPayload {
-        source: "rev_01".into(),
-        target: "working_sub".into(),
+        source: "working_sub".into(),
+        target: "rev_01".into(),
     }))?;
 
     // Simulate Dissent Output!
@@ -632,7 +632,7 @@ async fn test_coordinator_generates_rework_implementation_upon_dissent() -> Resu
 
     // Evaluating conflict generative fallback bounding
     let mut generated_implement_rework = false;
-    coord
+    tokio::time::timeout(std::time::Duration::from_secs(20), coord
         .run_until(|appview| {
             for (_id, payload) in &appview.tasks {
                 if let EventPayload::Task(t) = payload {
@@ -645,8 +645,9 @@ async fn test_coordinator_generates_rework_implementation_upon_dissent() -> Resu
                 }
             }
             false
-        })
-        .await?;
+        }))
+        .await
+        .expect("Test timed out!")?;
 
     assert!(
         generated_implement_rework,
@@ -736,12 +737,12 @@ async fn test_coordinator_applies_fast_forward_merge_to_feature_branch() -> Resu
     });
     writer.log_event_with_id_override(sub_task, "working_sub".into())?;
     writer.log_event(EventPayload::BlockedBy(BlockedByPayload {
-        source: "working_sub".into(),
-        target: "root_plan_id".into(),
+        source: "root_plan_id".into(),
+        target: "working_sub".into(),
     }))?;
     writer.log_event(EventPayload::BlockedBy(BlockedByPayload {
-        source: "rev_impl_01".into(),
-        target: "working_sub".into(),
+        source: "working_sub".into(),
+        target: "rev_impl_01".into(),
     }))?;
 
     // Trigger the merge intercept structurally native mappings
@@ -754,13 +755,13 @@ async fn test_coordinator_applies_fast_forward_merge_to_feature_branch() -> Resu
     writer.log_event(EventPayload::AssignmentComplete(
         nancy::schema::task::AssignmentCompletePayload {
             assignment_ref: assign_id,
-            report: "Approved".into(),
+            report: r#"{"vote":"approve","agree_notes":"","disagree_notes":""}"#.into(),
         },
     ))?;
     writer.commit_batch()?;
 
     let mut coord = Coordinator::new(temp_dir.path())?;
-    coord
+    tokio::time::timeout(std::time::Duration::from_secs(20), coord
         .run_until(|_appview| {
             if let Ok(feat_ref) = repo.find_reference("refs/heads/nancy/features/root_plan_id") {
                 if let Ok(c) = feat_ref.peel_to_commit() {
@@ -772,8 +773,9 @@ async fn test_coordinator_applies_fast_forward_merge_to_feature_branch() -> Resu
                 }
             }
             false
-        })
-        .await?;
+        }))
+        .await
+        .expect("Test timed out!")?;
 
     // Verify FF updates native root completely structurally
     let feat_ref = repo.find_reference("refs/heads/nancy/features/root_plan_id")?;

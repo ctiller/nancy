@@ -202,6 +202,7 @@ mod tests {
     use super::*;
     use serde::Deserialize;
 
+    #[allow(dead_code)]
     #[derive(Deserialize, JsonSchema)]
     struct DummyStruct {
         _val: i32,

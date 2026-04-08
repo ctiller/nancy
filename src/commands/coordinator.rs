@@ -586,7 +586,7 @@ mod tests {
 
         let rt = tokio::runtime::Runtime::new().unwrap();
         let _ = rt.block_on(async {
-            tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            let _ = tokio::time::timeout(std::time::Duration::from_secs(5), async {
                 let mut coord = Coordinator::new(temp_dir.path()).unwrap();
                 coord.run_until(|appview| {
                     appview.tasks.iter().any(|(id, payload)| {
@@ -660,7 +660,7 @@ mod tests {
 
         let rt = tokio::runtime::Runtime::new().unwrap();
         let _ = rt.block_on(async {
-            tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            let _ = tokio::time::timeout(std::time::Duration::from_secs(5), async {
                 let mut coord = Coordinator::new(temp_dir.path()).unwrap();
                 coord.run_until(|appview| {
                     appview.tasks.values().any(|payload| {

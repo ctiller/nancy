@@ -218,6 +218,7 @@ pub async fn run<P: AsRef<Path>>(dir: P) -> Result<()> {
                             };
                             let stream =
                                 futures_util::stream::iter(vec![bytes::Bytes::from(tar_payload)]);
+                            #[allow(deprecated)]
                             if let Err(e) = docker
                                 .upload_to_container_streaming(
                                     &response.id,

@@ -441,7 +441,7 @@ pub async fn manage_paths(operations: Vec<PathOperation>) -> Result<serde_json::
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::llm::tool::LlmTool;
+
     use std::fs;
     use tempfile::tempdir;
 
