@@ -130,188 +130,7 @@ impl Coordinator {
             for task_id in &appview.task_completions {
                 if !processed_completed_tasks.contains(task_id) {
                     processed_completed_tasks.insert(task_id.clone());
-                    if let Some(EventPayload::Task(t)) = appview.tasks.get(task_id) {
-                        use crate::schema::task::{BlockedByPayload, TaskAction, TaskPayload};
-                        match t.action {
-                            TaskAction::Plan => {
-                                let review_plan = EventPayload::Task(TaskPayload {
-                                    description: format!("Review generated plan for {}", task_id),
-                                    preconditions: "Plan mapping complete natively".to_string(),
-                                    postconditions:
-                                        "System natively orchestrates bound review limits safely"
-                                            .to_string(),
-                                    validation_strategy: "Panel Review".to_string(),
-                                    action: TaskAction::ReviewPlan,
-                                    branch: format!("refs/heads/nancy/plans/{}", task_id),
-                                    review_session_file: None,
-                                });
-                                if let Ok(review_task_id) = writer.log_event(review_plan) {
-                                    writer
-                                        .log_event(EventPayload::BlockedBy(BlockedByPayload {
-                                            source: review_task_id,
-                                            target: task_id.clone(),
-                                        }))
-                                        .ok();
-                                    logged_any = true;
-                                }
-                            }
-                            TaskAction::ReviewPlan => {
-                                // Create feature branch
-                                let feature_branch =
-                                    format!("refs/heads/nancy/features/{}", task_id);
-                                if self.repo.find_reference(&feature_branch).is_err() {
-                                    // Use master/main generically depending on what inherently exists natively. Note: standard fallback mechanism checks HEAD.
-                                    let head = self.repo.head().unwrap().peel_to_commit().unwrap();
-                                    self.repo
-                                        .branch(
-                                            &format!("nancy/features/{}", task_id),
-                                            &head,
-                                            false,
-                                        )
-                                        .ok();
-                                }
-                            }
-                            TaskAction::ReviewImplementation => {
-                                // First check if the report was a vote to reject
-                                if let Some(report_str) = appview.completed_reports.get(task_id) {
-                                    if let Ok(report) =
-                                        serde_json::from_str::<
-                                            crate::pre_review::schema::ReviewOutput,
-                                        >(report_str)
-                                    {
-                                        if report.vote == crate::pre_review::schema::ReviewVote::ChangesRequired {
-                                            if let Some(implement_id) = appview.get_implement_task_id(task_id) {
-                                                let rework_task = EventPayload::Task(TaskPayload {
-                                                    description: format!("Address review feedback structurally physically on {}", implement_id),
-                                                    preconditions: "Review Dissent Documented".to_string(),
-                                                    postconditions: "Feedback addressed entirely".to_string(),
-                                                    validation_strategy: "Unit Tests + Native DAG Flow".to_string(),
-                                                    action: TaskAction::Implement,
-                                                    branch: format!("refs/heads/nancy/tasks/{}", implement_id),
-                                                    review_session_file: None,
-                                                });
-                                                if let Ok(rework_id) = writer.log_event(rework_task) {
-                                                    writer.log_event(EventPayload::BlockedBy(BlockedByPayload {
-                                                        source: rework_id.clone(), target: task_id.clone()
-                                                    })).ok();
-                                                }
-                                            }
-                                            logged_any = true;
-                                            continue; // Bail out of FF merge natively handling rework explicitly properly without conflicts.
-                                        }
-                                    }
-                                }
-
-                                if let Some(feature_ref_name) = appview.get_feature_branch(task_id)
-                                {
-                                    if let Some(implement_id) =
-                                        appview.get_implement_task_id(task_id)
-                                    {
-                                        let task_branch =
-                                            format!("refs/heads/nancy/tasks/{}", implement_id);
-                                        // Restrict to strict --ff-only equivalent dynamically evaluated!
-                                        if let (Ok(feat_ref), Ok(task_ref)) = (
-                                            self.repo.find_reference(&feature_ref_name),
-                                            self.repo.find_reference(&task_branch),
-                                        ) {
-                                            let feat_commit = feat_ref.peel_to_commit().unwrap();
-                                            let task_commit = task_ref.peel_to_commit().unwrap();
-
-                                            if self
-                                                .repo
-                                                .graph_descendant_of(
-                                                    task_commit.id(),
-                                                    feat_commit.id(),
-                                                )
-                                                .unwrap_or(false)
-                                            {
-                                                println!(
-                                                    "Coordinator fast-forwarding {} to {}",
-                                                    feature_ref_name,
-                                                    task_commit.id()
-                                                );
-                                                // Fast-forward merges cleanly!
-                                                let mut mutable_feat = feat_ref;
-                                                let res = mutable_feat.set_target(
-                                                    task_commit.id(),
-                                                    "Nancy Coordinator: --ff-only acceptance",
-                                                );
-                                                println!(
-                                                    "Set target result is_ok: {}",
-                                                    res.is_ok()
-                                                );
-                                            } else {
-                                                println!(
-                                                    "NOT A DESCENDANT {} {}",
-                                                    task_commit.id(),
-                                                    feat_commit.id()
-                                                );
-                                                // FF Failed: Parent Advanced! Generate Conflict Resolution Task natively!
-                                                let conflict_task =
-                                                    EventPayload::Task(TaskPayload {
-                                                        description: format!(
-                                                            "Resolve merge conflict on {}",
-                                                            implement_id
-                                                        ),
-                                                        preconditions: "Upstream advanced"
-                                                            .to_string(),
-                                                        postconditions: "Clean FF merge status"
-                                                            .to_string(),
-                                                        validation_strategy:
-                                                            "Re-review patch equivalence"
-                                                                .to_string(),
-                                                        action: TaskAction::Implement,
-                                                        branch: task_branch.clone(),
-                                                        review_session_file: None,
-                                                    });
-                                                if let Ok(new_task_id) =
-                                                    writer.log_event(conflict_task)
-                                                {
-                                                    // Map a new review node sequentially blocking standard resolution DAG
-                                                    let review_node =
-                                                        EventPayload::Task(TaskPayload {
-                                                            description: format!(
-                                                                "Review resolution for {}",
-                                                                new_task_id
-                                                            ),
-                                                            preconditions: "Implementation Patched"
-                                                                .to_string(),
-                                                            postconditions:
-                                                                "Fast-forward cleanly merged"
-                                                                    .to_string(),
-                                                            validation_strategy: "Panel Review"
-                                                                .to_string(),
-                                                            action:
-                                                                TaskAction::ReviewImplementation,
-                                                            branch: format!(
-                                                                "refs/heads/nancy/tasks/{}",
-                                                                new_task_id
-                                                            ),
-                                                            review_session_file: None,
-                                                        });
-                                                    if let Ok(review_task_id) =
-                                                        writer.log_event(review_node)
-                                                    {
-                                                        writer
-                                                            .log_event(EventPayload::BlockedBy(
-                                                                BlockedByPayload {
-                                                                    source: review_task_id,
-                                                                    target: new_task_id,
-                                                                },
-                                                            ))
-                                                            .ok();
-                                                        // Ensure original dependents wait for THIS new review sequentially to resolve FF.
-                                                    }
-                                                    logged_any = true;
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
+                    logged_any |= process_task_completion(&self.repo, &appview, &writer, task_id).unwrap_or(false);
                 }
             }
 
@@ -320,82 +139,8 @@ impl Coordinator {
                 if workers.is_empty() {
                     println!("Coordinator has no workers provisioned!");
                 } else {
-                    for (task_id, _payload) in &appview.tasks {
-                        if !appview.assignments.contains_key(task_id)
-                            && !processed_request_ids.contains(task_id)
-                        {
-                            processed_request_ids.insert(task_id.clone());
-
-                            // Pick sequential target
-                            if let Some(target) = workers.first() {
-                                // Task Branch Generation natively enforced bounding limits protecting execution checkouts.
-                                if let Some(EventPayload::Task(t)) = appview.tasks.get(task_id) {
-                                    if t.action == crate::schema::task::TaskAction::Implement {
-                                        let task_branch =
-                                            format!("refs/heads/nancy/tasks/{}", task_id);
-                                        if self.repo.find_reference(&task_branch).is_err() {
-                                            if let Some(feature_branch) =
-                                                appview.get_feature_branch(task_id)
-                                            {
-                                                if let Ok(feat_ref) =
-                                                    self.repo.find_reference(&feature_branch)
-                                                {
-                                                    let commit = feat_ref.peel_to_commit().unwrap();
-                                                    self.repo
-                                                        .branch(
-                                                            &format!("nancy/tasks/{}", task_id),
-                                                            &commit,
-                                                            false,
-                                                        )
-                                                        .ok();
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-
-                                let assignment = CoordinatorAssignmentPayload {
-                                    task_ref: task_id.clone(),
-                                    assignee_did: target.did.clone(),
-                                };
-                                writer
-                                    .log_event(EventPayload::CoordinatorAssignment(assignment))?;
-                                logged_any = true;
-                            }
-                        }
-                    }
-
-                    // Map unhandled TaskRequests into TaskAction::Plan and bind them via BlockedBy
-                    for (request_id, req_payload) in &appview.requests {
-                        if !appview.handled_requests.contains(request_id)
-                            && !processed_request_ids.contains(request_id)
-                        {
-                            processed_request_ids.insert(request_id.clone());
-
-                            use crate::schema::task::{BlockedByPayload, TaskAction, TaskPayload};
-
-                            let orphaned_branch = format!("refs/heads/nancy/plans/{}", request_id);
-
-                            if let EventPayload::TaskRequest(r) = req_payload {
-                                let plan_task = EventPayload::Task(TaskPayload {
-                                    description: r.description.clone(),
-                                    preconditions: "User Request".to_string(),
-                                    postconditions: "Generated Implementation DAG".to_string(),
-                                    validation_strategy: "Panel Review".to_string(),
-                                    action: TaskAction::Plan,
-                                    branch: orphaned_branch,
-                                    review_session_file: None,
-                                });
-
-                                let task_ev_id = writer.log_event(plan_task)?;
-                                writer.log_event(EventPayload::BlockedBy(BlockedByPayload {
-                                    source: task_ev_id,
-                                    target: request_id.clone(),
-                                }))?;
-                                logged_any = true;
-                            }
-                        }
-                    }
+                    logged_any |= handle_work_assignments(&self.repo, &appview, &writer, workers, &mut processed_request_ids).unwrap_or(false);
+                    logged_any |= handle_task_requests(&appview, &writer, &mut processed_request_ids).unwrap_or(false);
                 }
             }
 
@@ -463,6 +208,147 @@ async fn updates_ready_handler(
     let _ = rx.recv().await;
 }
 
+
+
+fn handle_review_plan(repo: &Repository, task_id: &String) {
+    let feature_branch = format!("refs/heads/nancy/features/{}", task_id);
+    if repo.find_reference(&feature_branch).is_err() {
+        if let Ok(head) = repo.head() {
+            if let Ok(commit) = head.peel_to_commit() {
+                let _ = repo.branch(&format!("nancy/features/{}", task_id), &commit, false);
+            }
+        }
+    }
+}
+
+fn handle_plan(writer: &Writer, task_id: &String) -> bool {
+    use crate::schema::task::{BlockedByPayload, TaskAction, TaskPayload};
+    let review_plan = EventPayload::Task(TaskPayload {
+        description: format!("Review generated plan for {}", task_id),
+        preconditions: "Plan mapping complete natively".to_string(),
+        postconditions:
+            "System natively orchestrates bound review limits safely"
+                .to_string(),
+        validation_strategy: "Panel Review".to_string(),
+        action: TaskAction::ReviewPlan,
+        branch: format!("refs/heads/nancy/plans/{}", task_id),
+        review_session_file: None,
+    });
+    if let Ok(review_task_id) = writer.log_event(review_plan) {
+        let _ = writer.log_event(EventPayload::BlockedBy(BlockedByPayload {
+            source: review_task_id, target: task_id.clone()
+        }));
+        return true;
+    }
+    false
+}
+
+fn handle_review_rejection(
+    appview: &AppView,
+    writer: &Writer,
+    task_id: &String,
+) -> bool {
+    let report_str = match appview.completed_reports.get(task_id) {
+        Some(s) => s,
+        None => return false,
+    };
+    let report = match serde_json::from_str::<crate::pre_review::schema::ReviewOutput>(report_str) {
+        Ok(r) => r,
+        Err(_) => return false,
+    };
+    if report.vote != crate::pre_review::schema::ReviewVote::ChangesRequired {
+        return false;
+    }
+    let implement_id = match appview.get_implement_task_id(task_id) {
+        Some(id) => id,
+        None => return false,
+    };
+    
+    use crate::schema::task::{BlockedByPayload, TaskAction, TaskPayload};
+    let rework_task = EventPayload::Task(TaskPayload {
+        description: format!("Address review feedback structurally physically on {}", implement_id),
+        preconditions: "Review Dissent Documented".to_string(),
+        postconditions: "Feedback addressed entirely".to_string(),
+        validation_strategy: "Unit Tests + Native DAG Flow".to_string(),
+        action: TaskAction::Implement,
+        branch: format!("refs/heads/nancy/tasks/{}", implement_id),
+        review_session_file: None,
+    });
+    if let Ok(rework_id) = writer.log_event(rework_task) {
+        let _ = writer.log_event(EventPayload::BlockedBy(BlockedByPayload {
+            source: rework_id, target: task_id.clone()
+        }));
+    }
+    true
+}
+
+fn handle_review_approval(
+    repo: &Repository,
+    appview: &AppView,
+    writer: &Writer,
+    task_id: &String,
+) -> bool {
+    let feature_ref_name = match appview.get_feature_branch(task_id) {
+        Some(name) => name,
+        None => return false,
+    };
+    let implement_id = match appview.get_implement_task_id(task_id) {
+        Some(id) => id,
+        None => return false,
+    };
+    
+    let task_branch = format!("refs/heads/nancy/tasks/{}", implement_id);
+    let feat_ref = match repo.find_reference(&feature_ref_name) {
+        Ok(r) => r,
+        Err(_) => return false,
+    };
+    let task_ref = match repo.find_reference(&task_branch) {
+        Ok(r) => r,
+        Err(_) => return false,
+    };
+    let feat_commit = feat_ref.peel_to_commit().unwrap();
+    let task_commit = task_ref.peel_to_commit().unwrap();
+
+    if repo.graph_descendant_of(task_commit.id(), feat_commit.id()).unwrap_or(false) {
+        println!("Coordinator fast-forwarding {} to {}", feature_ref_name, task_commit.id());
+        let mut mutable_feat = feat_ref;
+        let res = mutable_feat.set_target(task_commit.id(), "Nancy Coordinator: --ff-only acceptance");
+        println!("Set target result is_ok: {}", res.is_ok());
+        false
+    } else {
+        println!("NOT A DESCENDANT {} {}", task_commit.id(), feat_commit.id());
+        use crate::schema::task::{BlockedByPayload, TaskAction, TaskPayload};
+        let conflict_task = EventPayload::Task(TaskPayload {
+            description: format!("Resolve merge conflict on {}", implement_id),
+            preconditions: "Upstream advanced".to_string(),
+            postconditions: "Clean FF merge status".to_string(),
+            validation_strategy: "Re-review patch equivalence".to_string(),
+            action: TaskAction::Implement,
+            branch: task_branch.clone(),
+            review_session_file: None,
+        });
+        if let Ok(new_task_id) = writer.log_event(conflict_task) {
+            let review_node = EventPayload::Task(TaskPayload {
+                description: format!("Review resolution for {}", new_task_id),
+                preconditions: "Implementation Patched".to_string(),
+                postconditions: "Fast-forward cleanly merged".to_string(),
+                validation_strategy: "Panel Review".to_string(),
+                action: TaskAction::ReviewImplementation,
+                branch: format!("refs/heads/nancy/tasks/{}", new_task_id),
+                review_session_file: None,
+            });
+            if let Ok(review_task_id) = writer.log_event(review_node) {
+                let _ = writer.log_event(EventPayload::BlockedBy(BlockedByPayload {
+                    source: review_task_id,
+                    target: new_task_id,
+                }));
+            }
+            return true;
+        }
+        false
+    }
+}
+
 pub async fn run<P: AsRef<Path>>(dir: P) -> Result<()> {
     ctrlc::set_handler(move || {
         println!("Received interrupt signal. Shutting down Coordinator...");
@@ -472,6 +358,124 @@ pub async fn run<P: AsRef<Path>>(dir: P) -> Result<()> {
 
     let mut coord = Coordinator::new(dir)?;
     coord.run_until(|_| false).await
+}
+
+fn handle_work_assignments(
+    repo: &Repository,
+    appview: &AppView,
+    writer: &Writer,
+    workers: &[crate::schema::identity_config::DidOwner],
+    processed_request_ids: &mut std::collections::HashSet<String>,
+) -> Result<bool> {
+    let mut logged_any = false;
+    let target = match workers.first() {
+        Some(t) => t,
+        None => return Ok(false),
+    };
+
+    for (task_id, _payload) in &appview.tasks {
+        if appview.assignments.contains_key(task_id) || processed_request_ids.contains(task_id) {
+            continue;
+        }
+        processed_request_ids.insert(task_id.clone());
+
+        if let Some(EventPayload::Task(t)) = appview.tasks.get(task_id) {
+            if t.action == crate::schema::task::TaskAction::Implement {
+                ensure_task_branch(repo, appview, task_id);
+            }
+        }
+        
+        let assignment = crate::schema::task::CoordinatorAssignmentPayload {
+            task_ref: task_id.clone(),
+            assignee_did: target.did.clone(),
+        };
+        writer.log_event(EventPayload::CoordinatorAssignment(assignment))?;
+        logged_any = true;
+    }
+    Ok(logged_any)
+}
+
+fn ensure_task_branch(repo: &Repository, appview: &AppView, task_id: &String) {
+    let task_branch = format!("refs/heads/nancy/tasks/{}", task_id);
+    if repo.find_reference(&task_branch).is_ok() {
+        return;
+    }
+    let feature_branch = match appview.get_feature_branch(task_id) {
+        Some(b) => b,
+        None => return,
+    };
+    let feat_ref = match repo.find_reference(&feature_branch) {
+        Ok(r) => r,
+        Err(_) => return,
+    };
+    if let Ok(commit) = feat_ref.peel_to_commit() {
+        let _ = repo.branch(&format!("nancy/tasks/{}", task_id), &commit, false);
+    }
+}
+
+fn handle_task_requests(
+    appview: &AppView,
+    writer: &Writer,
+    processed_request_ids: &mut std::collections::HashSet<String>,
+) -> Result<bool> {
+    let mut logged_any = false;
+    for (request_id, req_payload) in &appview.requests {
+        if appview.handled_requests.contains(request_id) || processed_request_ids.contains(request_id) {
+            continue;
+        }
+        processed_request_ids.insert(request_id.clone());
+
+        let r = match req_payload {
+            EventPayload::TaskRequest(req) => req,
+            _ => continue,
+        };
+
+        use crate::schema::task::{BlockedByPayload, TaskAction, TaskPayload};
+        let orphaned_branch = format!("refs/heads/nancy/plans/{}", request_id);
+        
+        let plan_task = EventPayload::Task(TaskPayload {
+            description: r.description.clone(),
+            preconditions: "User Request".to_string(),
+            postconditions: "Generated Implementation DAG".to_string(),
+            validation_strategy: "Panel Review".to_string(),
+            action: TaskAction::Plan,
+            branch: orphaned_branch,
+            review_session_file: None,
+        });
+        
+        let task_ev_id = writer.log_event(plan_task)?;
+        writer.log_event(EventPayload::BlockedBy(BlockedByPayload {
+            source: task_ev_id, target: request_id.clone(),
+        }))?;
+        logged_any = true;
+    }
+    Ok(logged_any)
+}
+
+fn process_task_completion(
+    repo: &Repository,
+    appview: &AppView,
+    writer: &Writer,
+    task_id: &String,
+) -> Result<bool> {
+    let mut logged_any = false;
+    if let Some(EventPayload::Task(t)) = appview.tasks.get(task_id) {
+        use crate::schema::task::TaskAction;
+        match t.action {
+            TaskAction::Plan => {
+                logged_any |= handle_plan(writer, task_id);
+            }
+            TaskAction::ReviewPlan => {
+                handle_review_plan(repo, task_id);
+            }
+            TaskAction::ReviewImplementation => {
+                logged_any |= handle_review_rejection(appview, writer, task_id)
+                    || handle_review_approval(repo, appview, writer, task_id);
+            }
+            _ => {}
+        }
+    }
+    Ok(logged_any)
 }
 
 #[cfg(test)]
@@ -688,6 +692,245 @@ mod tests {
                 }).await
             }).await.expect("Test completely timed out natively via timeout boundary!");
         });
+        Ok(())
+    }
+
+    #[sealed_test]
+    fn test_handle_review_rejection_direct() -> Result<()> {
+        let temp_dir = TempDir::new()?;
+        let repo = Repository::init(temp_dir.path())?;
+        let nancy_dir = temp_dir.path().join(".nancy");
+        std::fs::create_dir_all(&nancy_dir)?;
+
+        let coord_identity = Identity::Coordinator {
+            did: DidOwner { did: "mock1".to_string(), public_key_hex: "00".to_string(), private_key_hex: "00".to_string() },
+            workers: vec![],
+        };
+        fs::write(nancy_dir.join("identity.json"), serde_json::to_string(&coord_identity)?)?;
+        let writer = Writer::new(&repo, coord_identity)?;
+
+        let mut appview = AppView::new();
+        
+        let implement_payload = EventPayload::Task(TaskPayload {
+            action: TaskAction::Implement, description: "".to_string(), preconditions: "".to_string(),
+            postconditions: "".to_string(), validation_strategy: "".to_string(),
+            branch: "TBD".to_string(), review_session_file: None
+        });
+        let implement_id = writer.log_event(implement_payload.clone())?;
+        appview.apply_event(&implement_payload, &implement_id);
+
+        let review_payload = EventPayload::Task(TaskPayload {
+            action: TaskAction::ReviewImplementation, description: "".to_string(), preconditions: "".to_string(),
+            postconditions: "".to_string(), validation_strategy: "".to_string(),
+            branch: "TBD".to_string(), review_session_file: None
+        });
+        let review_id = writer.log_event(review_payload.clone())?;
+        appview.apply_event(&review_payload, &review_id);
+
+        let blocked_by_payload = EventPayload::BlockedBy(BlockedByPayload { source: implement_id.clone(), target: review_id.clone() });
+        writer.log_event(blocked_by_payload.clone())?;
+        appview.apply_event(&blocked_by_payload, "ev_block_id"); 
+
+        let report = crate::pre_review::schema::ReviewOutput {
+            vote: crate::pre_review::schema::ReviewVote::ChangesRequired,
+            agree_notes: "".to_string(),
+            disagree_notes: "".to_string(),
+        };
+        appview.completed_reports.insert(review_id.clone(), serde_json::to_string(&report)?);
+
+        let handled = handle_review_rejection(&appview, &writer, &review_id);
+        assert!(handled, "Direct unit test for review rejection failed: returned false");
+        writer.commit_batch()?;
+        
+        let mut rework_logged = false;
+        let reader = Reader::new(&repo, "mock1".to_string());
+        for ev in reader.iter_events()? {
+            if let EventPayload::Task(t) = ev?.payload {
+                if t.description.contains(&implement_id) && t.action == TaskAction::Implement && t.preconditions.contains("Review Dissent") {
+                    rework_logged = true;
+                }
+            }
+        }
+        assert!(rework_logged, "Rework task not natively logged during test boundaries!");
+        Ok(())
+    }
+
+    #[sealed_test]
+    fn test_handle_review_approval_direct_conflict_generation() -> Result<()> {
+        let temp_dir = TempDir::new()?;
+        let repo = Repository::init(temp_dir.path())?;
+        let nancy_dir = temp_dir.path().join(".nancy");
+        std::fs::create_dir_all(&nancy_dir)?;
+
+        let coord_identity = Identity::Coordinator {
+            did: DidOwner { did: "mock1".to_string(), public_key_hex: "00".to_string(), private_key_hex: "00".to_string() },
+            workers: vec![],
+        };
+        fs::write(nancy_dir.join("identity.json"), serde_json::to_string(&coord_identity)?)?;
+        
+        let mut index = repo.index()?;
+        let tree_id = index.write_tree()?;
+        let tree = repo.find_tree(tree_id)?;
+        let sig = git2::Signature::now("Test", "test@test.com")?;
+        let commit1 = repo.commit(Some("HEAD"), &sig, &sig, "Initial", &tree, &[])?;
+        let commit1_obj = repo.find_commit(commit1)?;
+        let commit2 = repo.commit(None, &sig, &sig, "Feature Advance", &tree, &[&commit1_obj])?;
+
+        let writer = Writer::new(&repo, coord_identity)?;
+        let mut appview = AppView::new();
+
+        let implement_payload = EventPayload::Task(TaskPayload {
+            action: TaskAction::Implement, description: "".to_string(), preconditions: "".to_string(),
+            postconditions: "".to_string(), validation_strategy: "".to_string(),
+            branch: "TBD".to_string(), review_session_file: None
+        });
+        let implement_id = writer.log_event(implement_payload.clone())?;
+        repo.branch(&format!("nancy/tasks/{}", implement_id), &commit1_obj, false)?;
+        appview.apply_event(&implement_payload, &implement_id);
+
+        let review_plan_payload = EventPayload::Task(TaskPayload {
+            action: TaskAction::ReviewPlan, description: "".to_string(), preconditions: "".to_string(),
+            postconditions: "".to_string(), validation_strategy: "".to_string(),
+            branch: "TBD".to_string(), review_session_file: None
+        });
+        let review_plan_id = writer.log_event(review_plan_payload.clone())?;
+        repo.branch(&format!("nancy/features/{}", review_plan_id), &commit1_obj, false)?;
+        repo.reference(&format!("refs/heads/nancy/features/{}", review_plan_id), commit2, true, "Advance")?;
+        appview.apply_event(&review_plan_payload, &review_plan_id);
+        
+        let plan_block = EventPayload::BlockedBy(BlockedByPayload { source: review_plan_id.clone(), target: implement_id.clone() });
+        appview.apply_event(&plan_block, "plan_block_id"); 
+
+        let review_payload = EventPayload::Task(TaskPayload {
+            action: TaskAction::ReviewImplementation, description: "".to_string(), preconditions: "".to_string(),
+            postconditions: "".to_string(), validation_strategy: "".to_string(),
+            branch: "TBD".to_string(), review_session_file: None
+        });
+        let review_id = writer.log_event(review_payload.clone())?;
+        appview.apply_event(&review_payload, &review_id);
+
+        let blocked_by_payload = EventPayload::BlockedBy(BlockedByPayload { source: implement_id.clone(), target: review_id.clone() });
+        appview.apply_event(&blocked_by_payload, "ev_block_id");
+
+        let handled = handle_review_approval(&repo, &appview, &writer, &review_id);
+        assert!(handled, "Direct unit test for review approval failed mapping conflict boundaries");
+        writer.commit_batch()?;
+
+        let mut conflict_logged = false;
+        let reader = Reader::new(&repo, "mock1".to_string());
+        for ev in reader.iter_events()? {
+            if let EventPayload::Task(t) = ev?.payload {
+                if t.description.contains(&format!("Resolve merge conflict on {}", implement_id)) {
+                    conflict_logged = true;
+                }
+            }
+        }
+        assert!(conflict_logged, "Conflict task not successfully emitted into ledger structurally!");
+        Ok(())
+    }
+
+    #[sealed_test]
+    fn test_handle_task_requests_direct() -> Result<()> {
+        let temp_dir = TempDir::new()?;
+        let repo = Repository::init(temp_dir.path())?;
+        let nancy_dir = temp_dir.path().join(".nancy");
+        std::fs::create_dir_all(&nancy_dir)?;
+
+        let coord_identity = Identity::Coordinator {
+            did: crate::schema::identity_config::DidOwner { did: "mock1".to_string(), public_key_hex: "00".to_string(), private_key_hex: "00".to_string() },
+            workers: vec![],
+        };
+        fs::write(nancy_dir.join("identity.json"), serde_json::to_string(&coord_identity)?)?;
+        let writer = Writer::new(&repo, coord_identity)?;
+        let mut appview = AppView::new();
+
+        let req_payload = EventPayload::TaskRequest(crate::schema::task::TaskRequestPayload {
+            description: "Test Request".to_string(),
+            requestor: "test_user".to_string(),
+        });
+        appview.apply_event(&req_payload, "req1");
+        
+        let mut processed = std::collections::HashSet::new();
+        let handled = handle_task_requests(&appview, &writer, &mut processed)?;
+        assert!(handled, "Task requests should log Plan events");
+        writer.commit_batch()?;
+
+        let mut plan_found = false;
+        let reader = Reader::new(&repo, "mock1".to_string());
+        for ev in reader.iter_events()? {
+            if let EventPayload::Task(t) = ev?.payload {
+                if t.action == TaskAction::Plan && t.description == "Test Request" { plan_found = true; }
+            }
+        }
+        assert!(plan_found, "Plan event not natively produced for request boundary mapping limits!");
+        Ok(())
+    }
+
+    #[sealed_test]
+    fn test_handle_plan_direct() -> Result<()> {
+        let temp_dir = TempDir::new()?;
+        let repo = Repository::init(temp_dir.path())?;
+        let nancy_dir = temp_dir.path().join(".nancy");
+        std::fs::create_dir_all(&nancy_dir)?;
+
+        let coord_identity = Identity::Coordinator {
+            did: crate::schema::identity_config::DidOwner { did: "mock1".to_string(), public_key_hex: "00".to_string(), private_key_hex: "00".to_string() },
+            workers: vec![],
+        };
+        fs::write(nancy_dir.join("identity.json"), serde_json::to_string(&coord_identity)?)?;
+        let writer = Writer::new(&repo, coord_identity)?;
+        
+        let handled = handle_plan(&writer, &"task_123".to_string());
+        assert!(handled, "Handle plan should natively produce ReviewPlan tasks structurally!");
+        writer.commit_batch()?;
+
+        let mut review_found = false;
+        let reader = Reader::new(&repo, "mock1".to_string());
+        for ev in reader.iter_events()? {
+            if let EventPayload::Task(t) = ev?.payload {
+                if t.action == TaskAction::ReviewPlan && t.branch.contains("task_123") { review_found = true; }
+            }
+        }
+        assert!(review_found, "ReviewPlan event not naturally linked and produced directly!");
+        Ok(())
+    }
+
+    #[sealed_test]
+    fn test_handle_work_assignments_direct() -> Result<()> {
+        let temp_dir = TempDir::new()?;
+        let repo = Repository::init(temp_dir.path())?;
+        let nancy_dir = temp_dir.path().join(".nancy");
+        std::fs::create_dir_all(&nancy_dir)?;
+
+        let worker = crate::schema::identity_config::DidOwner { did: "mockworker".to_string(), public_key_hex: "00".to_string(), private_key_hex: "00".to_string() };
+        let coord_identity = Identity::Coordinator {
+            did: crate::schema::identity_config::DidOwner { did: "mock1".to_string(), public_key_hex: "00".to_string(), private_key_hex: "00".to_string() },
+            workers: vec![worker.clone()],
+        };
+        fs::write(nancy_dir.join("identity.json"), serde_json::to_string(&coord_identity)?)?;
+        let writer = Writer::new(&repo, coord_identity)?;
+        let mut appview = AppView::new();
+
+        let implement_payload = EventPayload::Task(TaskPayload {
+            action: TaskAction::Implement, description: "".to_string(), preconditions: "".to_string(),
+            postconditions: "".to_string(), validation_strategy: "".to_string(),
+            branch: "TBD".to_string(), review_session_file: None
+        });
+        appview.apply_event(&implement_payload, "impl1");
+        
+        let mut processed = std::collections::HashSet::new();
+        let handled = handle_work_assignments(&repo, &appview, &writer, &vec![worker.clone()], &mut processed)?;
+        assert!(handled, "Work assignments skipped cleanly without natively assigning bounds!");
+        writer.commit_batch()?;
+
+        let mut assigned = false;
+        let reader = Reader::new(&repo, "mock1".to_string());
+        for ev in reader.iter_events()? {
+            if let EventPayload::CoordinatorAssignment(a) = ev?.payload {
+                if a.assignee_did == "mockworker" && a.task_ref == "impl1" { assigned = true; }
+            }
+        }
+        assert!(assigned, "CoordinatorAssignmentPayload structurally missing natively from the evaluation harness limits!");
         Ok(())
     }
 }
