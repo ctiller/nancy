@@ -2,12 +2,17 @@ use crate::eval::EvalDefinition;
 use anyhow::{Context, Result, bail};
 use std::fs;
 
-pub async fn eval_plan(path: &str, output_path: &std::path::Path) -> Result<()> {
+pub fn parse_eval_definition(path: &std::path::Path) -> Result<EvalDefinition> {
     let def: EvalDefinition =
         serde_yaml::from_slice(&fs::read(path).context("Failed to read eval yaml mapping")?)?;
     if def.action != "plan" {
         bail!("Only 'plan' supported");
     }
+    Ok(def)
+}
+
+pub async fn eval_plan(path: &str, output_path: &std::path::Path) -> Result<()> {
+    let def = parse_eval_definition(std::path::Path::new(path))?;
 
     let runner = crate::eval::EvalRunner::setup(&def).await?;
     runner.push_task(def.task_description.clone()).await?;

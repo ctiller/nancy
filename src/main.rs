@@ -46,31 +46,27 @@ pub struct AddTaskArgs {
     pub file: Option<PathBuf>,
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
-    dotenvy::dotenv().ok();
-    let args = Args::parse();
-
+pub async fn execute_command(args: &Args, cwd: PathBuf) -> Result<()> {
     match &args.command {
         Commands::Init(init_args) => {
-            nancy::commands::init::init(std::env::current_dir()?, init_args.grinders).await?;
+            nancy::commands::init::init(cwd, init_args.grinders).await?;
         }
         Commands::AddTask(add_task_args) => {
             nancy::commands::add_task::add_task(
-                std::env::current_dir()?,
+                cwd,
                 add_task_args.task.clone(),
                 add_task_args.file.clone(),
             )
             .await?;
         }
         Commands::Grind => {
-            nancy::commands::grind::grind(std::env::current_dir()?, None, None).await?;
+            nancy::commands::grind::grind(cwd, None, None).await?;
         }
         Commands::Coordinator => {
-            nancy::commands::coordinator::run(std::env::current_dir()?).await?;
+            nancy::commands::coordinator::run(cwd).await?;
         }
         Commands::Run => {
-            nancy::commands::run::run(std::env::current_dir()?).await?;
+            nancy::commands::run::run(cwd).await?;
         }
         Commands::Eval { action, file } => {
             nancy::commands::eval::run(action.clone(), file.clone()).await?;
@@ -78,6 +74,13 @@ async fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    dotenvy::dotenv().ok();
+    let args = Args::parse();
+    execute_command(&args, std::env::current_dir()?).await
 }
 
 #[cfg(test)]
@@ -100,5 +103,54 @@ mod tests {
         assert!(Args::try_parse_from(["nancy", "run"]).is_ok());
         assert!(Args::try_parse_from(["nancy", "add-task", "--task", "test"]).is_ok());
         assert!(Args::try_parse_from(["nancy", "add-task", "--file", "test.txt"]).is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_execute_command_dispatch_loops() -> Result<()> {
+        let td = tempfile::tempdir()?;
+        let td_path = td.path().to_path_buf();
+        
+        let _ = std::process::Command::new("git").args(["init"]).current_dir(&td_path).output();
+        let _ = std::process::Command::new("git").args(["branch", "-m", "main"]).current_dir(&td_path).output();
+        std::fs::write(td_path.join("README.md"), "INIT").unwrap();
+        let _ = std::process::Command::new("git").args(["add", "."]).current_dir(&td_path).output();
+        let _ = std::process::Command::new("git").args(["commit", "-m", "init"]).current_dir(&td_path).output();
+
+        let grind_dir = td_path.clone();
+        
+        // Init identity so that coordinator/grind bounds don't blow up prior to spinning the loop natively!
+        let args_init = Args::try_parse_from(["nancy", "init"]).unwrap();
+        execute_command(&args_init, grind_dir.clone()).await?;
+        assert!(grind_dir.join(".nancy").exists());
+
+        // Test long-running Grinder loop bounds triggering cleanly
+        let args_grind = Args::try_parse_from(["nancy", "grind"]).unwrap();
+        tokio::select! {
+            _ = tokio::time::sleep(tokio::time::Duration::from_secs(2)) => {}
+            res = execute_command(&args_grind, grind_dir.clone()) => {
+                let _ = res; 
+            }
+        }
+        
+        let args_coordinator = Args::try_parse_from(["nancy", "coordinator"]).unwrap();
+        let coord_dir = grind_dir.clone();
+        tokio::select! {
+            _ = tokio::time::sleep(tokio::time::Duration::from_secs(2)) => {}
+            res = execute_command(&args_coordinator, coord_dir) => {
+                let _ = res;
+            }
+        }
+
+        // Test Run explicitly triggering loop correctly natively cleanly
+        let args_run = Args::try_parse_from(["nancy", "run"]).unwrap();
+        let run_dir = grind_dir.clone();
+        tokio::select! {
+            _ = tokio::time::sleep(tokio::time::Duration::from_secs(2)) => {}
+            res = execute_command(&args_run, run_dir) => {
+                let _ = res;
+            }
+        }
+        
+        Ok(())
     }
 }

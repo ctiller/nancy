@@ -63,53 +63,21 @@ mod tests {
     use crate::personas::get_all_personas;
     use crate::pre_review::schema::ReviewOutput;
 
-    #[tokio::test]
-    #[ignore = "Hits real Gemini API; run manually via --ignored"]
-    async fn test_e2e_real_llm_reviewer_execution() {
-        // We load the local .env to access the GEMINI_API_KEY for the real LLM run
-        dotenvy::dotenv().ok();
+    #[test]
+    fn test_schema_validation_parse_llm_decision() {
+        // Assert raw parse decision boundary instead of leaning on MockClient hooks or remote LLMs directly natively!
+        let valid_llm_response = r#"{
+            "vote": "needs_clarification",
+            "agree_notes": "Good variable names",
+            "disagree_notes": "Lack of structural breakdown",
+            "overridden_vetoes": []
+        }"#;
 
-        let all_personas = get_all_personas();
-        let pedant = all_personas
-            .iter()
-            .find(|p| p.name == "The Pedant")
-            .unwrap();
-
-        let system_prompt = reviewer_system_prompt(pedant);
-        let task_prompt = reviewer_task_prompt(
-            1,
-            "Refactor network module to use async channels",
-            "Git diff shows removal of mutexes and addition of tokio channels.",
-            "{\"round_number\": 1, \"ghost_vetos\": [], \"coordinator_justifications\": []}",
-        );
-
-        // We bind the extracted prompt directly into the standard client with schema constraint
-        let mut client = thinking_llm("reviewer_test")
-            .system_prompt(&system_prompt)
-            // Lower temperature to keep the test predictable
-            .temperature(0.1)
-            .build()
-            .expect("Failed to build LLM client");
-
-        let result = client.ask::<ReviewOutput>(&task_prompt).await;
-
-        // Assert that the real LLM endpoint returned a correctly parsed review object schema
-        assert!(
-            result.is_ok(),
-            "Real LLM failed to return a valid structured payload"
-        );
-        let review_output = result.unwrap();
-
-        // As the Pedant reviewing a basic technical refactor diff, we expect a valid JSON parse at minimum
-        println!("Test E2E Review Output: {:?}", review_output);
-        assert!(
-            !review_output.agree_notes.is_empty(),
-            "LLM failed to populate agree_notes"
-        );
-        assert!(
-            !review_output.disagree_notes.is_empty(),
-            "LLM failed to populate disagree_notes"
-        );
+        let parsed: ReviewOutput = 
+            crate::llm::client::parse_response(valid_llm_response).expect("Schema parsing natively failed");
+            
+        assert_eq!(parsed.vote, crate::pre_review::schema::ReviewVote::NeedsClarification);
+        assert!(!parsed.disagree_notes.is_empty());
     }
 
     #[test]

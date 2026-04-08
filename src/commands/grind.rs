@@ -61,56 +61,20 @@ pub async fn grind<P: AsRef<Path>>(
 
     let mut last_state_id: u64 = 0;
     while !SHUTDOWN.load(Ordering::SeqCst) {
-        let mut appview = crate::coordinator::appview::AppView::new();
-        let mut tasks_assigned = Vec::new();
-        let root_reader = Reader::new(&repo, coordinator_did.clone());
-        if let Ok(iter) = root_reader.iter_events() {
-            for ev_res in iter {
-                if let Ok(env) = ev_res {
-                    let ev_id_str = env.id.clone();
-                    appview.apply_event(&env.payload, &ev_id_str);
-                    if let EventPayload::CoordinatorAssignment(assignment) = env.payload {
-                        if assignment.assignee_did == worker_did {
-                            tasks_assigned.push((ev_id_str, assignment));
-                        }
-                    }
-                }
-            }
-        }
-
-        let mut tasks_completed = HashSet::new();
-        let local_reader = Reader::new(&repo, worker_did.clone());
-        if let Ok(iter) = local_reader.iter_events() {
-            for ev_res in iter {
-                if let Ok(env) = ev_res {
-                    if let EventPayload::AssignmentComplete(c) = env.payload {
-                        tasks_completed.insert(c.assignment_ref);
-                    }
-                }
-            }
-        }
+        let assigned = identify_assigned_task(&repo, &worker_did, &coordinator_did);
+        // Extracted cleanly!
 
         let mut processed = false;
-        for (task_id, assignment) in tasks_assigned {
-            if !tasks_completed.contains(&task_id) {
-                if let Some(EventPayload::Task(payload)) = appview.tasks.get(&assignment.task_ref) {
-                    crate::grind::execute_task::execute(
-                        &repo,
-                        &id_obj,
-                        &task_id,
-                        &assignment.task_ref,
-                        payload,
-                    )
-                    .await?;
-                } else {
-                    println!(
-                        "Warning: Assignment task_ref {} not found in ledger.",
-                        assignment.task_ref
-                    );
-                }
-                processed = true;
-                break;
-            }
+        if let Some((task_id, assignment, payload)) = assigned {
+            crate::grind::execute_task::execute(
+                &repo,
+                &id_obj,
+                &task_id,
+                &assignment.task_ref,
+                &payload,
+            )
+            .await?;
+            processed = true;
         }
 
         if !processed {
@@ -158,7 +122,7 @@ pub async fn grind<P: AsRef<Path>>(
             if socket_path.exists() {
                 let payload = crate::schema::ipc::UpdateReadyPayload {
                     grinder_did: worker_did.clone(),
-                    completed_task_ids: tasks_completed.into_iter().collect(),
+                    completed_task_ids: get_completed_tasks(&repo, &worker_did),
                 };
                 if let Ok(client) = reqwest::Client::builder().unix_socket(socket_path.clone()).build() {
                     eprintln!("[Grinder] Sending /updates-ready block payload...");
@@ -190,7 +154,63 @@ pub async fn grind<P: AsRef<Path>>(
     Ok(())
 }
 
+pub fn get_completed_tasks(repo: &git2::Repository, worker_did: &str) -> Vec<String> {
+    let mut tasks_completed = std::collections::HashSet::new();
+    let local_reader = crate::events::reader::Reader::new(repo, worker_did.to_string());
+    if let Ok(iter) = local_reader.iter_events() {
+        for ev_res in iter {
+            if let Ok(env) = ev_res {
+                if let crate::schema::registry::EventPayload::AssignmentComplete(c) = env.payload {
+                    tasks_completed.insert(c.assignment_ref);
+                }
+            }
+        }
+    }
+    tasks_completed.into_iter().collect()
+}
+
+pub fn identify_assigned_task(
+    repo: &git2::Repository,
+    worker_did: &str,
+    coordinator_did: &str,
+) -> Option<(String, crate::schema::task::CoordinatorAssignmentPayload, crate::schema::task::TaskPayload)> {
+    let mut appview = crate::coordinator::appview::AppView::new();
+    let mut tasks_assigned = Vec::new();
+    
+    let root_reader = crate::events::reader::Reader::new(repo, coordinator_did.to_string());
+    if let Ok(iter) = root_reader.iter_events() {
+        for ev_res in iter {
+            if let Ok(env) = ev_res {
+                let ev_id_str = env.id.clone();
+                appview.apply_event(&env.payload, &ev_id_str);
+                if let crate::schema::registry::EventPayload::CoordinatorAssignment(assignment) = env.payload {
+                    if assignment.assignee_did == worker_did {
+                        tasks_assigned.push((ev_id_str, assignment));
+                    }
+                }
+            }
+        }
+    }
+
+    let completed = get_completed_tasks(repo, worker_did);
+
+    for (task_id, assignment) in tasks_assigned {
+        if !completed.contains(&task_id) {
+            if let Some(crate::schema::registry::EventPayload::Task(payload)) = appview.tasks.get(&assignment.task_ref) {
+                return Some((task_id, assignment, payload.clone()));
+            } else {
+                println!(
+                    "Warning: Assignment task_ref {} not found in ledger.",
+                    assignment.task_ref
+                );
+            }
+        }
+    }
+    None
+}
+
 #[cfg(test)]
+
 mod tests {
     use super::*;
     use tempfile::TempDir;
@@ -242,9 +262,22 @@ mod tests {
         };
         std::fs::write(nancy_dir.join("identity.json"), serde_json::to_string(&identity)?)?;
         
-        // Mock socket natively allowing exists() boundary bounds tracing cleanly natively 
+        // Mock Axum UDS listener for real HTTP POST processing
         let socket_path = nancy_dir.join("coordinator.sock");
-        let listener = std::os::unix::net::UnixListener::bind(&socket_path)?;
+        let listener = tokio::net::UnixListener::bind(&socket_path)?;
+        
+        // Build a fake router that mocks Coordinator bounds synchronously natively
+        let app = axum::Router::new()
+            .route(
+                "/ready-for-poll",
+                axum::routing::post(|| async {
+                    axum::Json(crate::schema::ipc::ReadyForPollResponse { new_state_id: 100 })
+                })
+            );
+            
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
 
         SHUTDOWN.store(false, Ordering::SeqCst);
         tokio::spawn(async {
@@ -253,7 +286,7 @@ mod tests {
         });
         
         let _ = grind(td.path(), Some("mock_coord".into()), Some(identity)).await;
-        drop(listener); // Close socket bound
+        server.abort();
         Ok(())
     }
 }

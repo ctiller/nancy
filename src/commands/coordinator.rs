@@ -18,7 +18,7 @@ use tokio::sync::broadcast;
 #[derive(Clone)]
 pub struct IpcState {
     tx_ready: Arc<tokio::sync::watch::Sender<u64>>,
-    tx_updates: Arc<tokio::sync::mpsc::UnboundedSender<crate::schema::ipc::UpdateReadyPayload>>,
+    tx_updates: Arc<tokio::sync::mpsc::UnboundedSender<(crate::schema::ipc::UpdateReadyPayload, tokio::sync::oneshot::Sender<()>)>>,
 }
 
 pub static SHUTDOWN: AtomicBool = AtomicBool::new(false);
@@ -90,63 +90,24 @@ impl Coordinator {
         });
 
         while !condition(&AppView::new()) && !SHUTDOWN.load(Ordering::SeqCst) {
-            let mut appview = AppView::new();
-
-            // Poll our own ledger to hydrate AppView structurally
-            let reader = Reader::new(&self.repo, did.clone());
-            if let Ok(iter) = reader.iter_events() {
-                for ev_res in iter {
-                    if let Ok(env) = ev_res {
-                        appview.apply_event(&env.payload, &env.id);
-                    }
-                }
-            }
-
-
-            // Sync with grinders to receive their AssignmentCompletes
-            if let Identity::Coordinator { workers, .. } = &self.identity {
-                for worker in workers {
-                    let local_reader = Reader::new(&self.repo, worker.did.clone());
-                    if let Ok(iter) = local_reader.iter_events() {
-                        for ev_res in iter {
-                            if let Ok(env) = ev_res {
-                                appview.apply_event(&env.payload, &env.id);
-                            }
-                        }
-                    }
-                }
-            }
+            let mut appview = hydrate_coordinator_state(&self.repo, &self.identity);
 
             // Test loop condition against synced view
             if condition(&appview) {
                 break;
             }
 
-            let writer = Writer::new(&self.repo, self.identity.clone())?;
-            let mut logged_any = false;
-
-            // Process Completed Tasks first sequentially avoiding deadlocks
-            for task_id in &appview.task_completions {
-                if !processed_completed_tasks.contains(task_id) {
-                    processed_completed_tasks.insert(task_id.clone());
-                    logged_any |= process_task_completion(&self.repo, &appview, &writer, task_id).unwrap_or(false);
-                }
-            }
-
-            // Extract unassigned items to map to workers
-            if let Identity::Coordinator { workers, .. } = &self.identity {
-                if workers.is_empty() {
-                    println!("Coordinator has no workers provisioned!");
-                } else {
-                    logged_any |= handle_work_assignments(&self.repo, &appview, &writer, workers, &mut processed_request_ids).unwrap_or(false);
-                    logged_any |= handle_task_requests(&appview, &writer, &mut processed_request_ids).unwrap_or(false);
-                }
-            }
+            let mut logged_any = process_app_view_events(
+                &self.repo, 
+                &appview, 
+                &self.identity, 
+                &mut processed_completed_tasks, 
+                &mut processed_request_ids
+            )?;
 
             let mut will_sleep = false;
 
             if logged_any {
-                writer.commit_batch()?;
                 eprintln!("[Coordinator] Successfully processed and committed Grinder events. Broadcasting tx_ready to unblock...");
                 shared_tx_ready.send_modify(|val| *val += 1); // increment state boundary safely
             } else if force_sync_broadcast {
@@ -163,9 +124,11 @@ impl Coordinator {
                 use tokio::time::{sleep, Duration};
                 tokio::select! {
                     _ = sleep(Duration::from_millis(1500)) => {} // safety loop
-                    _ = rx_updates.recv() => {
+                    Some(payload_with_tx) = rx_updates.recv() => {
                         eprintln!("[Coordinator] AWAKENED: Grinder explicitly hit /updates-ready HTTP ping. Accelerating event processor...");
                         force_sync_broadcast = true;
+                        // Synchronize explicitly with the Grinder!
+                        let _ = payload_with_tx.1.send(());
                     } // cleanly awoken explicitly by grinder /updates-ready
                 }
             }
@@ -217,15 +180,9 @@ async fn updates_ready_handler(
     State(state): State<IpcState>,
     axum::Json(payload): axum::Json<crate::schema::ipc::UpdateReadyPayload>,
 ) {
-    eprintln!("[Coordinator API] Grinder hit /updates-ready ({} completed). Sending via tx_updates...", payload.completed_task_ids.len());
-    let mut rx = state.tx_ready.subscribe();
-    let _initial_val = *rx.borrow_and_update();
-    let _ = state.tx_updates.send(payload);
-    let mut res = false;
-    if rx.changed().await.is_ok() {
-        res = true;
-    }
-    eprintln!("[Coordinator API] /updates-ready unblocked natively! Result: {:?}", res);
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let _ = state.tx_updates.send((payload, tx));
+    let _ = rx.await;
 }
 
 
@@ -469,6 +426,72 @@ fn handle_task_requests(
         }))?;
         logged_any = true;
     }
+    Ok(logged_any)
+}
+
+pub fn hydrate_coordinator_state(repo: &Repository, identity: &Identity) -> AppView {
+    let mut appview = AppView::new();
+    let did = identity.get_did_owner().did.clone();
+
+    // Poll our own ledger to hydrate AppView structurally
+    let reader = Reader::new(repo, did);
+    if let Ok(iter) = reader.iter_events() {
+        for ev_res in iter {
+            if let Ok(env) = ev_res {
+                appview.apply_event(&env.payload, &env.id);
+            }
+        }
+    }
+
+    // Sync with grinders to receive their AssignmentCompletes
+    if let Identity::Coordinator { workers, .. } = identity {
+        for worker in workers {
+            let local_reader = Reader::new(repo, worker.did.clone());
+            if let Ok(iter) = local_reader.iter_events() {
+                for ev_res in iter {
+                    if let Ok(env) = ev_res {
+                        appview.apply_event(&env.payload, &env.id);
+                    }
+                }
+            }
+        }
+    }
+
+    appview
+}
+
+pub fn process_app_view_events(
+    repo: &Repository, 
+    appview: &AppView, 
+    identity: &Identity, 
+    processed_completed_tasks: &mut std::collections::HashSet<String>, 
+    processed_request_ids: &mut std::collections::HashSet<String>
+) -> Result<bool> {
+    let writer = Writer::new(repo, identity.clone())?;
+    let mut logged_any = false;
+
+    // Process Completed Tasks first sequentially avoiding deadlocks
+    for task_id in &appview.task_completions {
+        if !processed_completed_tasks.contains(task_id) {
+            processed_completed_tasks.insert(task_id.clone());
+            logged_any |= process_task_completion(repo, appview, &writer, task_id).unwrap_or(false);
+        }
+    }
+
+    // Extract unassigned items to map to workers
+    if let Identity::Coordinator { workers, .. } = identity {
+        if workers.is_empty() {
+            println!("Coordinator has no workers provisioned!");
+        } else {
+            logged_any |= handle_work_assignments(repo, appview, &writer, workers, processed_request_ids).unwrap_or(false);
+            logged_any |= handle_task_requests(appview, &writer, processed_request_ids).unwrap_or(false);
+        }
+    }
+    
+    if logged_any {
+        writer.commit_batch()?;
+    }
+
     Ok(logged_any)
 }
 
@@ -960,6 +983,108 @@ mod tests {
             }
         }
         assert!(assigned, "CoordinatorAssignmentPayload structurally missing natively from the evaluation harness limits!");
+        Ok(())
+    }
+
+    struct ServerGuard {
+        handle: tokio::task::JoinHandle<()>,
+    }
+    impl Drop for ServerGuard {
+        fn drop(&mut self) {
+            self.handle.abort();
+        }
+    }
+
+    #[tokio::test]
+    async fn test_ipc_handlers() -> anyhow::Result<()> {
+        let (tx_ready, _rx_ready) = tokio::sync::watch::channel::<u64>(0);
+        let shared_tx_ready = std::sync::Arc::new(tx_ready);
+        let (tx_updates, mut _rx_updates) = tokio::sync::mpsc::unbounded_channel();
+        let ipc_state = super::IpcState {
+            tx_ready: shared_tx_ready.clone(),
+            tx_updates: std::sync::Arc::new(tx_updates),
+        };
+
+        let app = axum::Router::new()
+            .route("/ready-for-poll", axum::routing::post(super::ready_for_poll_handler))
+            .route("/shutdown-requested", axum::routing::get(super::shutdown_requested_handler))
+            .route("/updates-ready", axum::routing::post(super::updates_ready_handler))
+            .with_state(ipc_state);
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let port = listener.local_addr()?.port();
+        let _server_guard = ServerGuard {
+            handle: tokio::spawn(async move {
+                axum::serve(listener, app).await.unwrap();
+            })
+        };
+
+        let client = reqwest::Client::new();
+        let base_url = format!("http://127.0.0.1:{}", port);
+
+        // Test updates_ready
+        let update_payload = crate::schema::ipc::UpdateReadyPayload {
+            grinder_did: "g1".to_string(),
+            completed_task_ids: vec!["t1".to_string()],
+        };
+        let res = client.post(&format!("{}/updates-ready", base_url))
+            .json(&update_payload);
+        
+        let update_req = tokio::task::spawn(async move {
+            res.send().await.unwrap()
+        });
+        
+        // This should have pushed an item to rx_updates!
+        let msg = _rx_updates.recv().await.unwrap();
+        assert_eq!(msg.0.completed_task_ids[0], "t1");
+        msg.1.send(()).unwrap();
+        
+        let res_final = update_req.await?;
+        assert!(res_final.status().is_success());
+
+        // Test ready-for-poll (Stale state instantly returns)
+        let ready_payload = crate::schema::ipc::ReadyForPollPayload { last_state_id: 99 };
+        let res = client.post(&format!("{}/ready-for-poll", base_url))
+            .json(&ready_payload)
+            .send().await?;
+        assert!(res.status().is_success());
+        let ready_data = res.json::<crate::schema::ipc::ReadyForPollResponse>().await?;
+        assert_eq!(ready_data.new_state_id, 0); // instantly bound back to 0!
+
+        // Test ready-for-poll (Waiting for state)
+        let ready_payload_sync = crate::schema::ipc::ReadyForPollPayload { last_state_id: 0 };
+        let base_url2 = base_url.clone();
+        let ready_req = tokio::task::spawn(async move {
+            let client2 = reqwest::Client::new();
+            let res2 = client2.post(&format!("{}/ready-for-poll", base_url2))
+                .timeout(std::time::Duration::from_secs(2))
+                .json(&ready_payload_sync)
+                .send().await.unwrap();
+            res2.json::<crate::schema::ipc::ReadyForPollResponse>().await.unwrap()
+        });
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+        // Broadcast new state boundary
+        shared_tx_ready.send_modify(|val| *val += 1);
+
+        let bound_data = ready_req.await?;
+        assert_eq!(bound_data.new_state_id, 1);
+
+        // Test shutdown_requested triggers appropriately
+        let base_url3 = base_url.clone();
+        let shutdown_req = tokio::task::spawn(async move {
+            let client3 = reqwest::Client::new();
+            client3.get(&format!("{}/shutdown-requested", base_url3))
+                .timeout(std::time::Duration::from_secs(2))
+                .send().await.unwrap()
+        });
+        
+        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+        super::SHUTDOWN.store(true, std::sync::atomic::Ordering::SeqCst);
+        shared_tx_ready.send_modify(|val| *val += 1); // trigger condition
+        let _ = shutdown_req.await?;
+
+        super::SHUTDOWN.store(false, std::sync::atomic::Ordering::SeqCst);
         Ok(())
     }
 }
