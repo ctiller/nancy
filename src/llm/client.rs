@@ -562,4 +562,10 @@ mod tests {
         let result = client.ask("dummy question").await.unwrap();
         assert_eq!(result, "Resolved!");
     }
+
+    #[test]
+    fn test_session_serialize() {
+        let s = Session::new(10);
+        let _json = serde_json::to_string(&s).unwrap();
+    }
 }

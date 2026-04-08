@@ -101,6 +101,7 @@ impl ReviewSession {
 
     pub async fn invoke_reviewers(
         &mut self,
+        task_ref: &str,
         round: u32,
         experts: &[String],
         end_commit_hash: &str,
@@ -143,7 +144,85 @@ impl ReviewSession {
             }
         }
 
-        Ok(join_all(futures).await)
+        let outputs = join_all(futures).await;
+
+        if let Ok(repo) = Repository::open(&self.worktree_path) {
+            if let Err(e) = self.persist_states(&repo, round, task_ref) {
+                eprintln!("Warning: Failed to persist agent states to the nancy/agents branch: {}", e);
+            }
+        }
+
+        Ok(outputs)
+    }
+
+    pub fn persist_states(&self, repo: &git2::Repository, round: u32, task_ref: &str) -> Result<()> {
+        let mut session_logs = HashMap::new();
+        for (expert_id, client) in &self.reviewers {
+            session_logs.insert(expert_id.clone(), client.session.clone());
+        }
+
+        let state = crate::pre_review::schema::ReviewSessionState {
+            task_ref: task_ref.to_string(),
+            active_review_round: round,
+            session_logs,
+        };
+
+        let json = serde_json::to_string_pretty(&state)?;
+
+        let agents_ref_name = "refs/heads/nancy/agents";
+        let mut parent_commit = None;
+        let mut treebuilder = repo.treebuilder(None)?;
+        
+        let sig = git2::Signature::now("Review Orchestrator", "review@nancy.com")?;
+        
+        if let Ok(agents_ref) = repo.find_reference(agents_ref_name) {
+            if let Ok(commit) = agents_ref.peel_to_commit() {
+                parent_commit = Some(commit.clone());
+                if let Ok(tree) = commit.tree() {
+                    treebuilder = repo.treebuilder(Some(&tree))?;
+                }
+            }
+        }
+        
+        let safe_ref = task_ref.replace(":", "_").replace("/", "_");
+        let filename = format!("session_{}_{}.json", self.begin_commit_hash, safe_ref);
+        let blob_id = repo.blob(json.as_bytes())?;
+        
+        let mut reviews_treebuilder = repo.treebuilder(None)?;
+        
+        if let Some(commit) = &parent_commit {
+            if let Ok(tree) = commit.tree() {
+                if let Some(entry) = tree.get_name("reviews") {
+                    if let Ok(obj) = entry.to_object(repo) {
+                        if let Some(rtree) = obj.as_tree() {
+                            reviews_treebuilder = repo.treebuilder(Some(rtree))?;
+                        }
+                    }
+                }
+            }
+        }
+        
+        reviews_treebuilder.insert(&filename, blob_id, 0o100644)?;
+        let reviews_tree_id = reviews_treebuilder.write()?;
+        
+        treebuilder.insert("reviews", reviews_tree_id, 0o040000)?;
+        let new_tree_id = treebuilder.write()?;
+        let new_tree = repo.find_tree(new_tree_id)?;
+        
+        let message = format!("Persist review session {} round {}", safe_ref, round);
+        
+        let parents = match &parent_commit {
+            Some(p) => vec![p],
+            None => vec![],
+        };
+        
+        let mut parents_refs: Vec<&git2::Commit> = Vec::new();
+        for p in &parents {
+            parents_refs.push(p);
+        }
+
+        repo.commit(Some(agents_ref_name), &sig, &sig, &message, &new_tree, &parents_refs)?;
+        Ok(())
     }
 }
 
@@ -240,7 +319,7 @@ mod tests {
         
         // Call twice to trigger the backfill quorum via stagnation
         let _ = session.enforce_quorum(&experts);
-        let res = session.invoke_reviewers(1, &experts, &c2, "Task description", "{}").await;
+        let res = session.invoke_reviewers("test_task_1", 1, &experts, &c2, "Task description", "{}").await;
         
         if let Err(e) = &res {
             let _ = std::fs::write("/tmp/nancy_test_err.log", format!("Error: {:?}", e));
@@ -268,7 +347,7 @@ mod tests {
 
         let experts = vec!["Invalid Name That Drops Off Coverage".to_string(), "The Pedant".to_string()];
         
-        let res = session.invoke_reviewers(1, &experts, &c2, "Task description", "{}").await;
+        let res = session.invoke_reviewers("test_task_2", 1, &experts, &c2, "Task description", "{}").await;
         
         assert!(res.is_ok());
         let outputs = res.unwrap();
@@ -288,7 +367,7 @@ mod tests {
 
         let experts = vec!["The Pedant".to_string()];
         
-        let res = session.invoke_reviewers(6, &experts, &c2, "Task description", "{}").await;
+        let res = session.invoke_reviewers("test_task_3", 6, &experts, &c2, "Task description", "{}").await;
         
         assert!(res.is_ok());
         let outputs = res.unwrap();
@@ -312,7 +391,7 @@ mod tests {
         let experts = vec!["The Pedant".to_string()];
         
         // Final Round 7 triggering harsh bounds
-        let res = session.invoke_reviewers(7, &experts, &c2, "Task description", "{}").await;
+        let res = session.invoke_reviewers("test_task_4", 7, &experts, &c2, "Task description", "{}").await;
         
         assert!(res.is_ok());
         let outputs = res.unwrap();
@@ -321,5 +400,53 @@ mod tests {
         let out = outputs.into_iter().next().unwrap().expect("Parse failed");
         assert_eq!(serde_json::to_string(&out.vote).unwrap(), "\"veto\"");
         assert!(out.disagree_notes.contains("actively denied"));
+    }
+
+    #[tokio::test]
+    #[sealed_test(env = [
+        ("GEMINI_API_KEY", "mock"),
+        ("NANCY_NO_TRACE_EVENTS", "1")
+    ])]
+    async fn test_persist_states_saves_state_to_agents_branch() {
+        let (td, c1, _c2) = setup_test_repo().unwrap();
+        let mut session = ReviewSession::new(td.path().to_str().unwrap(), &c1);
+
+        let expert_id = "test_expert_persona".to_string();
+        let mut client = thinking_llm::<ReviewOutput>("reviewer_test")
+            .system_prompt("sys prompt")
+            .build()
+            .unwrap();
+            
+        // Mock a little bit of history
+        client.session.ask("Test history insertion".to_string());
+        session.reviewers.insert(expert_id, client);
+
+        let repo = Repository::open(td.path()).unwrap();
+        
+        let res = session.persist_states(&repo, 1, "test_session_task");
+        assert!(res.is_ok(), "Writing the state securely cleanly failed explicitly");
+        
+        // Assert that branch exists and contents are strictly exactly what we mapped
+        let branch_ref = repo.find_reference("refs/heads/nancy/agents").expect("Branch was not created successfully");
+        let head_commit = branch_ref.peel_to_commit().unwrap();
+        
+        // Ensure its message is exactly configured correctly
+        assert!(head_commit.message().unwrap().contains("Persist review session test_session_task round 1"));
+        
+        let tree = head_commit.tree().unwrap();
+        let reviews_entry = tree.get_name("reviews").expect("reviews dir not organically bound");
+        let reviews_tree = reviews_entry.to_object(&repo).unwrap().into_tree().unwrap();
+        
+        let json_file_entry = reviews_tree.get_name(&format!("session_{}_test_session_task.json", c1)).unwrap();
+        let blob = json_file_entry.to_object(&repo).unwrap().into_blob().unwrap();
+        
+        let json_str = std::str::from_utf8(blob.content()).unwrap();
+        
+        // Check schema boundary successfully serialized natively!
+        let deserialized: crate::pre_review::schema::ReviewSessionState = serde_json::from_str(json_str).unwrap();
+        
+        assert_eq!(deserialized.task_ref, "test_session_task");
+        assert_eq!(deserialized.active_review_round, 1);
+        assert!(deserialized.session_logs.contains_key("test_expert_persona"));
     }
 }

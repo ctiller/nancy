@@ -59,6 +59,15 @@ pub struct DissentLog {
     pub coordinator_justifications: Vec<String>,
 }
 
+/// The state of the active review session, capturing the entire dialog graph 
+/// of all reviewers on the panel.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReviewSessionState {
+    pub task_ref: String,
+    pub active_review_round: u32,
+    pub session_logs: std::collections::HashMap<String, gemini_client_api::gemini::types::sessions::Session>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
