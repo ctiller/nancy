@@ -204,5 +204,32 @@ mod tests {
         let _ = grind(td.path(), Some("mock_coord".into()), Some(identity)).await;
         Ok(())
     }
+    #[tokio::test]
+    async fn test_grind_socket_exists_coverage() -> anyhow::Result<()> {
+        let td = TempDir::new()?;
+        let _repo = Repository::init(td.path())?;
+        let nancy_dir = td.path().join(".nancy");
+        std::fs::create_dir_all(&nancy_dir)?;
+        
+        let identity = Identity::Coordinator {
+            did: DidOwner { did: "mock1".into(), public_key_hex: "00".into(), private_key_hex: "00".into() },
+            workers: vec![],
+        };
+        std::fs::write(nancy_dir.join("identity.json"), serde_json::to_string(&identity)?)?;
+        
+        // Mock socket natively allowing exists() boundary bounds tracing cleanly natively 
+        let socket_path = nancy_dir.join("coordinator.sock");
+        let listener = std::os::unix::net::UnixListener::bind(&socket_path)?;
+
+        SHUTDOWN.store(false, Ordering::SeqCst);
+        tokio::spawn(async {
+            tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+            SHUTDOWN.store(true, Ordering::SeqCst);
+        });
+        
+        let _ = grind(td.path(), Some("mock_coord".into()), Some(identity)).await;
+        drop(listener); // Close socket bound
+        Ok(())
+    }
 }
 
