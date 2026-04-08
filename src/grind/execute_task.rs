@@ -1,6 +1,7 @@
 use anyhow::{Context, Result, bail};
 use git2::Repository;
 use schemars::JsonSchema;
+use askama::Template;
 
 use crate::events::writer::Writer;
 use crate::schema::identity_config::Identity;
@@ -17,19 +18,24 @@ async fn handle_plan_task(
     task_payload: &TaskPayload,
     writer: &Writer<'_>,
 ) -> Result<String> {
+    let plan_file = target_path.join("plan.md");
+    let plan_file_str = plan_file.display().to_string();
+    let sys_prompt = crate::grind::prompts::PlannerSystemPromptTemplate {
+        plan_file_path: &plan_file_str,
+    }.render().unwrap();
+
     let mut client = crate::llm::thinking_llm("planner")
         .with_writer(writer)
         .tools(crate::tools::agent_tools())
-        .system_prompt(crate::grind::prompts::planner_system_prompt())
+        .system_prompt(&sys_prompt)
         .build()?;
 
-    let mut review_prompt = format!(
-        "Task Description: {}\nPreconditions: {}\n\nCRITICAL: You MUST use your filesystem tools to fully write your generated plan cleanly to the physical file explicitly located at: {}/plan.md",
-        task_payload.description, task_payload.preconditions, target_path.display()
-    );
+    let mut review_prompt = crate::grind::prompts::PlannerPromptTemplate {
+        description: &task_payload.description,
+        preconditions: &task_payload.preconditions,
+    }.render().unwrap();
     
     let mut final_out = String::new();
-    let plan_file = target_path.join("plan.md");
     
     for _attempt in 0..3 {
         let out = client.ask::<String>(&review_prompt).await?;
@@ -52,7 +58,9 @@ async fn handle_plan_task(
                 
             return Ok(format!("Plan successfully generated natively. Outputs length: {}", final_out.len()));
         } else {
-            review_prompt = format!("You generated a response but FAILED to actually create and write to the file {}/plan.md. Please formulate your data into markdown and physically execute your write tool onto that exact path now.", target_path.display());
+            review_prompt = crate::grind::prompts::PlannerFallbackPromptTemplate {
+                plan_file_path: &plan_file_str,
+            }.render().unwrap();
         }
     }
 

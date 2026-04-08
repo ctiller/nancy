@@ -103,7 +103,7 @@ pub fn extract_traces(
 }
 
 pub struct EvalRunner {
-    pub temp_dir: tempfile::TempDir,
+    pub temp_dir: std::path::PathBuf,
     pub repo: git2::Repository,
     pub id_obj: crate::schema::identity_config::Identity,
     grinder_handle: Option<std::thread::JoinHandle<()>>,
@@ -111,8 +111,11 @@ pub struct EvalRunner {
 
 impl EvalRunner {
     pub async fn setup(def: &EvalDefinition) -> anyhow::Result<Self> {
-        let (temp_dir, repo) = def.provision_repo()?;
-        let repo_path = temp_dir.path();
+        let (temp_dir_obj, repo) = def.provision_repo()?;
+        let temp_dir = temp_dir_obj.into_path();
+        let repo_path = temp_dir.as_path();
+        
+        tracing::info!("Eval test harness provisioned cleanly at: {}", repo_path.display());
 
         crate::commands::init::init(&repo_path, 1).await?;
 
@@ -136,11 +139,16 @@ impl EvalRunner {
         };
         let grinder_handle = std::thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().unwrap();
-            let _ = rt.block_on(crate::commands::grind::grind(
+            let res = rt.block_on(crate::commands::grind::grind(
                 bg_dir,
                 Some(explicit_coord),
                 explicit_grinder,
             ));
+            if let Err(e) = res {
+                tracing::error!("Grinder node catastrophically failed and terminated: {:?}", e);
+                // Forceably attempt to unlock any pending bounds natively!
+                crate::commands::grind::SHUTDOWN.store(true, std::sync::atomic::Ordering::SeqCst);
+            }
         });
 
         Ok(Self {
@@ -153,7 +161,7 @@ impl EvalRunner {
 
     pub async fn push_task(&self, description: Option<String>) -> anyhow::Result<()> {
         let desc = description.unwrap_or_else(|| "Evaluated generic task organically".to_string());
-        crate::commands::add_task::add_task(self.temp_dir.path(), Some(desc), None).await?;
+        crate::commands::add_task::add_task(self.temp_dir.as_path(), Some(desc), None).await?;
         Ok(())
     }
 
@@ -161,7 +169,7 @@ impl EvalRunner {
     where
         F: FnMut(&crate::coordinator::appview::AppView) -> bool,
     {
-        let mut coordinator = crate::commands::coordinator::Coordinator::new(self.temp_dir.path())?;
+        let mut coordinator = crate::commands::coordinator::Coordinator::new(self.temp_dir.as_path())?;
         coordinator.run_until(condition).await?;
         crate::commands::grind::SHUTDOWN.store(true, std::sync::atomic::Ordering::SeqCst);
         Ok(())

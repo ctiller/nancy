@@ -62,14 +62,20 @@ pub async fn grind<P: AsRef<Path>>(
 
         let mut processed = false;
         if let Some((task_id, assignment, payload)) = assigned {
-            crate::grind::execute_task::execute(
+            let res = crate::grind::execute_task::execute(
                 &repo,
                 &id_obj,
                 &task_id,
                 &assignment.task_ref,
                 &payload,
             )
-            .await?;
+            .await;
+            
+            if let Err(e) = res {
+                tracing::error!("[Grinder] execute_task dramatically failed natively! Force-flushing partial trace ledger bounds before exit: {:?}", e);
+                let _ = global_writer.commit_batch();
+                return Err(e);
+            }
             processed = true;
         }
 
