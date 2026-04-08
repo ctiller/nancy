@@ -182,7 +182,7 @@ impl EvalRunner {
         }
 
         let hash = appview
-            .tasks
+            .requests
             .keys()
             .next()
             .context("Failed to register organically sourced request hash")?
@@ -273,6 +273,53 @@ mod tests {
         
         assert!(res.is_ok(), "Native wait loop natively failed or deadlocked structurally");
         assert!(condition_met.load(std::sync::atomic::Ordering::SeqCst));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_get_request_hash_resolves_request_id_not_task_id() -> anyhow::Result<()> {
+        let tr = crate::debug::test_repo::TestRepo::new().unwrap();
+        let target_repo = &tr.repo;
+        
+        use crate::schema::identity_config::*;
+        let coord_identity = Identity::Coordinator {
+            did: DidOwner { did: "mock_test_1".to_string(), public_key_hex: "00".to_string(), private_key_hex: "00".to_string() },
+            workers: vec![],
+        };
+
+        let writer = crate::events::writer::Writer::new(target_repo, coord_identity.clone())?;
+
+        let task_req = crate::schema::registry::EventPayload::TaskRequest(crate::schema::task::TaskRequestPayload {
+            requestor: "User".to_string(),
+            description: "Test Request Workflow".to_string(),
+        });
+        let req_id = writer.log_event(task_req).unwrap();
+
+        let task = crate::schema::registry::EventPayload::Task(crate::schema::task::TaskPayload {
+            action: crate::schema::task::TaskAction::Plan,
+            description: "Some nested plan task generated".to_string(),
+            preconditions: "".to_string(),
+            postconditions: "".to_string(),
+            validation_strategy: "".to_string(),
+            branch: "TBD".to_string(),
+            review_session_file: None,
+        });
+        let task_id = writer.log_event(task).unwrap();
+        writer.commit_batch().unwrap();
+
+        assert_ne!(req_id, task_id);
+
+        let runner = EvalRunner {
+            temp_dir: tempfile::tempdir()?,
+            repo: git2::Repository::open(target_repo.workdir().unwrap())?,
+            id_obj: coord_identity,
+            grinder_handle: None,
+        };
+
+        let resolved_hash = runner.get_request_hash()?;
+        
+        assert_eq!(resolved_hash, req_id, "get_request_hash should resolve the request ID, but returned something else (possibly the task ID: {})", task_id);
+        
         Ok(())
     }
 }

@@ -46,7 +46,7 @@ pub struct AddTaskArgs {
     pub file: Option<PathBuf>,
 }
 
-pub async fn execute_command(args: &Args, cwd: PathBuf) -> Result<()> {
+pub(crate) async fn execute_command(args: &Args, cwd: PathBuf) -> Result<()> {
     match &args.command {
         Commands::Init(init_args) => {
             nancy::commands::init::init(cwd, init_args.grinders).await?;

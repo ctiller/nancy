@@ -13,25 +13,21 @@ pub fn llm_tool(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let mut args = Vec::new();
 
     for arg in &input_fn.sig.inputs {
-        if let syn::FnArg::Typed(pat_type) = arg {
-            if let Pat::Ident(pat_ident) = &*pat_type.pat {
+        if let syn::FnArg::Typed(pat_type) = arg
+            && let Pat::Ident(pat_ident) = &*pat_type.pat {
                 args.push((pat_ident.ident.clone(), pat_type.ty.clone()));
             }
-        }
     }
 
     // Extract doc comments for description
     let mut desc_lines = Vec::new();
     for attr in &input_fn.attrs {
-        if attr.path().is_ident("doc") {
-            if let syn::Meta::NameValue(nv) = &attr.meta {
-                if let syn::Expr::Lit(expr_lit) = &nv.value {
-                    if let syn::Lit::Str(lit_str) = &expr_lit.lit {
+        if attr.path().is_ident("doc")
+            && let syn::Meta::NameValue(nv) = &attr.meta
+                && let syn::Expr::Lit(expr_lit) = &nv.value
+                    && let syn::Lit::Str(lit_str) = &expr_lit.lit {
                         desc_lines.push(lit_str.value().trim().to_string());
                     }
-                }
-            }
-        }
     }
 
     let description = desc_lines.join("\n");

@@ -147,7 +147,7 @@ pub async fn execute(
         .arg("add")
         .arg("-f")
         .arg(&target_path)
-        .arg(&task_payload.branch)
+        .arg(task_payload.branch.strip_prefix("refs/heads/").unwrap_or(&task_payload.branch))
         .current_dir(workdir)
         .status()?;
 
@@ -488,9 +488,84 @@ mod tests {
             "task_ref_retry",
             &payload,
         ).await;
-        
-        assert!(res.is_err());
         assert!(res.unwrap_err().to_string().contains("Planner agent failed to persist plan.md persistently"));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[sealed_test(env = [
+        ("GEMINI_API_KEY", "mock"),
+        ("NANCY_NO_TRACE_EVENTS", "1")
+    ])]
+    async fn test_execute_attached_head_commit_preservation() -> anyhow::Result<()> {
+        let mut _tr = crate::debug::test_repo::TestRepo::new()?;
+        let td = &_tr.td;
+        let repo = &_tr.repo;
+
+        let mut index = repo.index()?;
+        let tree_id = index.write_tree()?;
+        let tree = repo.find_tree(tree_id)?;
+        let sig = git2::Signature::now("Mock", "mock@mock.com")?;
+        let commit_id = repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])?;
+        let commit = repo.find_commit(commit_id)?;
+
+        let branch_name = "nancy/plans/test_bug_fix";
+        let full_branch_ref = format!("refs/heads/{}", branch_name);
+        repo.branch(branch_name, &commit, false)?;
+
+        let nancy_dir = td.path().join(".nancy");
+        std::fs::create_dir_all(&nancy_dir)?;
+
+        let identity = Identity::Grinder(DidOwner {
+            did: "mock1".into(),
+            public_key_hex: "00".into(),
+            private_key_hex: "00".into(),
+        });
+
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        crate::events::logger::init_global_writer(tx);
+
+        let payload = TaskPayload {
+            description: "fake".into(),
+            preconditions: "fake".into(),
+            postconditions: "fake".into(),
+            validation_strategy: "fake".into(),
+            action: TaskAction::Plan,
+            branch: full_branch_ref.clone(),
+            review_session_file: None,
+        };
+
+        let worktrees_dir = repo.workdir().unwrap().join("worktrees").join("task_ref_fix");
+        let plan_file = worktrees_dir.join("plan.md");
+        crate::llm::mock::builder::MockChatBuilder::new()
+            .respond_tool_call("write_file", serde_json::json!({
+                "target_file": plan_file.to_string_lossy(),
+                "content": "Mock plan data",
+                "overwrite": true
+            }))
+            .respond("Completed explicit plan!")
+            .respond(r#"{"experts": ["Pedant"], "vote": "approve", "agree_notes": "", "disagree_notes": "", "overridden_vetoes": [], "consensus": "approve", "new_vetoes": [], "cleared_vetoes": [], "recommended_tasks": [], "general_notes": ""}"#)
+            .commit();
+
+        let res = execute(
+            &repo,
+            &identity,
+            "assign_fix",
+            "task_ref_fix",
+            &payload,
+        ).await;
+        
+        assert!(res.is_ok(), "Failed to execute gracefully naturally bounded");
+
+        let r = repo.find_reference(&full_branch_ref).expect("Branch reference should natively exist");
+        let head_commit = r.peel_to_commit().expect("Reference should uniquely resolve securely to commit structural bounds");
+        let head_tree = head_commit.tree().expect("Commit gracefully evaluates");
+        
+        assert!(
+            head_tree.get_name("plan.md").is_some(),
+            "Failure: plan.md was committed gracefully into detached HEAD natively rendering implicitly ignored persistently in the branch target securely natively"
+        );
 
         Ok(())
     }

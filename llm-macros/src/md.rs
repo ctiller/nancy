@@ -29,8 +29,8 @@ pub fn md_defined(_attr: TokenStream, item: TokenStream) -> TokenStream {
         // Convert string types to &'static str
         let mut is_string = false;
         let mut is_option = false;
-        if let Type::Path(type_path) = &field.ty {
-            if let Some(segment) = type_path.path.segments.last() {
+        if let Type::Path(type_path) = &field.ty
+            && let Some(segment) = type_path.path.segments.last() {
                 if segment.ident == "String" || segment.ident == "string" {
                     is_string = true;
                 } else if segment.ident == "Option" {
@@ -39,7 +39,6 @@ pub fn md_defined(_attr: TokenStream, item: TokenStream) -> TokenStream {
                     default_fields.push(quote! { #field_ident: PersonaCategory::Technical });
                 }
             }
-        }
 
         if is_string {
             default_fields.push(quote! { #field_ident: "" });
@@ -50,13 +49,11 @@ pub fn md_defined(_attr: TokenStream, item: TokenStream) -> TokenStream {
         } else {
             // If it's PersonaCategory, it already pushed above. We check so we don't push twice!
             let mut is_cat = false;
-            if let Type::Path(type_path) = &field.ty {
-                if let Some(segment) = type_path.path.segments.last() {
-                    if segment.ident == "PersonaCategory" {
+            if let Type::Path(type_path) = &field.ty
+                && let Some(segment) = type_path.path.segments.last()
+                    && segment.ident == "PersonaCategory" {
                         is_cat = true;
                     }
-                }
-            }
             if !is_cat {
                 default_fields.push(quote! { #field_ident: Default::default() });
             }
