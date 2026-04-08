@@ -21,6 +21,9 @@ pub struct ReviewOutput {
     pub agree_notes: String,
     /// Detailed notes on what the reviewer disagrees with, including proof for vetos.
     pub disagree_notes: String,
+    /// Event IDs of prior active vetoes this persona wishes to explicitly dismiss.
+    #[serde(default)]
+    pub overridden_vetoes: Vec<String>,
 }
 
 /// A veto held by a reviewer who has been ejected from the panel.

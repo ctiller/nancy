@@ -1,10 +1,8 @@
 use crate::llm::client::LlmClient;
 use anyhow::{Context, bail};
-use schemars::JsonSchema;
-use serde::de::DeserializeOwned;
-use std::any::TypeId;
 use std::marker::PhantomData;
 
+#[derive(Clone, Copy)]
 pub enum Kind {
     Fast,
     Thinking,
@@ -15,50 +13,39 @@ pub enum Version {
     V3_1,
 }
 
-pub struct LlmBuilder<T> {
+pub struct LlmBuilder {
     kind: Kind,
-    version: Version,
     temperature: Option<f32>,
     system_prompt: Vec<String>,
     tools: Vec<Box<dyn crate::llm::tool::LlmTool>>,
     subagent: String,
     trace_tx: Option<tokio::sync::mpsc::UnboundedSender<crate::schema::registry::EventPayload>>,
-    _marker: PhantomData<T>,
 }
 
-pub fn fast_llm<T: DeserializeOwned + JsonSchema + 'static>(name: &str) -> LlmBuilder<T> {
+pub fn fast_llm(name: &str) -> LlmBuilder {
     LlmBuilder::new(Kind::Fast, name)
 }
 
-pub fn thinking_llm<T: DeserializeOwned + JsonSchema + 'static>(name: &str) -> LlmBuilder<T> {
+pub fn thinking_llm(name: &str) -> LlmBuilder {
     LlmBuilder::new(Kind::Thinking, name)
 }
 
-impl<T: DeserializeOwned + JsonSchema + 'static> LlmBuilder<T> {
+impl LlmBuilder {
     fn new(mut kind: Kind, name: &str) -> Self {
         if cfg!(test) {
             kind = Kind::Fast;
         }
-
-        let is_string = TypeId::of::<T>() == TypeId::of::<String>();
-        let version = if is_string {
-            Version::V2_5
-        } else {
-            Version::V3_1
-        };
 
         let uuid = uuid::Uuid::new_v4().to_string()[..8].to_string();
         let subagent = format!("{}_{}", name, uuid);
 
         Self {
             kind,
-            version,
             temperature: None,
             system_prompt: Vec::new(),
             tools: Vec::new(),
             subagent,
             trace_tx: None,
-            _marker: PhantomData,
         }
     }
 
@@ -90,49 +77,9 @@ impl<T: DeserializeOwned + JsonSchema + 'static> LlmBuilder<T> {
         self
     }
 
-    pub fn build(self) -> anyhow::Result<LlmClient<T>> {
-        let model = Self::resolve_model(&self.kind, &self.version);
-
-        let is_string = TypeId::of::<T>() == TypeId::of::<String>();
-        let schema = if !is_string {
-            Some(schemars::schema_for!(T))
-        } else {
-            None
-        };
-
+    pub fn build(self) -> anyhow::Result<LlmClient> {
         let api_key = std::env::var("GEMINI_API_KEY")
             .context("GEMINI_API_KEY environment variable is not set")?;
-
-        // Inline mapping equivalent to old build_gemini_client
-        let joined_sys = self.system_prompt.join("\n\n");
-        let sys_prompt = if !joined_sys.is_empty() {
-            Some(gemini_client_api::gemini::types::request::SystemInstruction::from(joined_sys))
-        } else {
-            None
-        };
-
-        let mut gemini = gemini_client_api::gemini::ask::Gemini::new(&api_key, model, sys_prompt);
-        if let Some(temp) = self.temperature {
-            gemini.set_generation_config()["temperature"] = serde_json::json!(temp);
-        }
-
-        if let Some(schema_val) = &schema {
-            let schema_v = serde_json::to_value(schema_val)?;
-            let transpiled_v = crate::llm::schema::transpile_schema(schema_v);
-            gemini = gemini.set_json_mode(transpiled_v);
-        }
-
-        let mut function_decls = Vec::new();
-        for tool in &self.tools {
-            function_decls.push(tool.declaration());
-        }
-        if !function_decls.is_empty() {
-            gemini = gemini.set_tools(vec![
-                gemini_client_api::gemini::types::request::Tool::FunctionDeclarations(
-                    function_decls,
-                ),
-            ]);
-        }
 
         let session = gemini_client_api::gemini::types::sessions::Session::new(10000);
 
@@ -152,16 +99,14 @@ impl<T: DeserializeOwned + JsonSchema + 'static> LlmBuilder<T> {
         };
 
         Ok(LlmClient {
-            model: model.to_string(),
+            kind: self.kind,
+            api_key,
             temperature: self.temperature,
             system_prompt: self.system_prompt,
-            schema,
             tools: self.tools,
             subagent: self.subagent,
             trace_tx: tx,
             session,
-            gemini,
-            #[cfg(test)]
             mock_queue: {
                 if let Ok(mock_json) = std::env::var("NANCY_MOCK_LLM_RESPONSE") {
                     if let Ok(resps) = serde_json::from_str::<
@@ -183,11 +128,10 @@ impl<T: DeserializeOwned + JsonSchema + 'static> LlmBuilder<T> {
                     None
                 }
             },
-            _marker: PhantomData,
         })
     }
 
-    fn resolve_model(kind: &Kind, version: &Version) -> &'static str {
+    pub fn resolve_model(kind: &Kind, version: &Version) -> &'static str {
         match (kind, version) {
             (Kind::Fast, Version::V2_5) => "gemini-2.5-flash",
             (Kind::Fast, Version::V3_1) => "gemini-3.1-flash-preview",
@@ -200,44 +144,24 @@ impl<T: DeserializeOwned + JsonSchema + 'static> LlmBuilder<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde::Deserialize;
-
-    #[allow(dead_code)]
-    #[derive(Deserialize, JsonSchema)]
-    struct DummyStruct {
-        _val: i32,
-    }
-
     use sealed_test::prelude::*;
-
-    #[sealed_test(env = [("GEMINI_API_KEY", "xxx")])]
-    #[should_panic]
-    fn test_fast_llm_string() {
-        let _client = fast_llm::<String>("test").build().unwrap();
-    }
-
-    #[sealed_test(env = [("GEMINI_API_KEY", "xxx")])]
-    #[should_panic]
-    fn test_thinking_llm_string() {
-        let _client = thinking_llm::<String>("test").build().unwrap();
-    }
 
     #[test]
     fn test_resolve_model() {
         assert_eq!(
-            LlmBuilder::<String>::resolve_model(&Kind::Fast, &Version::V2_5),
+            LlmBuilder::resolve_model(&Kind::Fast, &Version::V2_5),
             "gemini-2.5-flash"
         );
         assert_eq!(
-            LlmBuilder::<String>::resolve_model(&Kind::Fast, &Version::V3_1),
+            LlmBuilder::resolve_model(&Kind::Fast, &Version::V3_1),
             "gemini-3.1-flash-preview"
         );
         assert_eq!(
-            LlmBuilder::<String>::resolve_model(&Kind::Thinking, &Version::V2_5),
+            LlmBuilder::resolve_model(&Kind::Thinking, &Version::V2_5),
             "gemini-2.5-pro"
         );
         assert_eq!(
-            LlmBuilder::<String>::resolve_model(&Kind::Thinking, &Version::V3_1),
+            LlmBuilder::resolve_model(&Kind::Thinking, &Version::V3_1),
             "gemini-3.1-pro-preview"
         );
     }

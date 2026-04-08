@@ -1,11 +1,104 @@
 use anyhow::{Context, Result, bail};
 use git2::Repository;
-use std::time::Duration;
+use schemars::JsonSchema;
 
 use crate::events::writer::Writer;
 use crate::schema::identity_config::Identity;
 use crate::schema::registry::EventPayload;
 use crate::schema::task::{AssignmentCompletePayload, TaskAction, TaskPayload};
+
+#[derive(serde::Serialize, serde::Deserialize, JsonSchema)]
+struct TeamSelectionPayload {
+    pub experts: Vec<String>,
+}
+
+async fn handle_plan_task(
+    _target_path: &std::path::Path,
+    task_payload: &TaskPayload,
+    writer: &Writer<'_>,
+) -> Result<String> {
+    let mut client = crate::llm::thinking_llm("planner")
+        .with_writer(writer)
+        .system_prompt(crate::grind::prompts::planner_system_prompt())
+        .build()?;
+
+    let review_prompt = format!(
+        "Task Description: {}\nPreconditions: {}",
+        task_payload.description, task_payload.preconditions
+    );
+    let out = client.ask::<String>(&review_prompt).await?;
+    Ok(format!("Plan generation outputs length: {}", out.len()))
+}
+
+async fn handle_implement_task(
+    _target_path: &std::path::Path,
+    task_payload: &TaskPayload,
+    writer: &Writer<'_>,
+) -> Result<String> {
+    let mut client = crate::llm::thinking_llm("implementer")
+        .with_writer(writer)
+        .tools(crate::tools::agent_tools())
+        .system_prompt(crate::grind::prompts::implementer_system_prompt())
+        .build()?;
+
+    let out = client.ask::<String>(&task_payload.description).await?;
+    Ok(format!("Implementation generation outputs: {}", out.len()))
+}
+
+async fn handle_review_task(
+    target_path: &std::path::Path,
+    repo: &Repository,
+    task_ref: &str,
+    task_payload: &TaskPayload,
+    writer: &Writer<'_>,
+) -> Result<String> {
+    let target_repo = Repository::open(target_path)?;
+    let head_minus_one = target_repo.revparse_single("HEAD~1")?.id().to_string();
+    let mut session = crate::pre_review::session::ReviewSession::new(target_path, &head_minus_one);
+
+    let mut coordinator_client = crate::llm::thinking_llm("review_coordinator")
+        .with_writer(writer)
+        .system_prompt(crate::grind::prompts::review_team_selection_prompt())
+        .build()?;
+
+    let team_selection = coordinator_client
+        .ask::<TeamSelectionPayload>("Select team based on diff bounds natively...")
+        .await?;
+
+    let outputs = session
+        .invoke_reviewers(
+            task_ref,
+            1,
+            &team_selection.experts,
+            "HEAD",
+            &task_payload.description,
+            "{}",
+        )
+        .await?;
+
+    let mut synthesis_client = crate::llm::thinking_llm("review_synthesis")
+        .with_writer(writer)
+        .system_prompt(crate::grind::prompts::review_synthesis_prompt())
+        .build()?;
+
+    let valid_outputs: Vec<_> = outputs.into_iter().filter_map(|x| x.ok()).collect();
+    let synthesis_str = serde_json::to_string(&valid_outputs)?;
+
+    let report = synthesis_client
+        .ask::<crate::schema::task::ReviewReportPayload>(&synthesis_str)
+        .await?;
+
+    for veto in &report.cleared_vetoes {
+        writer.log_event(EventPayload::GhostVetoOverride(
+            crate::schema::task::GhostVetoOverridePayload {
+                target_veto_event_id: veto.clone(),
+                override_reason: "Cleared by Dynamic Consensus Architect".to_string(),
+            },
+        ))?;
+    }
+
+    Ok(serde_json::to_string(&report)?)
+}
 
 pub async fn execute(
     repo: &Repository,
@@ -20,7 +113,6 @@ pub async fn execute(
     let safe_ref = task_ref.replace(":", "_").replace("/", "_");
     let target_path = workdir.join("worktrees").join(&safe_ref);
 
-    // Create worktree cleanly
     let status = std::process::Command::new("git")
         .arg("worktree")
         .arg("add")
@@ -34,7 +126,6 @@ pub async fn execute(
         bail!("Failed to spawn worktree for {}", task_ref);
     }
 
-    // Dual checkout evaluation exclusively mapping Plan parameters directly.
     if task_payload.action == TaskAction::Plan {
         println!("Provisioning localized dual-worktree for planning evaluation bounds...");
         let plan_exec_path = target_path.join("codebase_checkout");
@@ -48,21 +139,22 @@ pub async fn execute(
             .status()?;
     }
 
-    std::thread::sleep(Duration::from_millis(10)); // Mocking work securely
-
-    // Mock diff integrations safely mapped globally.
-    if task_payload.action == TaskAction::ReviewPlan
-        || task_payload.action == TaskAction::ReviewImplementation
-    {
-        println!("Parsed localized diff safely securely in Review phase bounds.");
-    }
-
-    let resolved_commit_sha = "mock_sha_xyz987".to_string();
     let writer = Writer::new(repo, id_obj.clone())?;
+
+    let report_str = match task_payload.action {
+        TaskAction::Plan => handle_plan_task(&target_path, task_payload, &writer).await?,
+        TaskAction::Implement => {
+            handle_implement_task(&target_path, task_payload, &writer).await?
+        }
+        TaskAction::ReviewPlan | TaskAction::ReviewImplementation => {
+            handle_review_task(&target_path, repo, task_ref, task_payload, &writer).await?
+        }
+    };
+
     writer.log_event(EventPayload::AssignmentComplete(
         AssignmentCompletePayload {
             assignment_ref: assignment_id.to_string(),
-            report: format!("Completed with mock sha {}", resolved_commit_sha),
+            report: report_str,
         },
     ))?;
     writer.commit_batch()?;
@@ -95,16 +187,20 @@ pub async fn execute(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::TempDir;
     use crate::schema::identity_config::DidOwner;
+    use tempfile::TempDir;
 
     #[tokio::test]
     async fn test_execute_failure_bounds() -> anyhow::Result<()> {
         let td = TempDir::new()?;
         let repo = Repository::init(td.path())?;
-        
-        let identity = Identity::Grinder(DidOwner { did: "mock1".into(), public_key_hex: "00".into(), private_key_hex: "00".into() });
-        
+
+        let identity = Identity::Grinder(DidOwner {
+            did: "mock1".into(),
+            public_key_hex: "00".into(),
+            private_key_hex: "00".into(),
+        });
+
         let payload = TaskPayload {
             description: "fake".into(),
             preconditions: "fake".into(),
@@ -115,20 +211,25 @@ mod tests {
             review_session_file: None,
         };
 
-        // Execution safely explicitly bails because the branch doesn't natively exist!
         let res = execute(&repo, &identity, "assign_123", "task_ref_7xyz", &payload).await;
         assert!(res.is_err());
         assert!(res.unwrap_err().to_string().contains("Failed to spawn worktree"));
-        
+
         Ok(())
     }
 
+    use sealed_test::prelude::*;
+
     #[tokio::test]
+    #[sealed_test(env = [
+        ("NANCY_MOCK_LLM_RESPONSE", r#"{"candidates": [{"content": {"parts": [{"text": "Completed explicitly safely in logic bound tests"}], "role": "model"}, "finishReason": "STOP", "index": 0}], "usageMetadata": {}, "modelVersion": "test"}"#),
+        ("GEMINI_API_KEY", "mock"),
+        ("NANCY_NO_TRACE_EVENTS", "1")
+    ])]
     async fn test_execute_success_bounds() -> anyhow::Result<()> {
         let td = TempDir::new()?;
         let repo = Repository::init(td.path())?;
-        
-        // Prepare branch
+
         let mut index = repo.index()?;
         let tree_id = index.write_tree()?;
         let tree = repo.find_tree(tree_id)?;
@@ -140,21 +241,146 @@ mod tests {
         let nancy_dir = td.path().join(".nancy");
         std::fs::create_dir_all(&nancy_dir)?;
 
-        let identity = Identity::Grinder(DidOwner { did: "mock1".into(), public_key_hex: "00".into(), private_key_hex: "00".into() });
-        
+        let identity = Identity::Grinder(DidOwner {
+            did: "mock1".into(),
+            public_key_hex: "00".into(),
+            private_key_hex: "00".into(),
+        });
+
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        crate::events::logger::init_global_writer(tx);
+
         let payload = TaskPayload {
             description: "fake".into(),
             preconditions: "fake".into(),
             postconditions: "fake".into(),
             validation_strategy: "fake".into(),
-            action: TaskAction::Plan, // Testing the dual worktree logic natively securely!
+            action: TaskAction::Plan,
             branch: "working_branch".into(),
             review_session_file: None,
         };
 
-        let res = execute(&repo, &identity, "assign_success", "task_ref_success", &payload).await;
-        assert!(res.is_ok());
+        let res = execute(
+            &repo,
+            &identity,
+            "assign_success",
+            "task_ref_success",
+            &payload,
+        )
+        .await;
         
+        assert!(res.is_ok(), "Safely compiled execution trace logic naturally bounds the mock dynamically: {:?}", res);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[sealed_test(env = [
+        ("NANCY_MOCK_LLM_RESPONSE", r#"{"candidates": [{"content": {"parts": [{"text": "{\"experts\": [\"Pedant\"], \"vote\": \"approve\", \"agree_notes\": \"\", \"disagree_notes\": \"\", \"overridden_vetoes\": [], \"consensus\": \"approve\", \"new_vetoes\": [], \"cleared_vetoes\": [\"v_123\"], \"recommended_tasks\": [], \"general_notes\": \"\"}"}], "role": "model"}, "finishReason": "STOP", "index": 0}], "usageMetadata": {}, "modelVersion": "test"}"#),
+        ("GEMINI_API_KEY", "mock"),
+        ("NANCY_NO_TRACE_EVENTS", "1")
+    ])]
+    async fn test_execute_review_bounds() -> anyhow::Result<()> {
+        let td = TempDir::new()?;
+        let repo = Repository::init(td.path())?;
+
+        let mut index = repo.index()?;
+        let tree_id = index.write_tree()?;
+        let tree = repo.find_tree(tree_id)?;
+        let sig = git2::Signature::now("Mock", "mock@mock.com")?;
+        let commit_id1 = repo.commit(Some("refs/heads/main"), &sig, &sig, "init1", &tree, &[])?;
+        let commit1 = repo.find_commit(commit_id1)?;
+        let commit_id = repo.commit(Some("refs/heads/main"), &sig, &sig, "init", &tree, &[&commit1])?;
+        let commit = repo.find_commit(commit_id)?;
+        repo.branch("working_branch", &commit, false)?;
+
+        let nancy_dir = td.path().join(".nancy");
+        std::fs::create_dir_all(&nancy_dir)?;
+
+        let identity = Identity::Grinder(DidOwner {
+            did: "mock1".into(),
+            public_key_hex: "00".into(),
+            private_key_hex: "00".into(),
+        });
+
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        crate::events::logger::init_global_writer(tx);
+
+        let payload = TaskPayload {
+            description: "fake review".into(),
+            preconditions: "fake".into(),
+            postconditions: "fake".into(),
+            validation_strategy: "fake".into(),
+            action: TaskAction::ReviewPlan,
+            branch: "working_branch".into(),
+            review_session_file: None,
+        };
+
+        let res = execute(
+            &repo,
+            &identity,
+            "assign_review",
+            "task_ref_review",
+            &payload,
+        ).await;
+        
+        assert!(res.is_ok(), "Safely compiled execution trace logic naturally bounds the mock dynamically: {:?}", res);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[sealed_test(env = [
+        ("NANCY_MOCK_LLM_RESPONSE", r#"{
+            "candidates": [{"content": {"parts": [{"text": "Implemented safely bounded!"}], "role": "model"}, "finishReason": "STOP", "index": 0}], "usageMetadata": {}, "modelVersion": "test"
+        }"#),
+        ("GEMINI_API_KEY", "mock"),
+        ("NANCY_NO_TRACE_EVENTS", "1")
+    ])]
+    async fn test_execute_implement_bounds() -> anyhow::Result<()> {
+        let td = TempDir::new()?;
+        let repo = Repository::init(td.path())?;
+
+        let mut index = repo.index()?;
+        let tree_id = index.write_tree()?;
+        let tree = repo.find_tree(tree_id)?;
+        let sig = git2::Signature::now("Mock", "mock@mock.com")?;
+        let commit_id = repo.commit(Some("refs/heads/main"), &sig, &sig, "init", &tree, &[])?;
+        let commit = repo.find_commit(commit_id)?;
+        repo.branch("working_branch", &commit, false)?;
+
+        let nancy_dir = td.path().join(".nancy");
+        std::fs::create_dir_all(&nancy_dir)?;
+
+        let identity = Identity::Grinder(DidOwner {
+            did: "mock1".into(),
+            public_key_hex: "00".into(),
+            private_key_hex: "00".into(),
+        });
+
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        crate::events::logger::init_global_writer(tx);
+
+        let payload = TaskPayload {
+            description: "fake impl".into(),
+            preconditions: "fake".into(),
+            postconditions: "fake".into(),
+            validation_strategy: "fake".into(),
+            action: TaskAction::Implement,
+            branch: "working_branch".into(),
+            review_session_file: None,
+        };
+
+        let res = execute(
+            &repo,
+            &identity,
+            "assign_impl",
+            "task_ref_impl",
+            &payload,
+        ).await;
+        
+        assert!(res.is_ok());
+
         Ok(())
     }
 }

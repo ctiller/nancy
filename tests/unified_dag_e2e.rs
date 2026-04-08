@@ -90,7 +90,7 @@ async fn test_coordinator_generates_plan_from_task_request() -> Result<()> {
 
 #[tokio::test]
 #[sealed_test(env = [
-    ("NANCY_MOCK_LLM_RESPONSE", r#"{"candidates": [{"content": {"parts": [{"text": "{\"vote\": \"approve\"}"}], "role": "model"} }]}"#),
+    ("NANCY_MOCK_LLM_RESPONSE", r#"{"candidates": [{"content": {"parts": [{"text": "{\"vote\": \"approve\"}"}], "role": "model"} }], "usageMetadata": {}, "modelVersion": "test"}"#),
     ("GEMINI_API_KEY", "mock")
 ])]
 // Validates that the Coordinator binds isolated planning environments structurally correctly.
@@ -159,7 +159,7 @@ async fn test_coordinator_creates_expected_plan_target_branch() -> Result<()> {
 
 #[tokio::test]
 #[sealed_test(env = [
-    ("NANCY_MOCK_LLM_RESPONSE", r#"{"candidates": [{"content": {"parts": [{"text": "{\"vote\": \"approve\"}"}], "role": "model"} }]}"#),
+    ("NANCY_MOCK_LLM_RESPONSE", r#"{"candidates": [{"content": {"parts": [{"text": "{\"vote\": \"approve\"}"}], "role": "model"} }], "usageMetadata": {}, "modelVersion": "test"}"#),
     ("GEMINI_API_KEY", "mock")
 ])]
 // Validates the explicit Dual-Worktree execution bounds natively creating physical branch maps cleanly spanning.
@@ -214,7 +214,7 @@ async fn test_grinder_dual_worktree_provisioning_for_plans() -> Result<()> {
 
 #[tokio::test]
 #[sealed_test(env = [
-    ("NANCY_MOCK_LLM_RESPONSE", r#"{"candidates": [{"content": {"parts": [{"text": "{\"vote\": \"approve\"}"}], "role": "model"} }]}"#),
+    ("NANCY_MOCK_LLM_RESPONSE", r#"{"candidates": [{"content": {"parts": [{"text": "{\"vote\": \"approve\"}"}], "role": "model"} }], "usageMetadata": {}, "modelVersion": "test"}"#),
     ("GEMINI_API_KEY", "mock")
 ])]
 // Validates the Coordinator tracking completed Plans seamlessly shifting to generating Review bounds safely tracking natively.
@@ -292,7 +292,7 @@ async fn test_coordinator_generates_review_plan_task_upon_plan_completion() -> R
 
 #[tokio::test]
 #[sealed_test(env = [
-    ("NANCY_MOCK_LLM_RESPONSE", r#"{"candidates": [{"content": {"parts": [{"text": "{\"vote\": \"approve\"}"}], "role": "model"} }]}"#),
+    ("NANCY_MOCK_LLM_RESPONSE", r#"{"candidates": [{"content": {"parts": [{"text": "{\"vote\": \"approve\"}"}], "role": "model"} }], "usageMetadata": {}, "modelVersion": "test"}"#),
     ("GEMINI_API_KEY", "mock")
 ])]
 // Validates successful Review Plans tracking cleanly shifting into registering base Feature tracking natively bound over Main!
@@ -372,7 +372,7 @@ async fn test_coordinator_registers_base_feature_branch_upon_review_plan_approva
 
 #[tokio::test]
 #[sealed_test(env = [
-    ("NANCY_MOCK_LLM_RESPONSE", r#"{"candidates": [{"content": {"parts": [{"text": "{\"vote\": \"approve\"}"}], "role": "model"} }]}"#),
+    ("NANCY_MOCK_LLM_RESPONSE", r#"{"candidates": [{"content": {"parts": [{"text": "{\"vote\": \"approve\"}"}], "role": "model"} }], "usageMetadata": {}, "modelVersion": "test"}"#),
     ("GEMINI_API_KEY", "mock")
 ])]
 // Validates that execution boundaries executing Work natively trace their Parent Feature branches tracking correctly seamlessly.
@@ -472,7 +472,7 @@ async fn test_coordinator_inherits_task_parent_from_feature_branch() -> Result<(
 
 #[tokio::test]
 #[sealed_test(env = [
-    ("NANCY_MOCK_LLM_RESPONSE", r#"{"candidates": [{"content": {"parts": [{"text": "{\"vote\": \"approve\"}"}], "role": "model"} }]}"#),
+    ("NANCY_MOCK_LLM_RESPONSE", r#"{"candidates": [{"content": {"parts": [{"text": "{\"vote\": \"approve\"}"}], "role": "model"} }], "usageMetadata": {}, "modelVersion": "test"}"#),
     ("GEMINI_API_KEY", "mock")
 ])]
 // Validates that dependency injection and resolution blocks downstream target allocations accurately bounding AppView states smoothly.
@@ -613,6 +613,7 @@ async fn test_coordinator_generates_rework_implementation_upon_dissent() -> Resu
         vote: nancy::pre_review::schema::ReviewVote::ChangesRequired, // Force reject!
         agree_notes: "".into(),
         disagree_notes: "Failed structural".into(),
+        overridden_vetoes: vec![],
     };
     let assign_id = writer.log_event(EventPayload::CoordinatorAssignment(
         nancy::schema::task::CoordinatorAssignmentPayload {
@@ -789,7 +790,7 @@ async fn test_coordinator_applies_fast_forward_merge_to_feature_branch() -> Resu
 
 #[tokio::test]
 #[sealed_test(env = [
-    ("NANCY_MOCK_LLM_RESPONSE", r#"{"candidates": [{"content": {"parts": [{"text": "{\"vote\": \"approve\"}"}], "role": "model"} }]}"#),
+    ("NANCY_MOCK_LLM_RESPONSE", r#"{"candidates": [{"content": {"parts": [{"text": "{\"vote\": \"approve\"}"}], "role": "model"} }], "usageMetadata": {}, "modelVersion": "test"}"#),
     ("GEMINI_API_KEY", "mock")
 ])]
 // Validates exterminator loop bounds natively dropping execution constraints structurally while mapping equivalency checking identically tracking constraints!

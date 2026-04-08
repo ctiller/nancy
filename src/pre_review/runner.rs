@@ -84,14 +84,14 @@ mod tests {
         );
 
         // We bind the extracted prompt directly into the standard client with schema constraint
-        let mut client = thinking_llm::<ReviewOutput>("reviewer_test")
+        let mut client = thinking_llm("reviewer_test")
             .system_prompt(&system_prompt)
             // Lower temperature to keep the test predictable
             .temperature(0.1)
             .build()
             .expect("Failed to build LLM client");
 
-        let result = client.ask(&task_prompt).await;
+        let result = client.ask::<ReviewOutput>(&task_prompt).await;
 
         // Assert that the real LLM endpoint returned a correctly parsed review object schema
         assert!(

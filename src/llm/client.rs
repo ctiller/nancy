@@ -5,32 +5,28 @@ use gemini_client_api::gemini::types::response::GeminiResponse;
 use gemini_client_api::gemini::types::sessions::Session;
 use schemars::JsonSchema;
 use serde::de::DeserializeOwned;
-use std::marker::PhantomData;
 use std::time::Duration;
 use tokio::time::sleep;
 
 #[cfg(test)]
 use std::sync::{Arc, Mutex};
 
-pub struct LlmClient<T> {
-    pub model: String,
+pub struct LlmClient {
+    pub kind: crate::llm::builder::Kind,
+    pub api_key: String,
     pub temperature: Option<f32>,
     pub system_prompt: Vec<String>,
-    pub schema: Option<schemars::Schema>,
     pub tools: Vec<Box<dyn crate::llm::tool::LlmTool>>,
     pub subagent: String,
     pub trace_tx: Option<tokio::sync::mpsc::UnboundedSender<crate::schema::registry::EventPayload>>,
     pub session: Session,
-    pub gemini: Gemini,
-    #[cfg(test)]
     pub mock_queue: Option<
-        Arc<
-            Mutex<
+        std::sync::Arc<
+            std::sync::Mutex<
                 Vec<Result<GeminiResponse, gemini_client_api::gemini::error::GeminiResponseError>>,
             >,
         >,
     >,
-    pub _marker: PhantomData<T>,
 }
 
 fn should_retry(err: &gemini_client_api::gemini::error::GeminiResponseError) -> Option<Duration> {
@@ -97,7 +93,7 @@ pub(crate) fn parse_response<T: DeserializeOwned + 'static>(text: &str) -> anyho
     }
 }
 
-impl<T: DeserializeOwned + JsonSchema + 'static> LlmClient<T> {
+impl LlmClient {
     pub(crate) async fn handle_tool_calls(&self, chat: &Chat) -> Vec<(String, serde_json::Value)> {
         let mut responses = Vec::new();
         for fc in chat.get_function_calls() {
@@ -156,7 +152,7 @@ impl<T: DeserializeOwned + JsonSchema + 'static> LlmClient<T> {
         responses
     }
 
-    pub async fn ask(&mut self, question: &str) -> anyhow::Result<T> {
+    pub async fn ask<T: DeserializeOwned + JsonSchema + 'static>(&mut self, question: &str) -> anyhow::Result<T> {
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
@@ -172,27 +168,62 @@ impl<T: DeserializeOwned + JsonSchema + 'static> LlmClient<T> {
             ));
         }
         self.session.ask(question.to_string());
-        self.run_loop().await
+        
+        let is_string = std::any::TypeId::of::<T>() == std::any::TypeId::of::<String>();
+        let version = if is_string {
+            crate::llm::builder::Version::V2_5
+        } else {
+            crate::llm::builder::Version::V3_1
+        };
+        let model = crate::llm::builder::LlmBuilder::resolve_model(&self.kind, &version);
+
+        let joined_sys = self.system_prompt.join("\n\n");
+        let sys_prompt = if !joined_sys.is_empty() {
+            Some(gemini_client_api::gemini::types::request::SystemInstruction::from(joined_sys))
+        } else {
+            None
+        };
+
+        let mut gemini = Gemini::new(&self.api_key, model, sys_prompt);
+        if let Some(temp) = self.temperature {
+            gemini.set_generation_config()["temperature"] = serde_json::json!(temp);
+        }
+
+        if !is_string {
+            let schema_val = schemars::schema_for!(T);
+            let schema_v = serde_json::to_value(&schema_val)?;
+            let transpiled_v = crate::llm::schema::transpile_schema(schema_v);
+            gemini = gemini.set_json_mode(transpiled_v);
+        }
+
+        let mut function_decls = Vec::new();
+        for tool in &self.tools {
+            function_decls.push(tool.declaration());
+        }
+        if !function_decls.is_empty() {
+            gemini = gemini.set_tools(vec![
+                gemini_client_api::gemini::types::request::Tool::FunctionDeclarations(
+                    function_decls,
+                ),
+            ]);
+        }
+
+        self.run_loop::<T>(&mut gemini).await
     }
 
-    pub(crate) async fn run_loop(&mut self) -> anyhow::Result<T> {
+    pub(crate) async fn run_loop<T: DeserializeOwned + 'static>(&mut self, gemini: &mut Gemini) -> anyhow::Result<T> {
         loop {
             // Loop for retries
             let mut retry_count = 0;
             let resp: GeminiResponse = loop {
-                #[cfg(not(test))]
-                let ask_res = Gemini::ask(&mut self.gemini, &mut self.session).await;
-                #[cfg(test)]
-                let ask_res = {
-                    if let Some(queue) = &self.mock_queue {
-                        let mut lock = queue.lock().unwrap();
-                        if lock.is_empty() {
-                            panic!("Mock queue exhausted during test");
-                        }
-                        lock.remove(0)
-                    } else {
-                        Gemini::ask(&mut self.gemini, &mut self.session).await
+                let ask_res = if let Some(queue) = &self.mock_queue {
+                    let mut lock = queue.lock().unwrap();
+                    if lock.is_empty() {
+                        panic!("Mock queue exhausted during test");
                     }
+                    lock.remove(0)
+                } else {
+                    Gemini::ask(gemini, &mut self.session).await
                 };
 
                 match ask_res {
@@ -215,12 +246,6 @@ impl<T: DeserializeOwned + JsonSchema + 'static> LlmClient<T> {
             if chat.has_function_call() {
                 let tool_responses = self.handle_tool_calls(chat).await;
                 for (name, payload) in tool_responses {
-                    #[cfg(not(test))]
-                    self.session
-                        .add_function_response(&name, payload)
-                        .map_err(|e| anyhow::anyhow!("{}", e))?;
-
-                    #[cfg(test)]
                     let _ = self.session.add_function_response(&name, payload);
                 }
             } else {
@@ -339,16 +364,6 @@ mod tests {
     #[tokio::test]
     async fn test_handle_tool_calls() {
         // Construct chat containing function calls natively.
-        let _json_fc = serde_json::json!({
-            "parts": [
-                {"functionCall": {"name": "test_tool", "args": {}}},
-                {"functionCall": {"name": "test_tool", "args": {"fail": true}}},
-                {"functionCall": {"name": "unknown_tool", "args": {}}}
-            ]
-        });
-
-        // This leverages an empty chat structure mock structurally mapped.
-        // Wait, Chat::from maps from a raw JSON blob? Let's just create a raw GeminiResponse dynamically bounding the array.
         let json_resp = serde_json::json!({
             "candidates": [{
                 "content": {
@@ -367,18 +382,16 @@ mod tests {
         let chat = resp.get_chat();
 
         let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
-        let client = LlmClient::<String> {
-            model: "model-test".to_string(),
+        let client = LlmClient {
+            kind: crate::llm::builder::Kind::Fast,
+            api_key: "xxx".to_string(),
             temperature: None,
             system_prompt: vec![],
-            schema: None,
             subagent: "test".to_string(),
             trace_tx: Some(tx),
             tools: vec![Box::new(MockTool)],
             session: Session::new(10),
-            gemini: Gemini::new("xxx", "xxx", None),
             mock_queue: None,
-            _marker: PhantomData,
         };
 
         let responses = client.handle_tool_calls(chat).await;
@@ -423,22 +436,19 @@ mod tests {
         let resp: GeminiResponse = serde_json::from_value(json_resp).unwrap();
 
         let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
-        let client = LlmClient::<String> {
-            model: "model-test".to_string(),
+        let mut client = LlmClient {
+            kind: crate::llm::builder::Kind::Fast,
+            api_key: "xxx".to_string(),
             temperature: None,
             system_prompt: vec![],
-            schema: None,
             subagent: "test".to_string(),
             trace_tx: Some(tx),
             tools: vec![],
             session: Session::new(10),
-            gemini: Gemini::new("xxx", "xxx", None),
             mock_queue: Some(Arc::new(Mutex::new(vec![Ok(resp)]))),
-            _marker: PhantomData,
         };
 
-        let mut client_mut = client;
-        let result = client_mut.ask("question").await.unwrap();
+        let result = client.ask::<String>("question").await.unwrap();
         assert_eq!(result, "Hello logic");
     }
 
@@ -461,21 +471,20 @@ mod tests {
         }
 
         let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
-        let mut client = LlmClient::<String> {
-            model: "model-test".to_string(),
+        let mut client = LlmClient {
+            kind: crate::llm::builder::Kind::Fast,
+            api_key: "xxx".to_string(),
             temperature: None,
             system_prompt: vec![],
-            schema: None,
             subagent: "test".to_string(),
             trace_tx: Some(tx),
             tools: vec![],
             session: Session::new(10),
-            gemini: Gemini::new("xxx", "xxx", None),
             mock_queue: Some(Arc::new(Mutex::new(responses))),
-            _marker: PhantomData,
         };
 
-        let result = client.run_loop().await;
+        let mut gemini = Gemini::new("xxx", "test_model", None);
+        let result = client.run_loop::<String>(&mut gemini).await;
         assert!(result.is_err());
         assert!(
             result
@@ -498,21 +507,20 @@ mod tests {
         ));
 
         let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
-        let mut client = LlmClient::<String> {
-            model: "model-test".to_string(),
+        let mut client = LlmClient {
+            kind: crate::llm::builder::Kind::Fast,
+            api_key: "xxx".to_string(),
             temperature: None,
             system_prompt: vec![],
-            schema: None,
             subagent: "test".to_string(),
             trace_tx: Some(tx),
             tools: vec![],
             session: Session::new(10),
-            gemini: Gemini::new("xxx", "xxx", None),
             mock_queue: Some(Arc::new(Mutex::new(vec![err]))),
-            _marker: PhantomData,
         };
 
-        let result = client.run_loop().await;
+        let mut gemini = Gemini::new("xxx", "test", None);
+        let result = client.run_loop::<String>(&mut gemini).await;
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("Gemini API error"));
     }
@@ -545,21 +553,19 @@ mod tests {
         let resp2: GeminiResponse = serde_json::from_value(json_text).unwrap();
 
         let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
-        let mut client = LlmClient::<String> {
-            model: "model-test".to_string(),
+        let mut client = LlmClient {
+            kind: crate::llm::builder::Kind::Fast,
+            api_key: "xxx".to_string(),
             temperature: None,
             system_prompt: vec![],
-            schema: None,
             subagent: "test".to_string(),
             trace_tx: Some(tx),
             tools: vec![Box::new(MockTool)],
             session: Session::new(10),
-            gemini: Gemini::new("xxx", "xxx", None),
             mock_queue: Some(Arc::new(Mutex::new(vec![Ok(resp1), Ok(resp2)]))),
-            _marker: PhantomData,
         };
 
-        let result = client.ask("dummy question").await.unwrap();
+        let result = client.ask::<String>("dummy question").await.unwrap();
         assert_eq!(result, "Resolved!");
     }
 

@@ -13,7 +13,7 @@ use crate::pre_review::runner::{reviewer_system_prompt, reviewer_task_prompt};
 pub struct ReviewSession {
     pub worktree_path: PathBuf,
     pub begin_commit_hash: String,
-    pub reviewers: HashMap<String, LlmClient<ReviewOutput>>,
+    pub reviewers: HashMap<String, LlmClient>,
     pub previous_invalid_panel: HashSet<String>,
 }
 
@@ -30,7 +30,7 @@ impl ReviewSession {
     fn generate_diff(&self, end_commit_hash: &str) -> Result<String> {
         let repo = Repository::open(&self.worktree_path)?;
         let t_begin = repo.find_commit(Oid::from_str(&self.begin_commit_hash)?)?.tree()?;
-        let t_end = repo.find_commit(Oid::from_str(end_commit_hash)?)?.tree()?;
+        let t_end = repo.revparse_single(end_commit_hash)?.peel_to_commit()?.tree()?;
         
         let diff = repo.diff_tree_to_tree(Some(&t_begin), Some(&t_end), None)?;
         
@@ -123,7 +123,7 @@ impl ReviewSession {
                 let sys_prompt = reviewer_system_prompt(persona);
                 let client_name = format!("reviewer_{}", persona.name.replace(" ", "_").to_lowercase());
 
-                let new_client = thinking_llm::<ReviewOutput>(&client_name)
+                let new_client = thinking_llm(&client_name)
                     .system_prompt(&sys_prompt)
                     .tools(crate::tools::agent_tools())
                     .build()?;
@@ -139,7 +139,7 @@ impl ReviewSession {
             if active_panel.contains(id) {
                 let prompt = task_prompt.clone();
                 futures.push(async move {
-                    client.ask(&prompt).await
+                    client.ask::<ReviewOutput>(&prompt).await
                 });
             }
         }
@@ -412,7 +412,7 @@ mod tests {
         let mut session = ReviewSession::new(td.path().to_str().unwrap(), &c1);
 
         let expert_id = "test_expert_persona".to_string();
-        let mut client = thinking_llm::<ReviewOutput>("reviewer_test")
+        let mut client = thinking_llm("reviewer_test")
             .system_prompt("sys prompt")
             .build()
             .unwrap();
