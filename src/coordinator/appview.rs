@@ -39,9 +39,9 @@ impl AppView {
                     self.handled_requests.insert(b.target.clone());
                 }
                 self.blocked_by
-                    .entry(b.source.clone())
+                    .entry(b.target.clone())
                     .or_default()
-                    .insert(b.target.clone());
+                    .insert(b.source.clone());
             }
             EventPayload::AssignmentComplete(c) => {
                 if let Some(target_ref) = self.assignment_targets.get(&c.assignment_ref) {
@@ -250,8 +250,8 @@ mod tests {
 
         appview.apply_event(
             &EventPayload::BlockedBy(BlockedByPayload {
-                source: "impl-id".to_string(),
-                target: "review-id".to_string(),
+                source: "review-id".to_string(),
+                target: "impl-id".to_string(),
             }),
             "bb1",
         );
@@ -292,8 +292,8 @@ mod tests {
 
         appview.apply_event(
             &EventPayload::BlockedBy(BlockedByPayload {
-                source: "review-impl-id".to_string(),
-                target: "impl-id".to_string(),
+                source: "impl-id".to_string(),
+                target: "review-impl-id".to_string(),
             }),
             "bb2",
         );
@@ -348,15 +348,15 @@ mod tests {
 
         view.apply_event(
             &EventPayload::BlockedBy(crate::schema::task::BlockedByPayload {
-                source: "t2".into(),
-                target: "t1".into(),
+                source: "t1".into(),
+                target: "t2".into(),
             }),
             "e1",
         );
         view.apply_event(
             &EventPayload::BlockedBy(crate::schema::task::BlockedByPayload {
-                source: "t3".into(),
-                target: "t1".into(),
+                source: "t1".into(),
+                target: "t3".into(),
             }),
             "e2",
         );

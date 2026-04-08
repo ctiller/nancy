@@ -480,8 +480,8 @@ async fn test_appview_pagerank_drops_blocked_tasks() -> Result<()> {
     // t1 blocked by t2!
     appview.apply_event(
         &EventPayload::BlockedBy(BlockedByPayload {
-            source: "t1".into(),
-            target: "t2".into(),
+            source: "t2".into(),
+            target: "t1".into(),
         }),
         "bb_01",
     );
