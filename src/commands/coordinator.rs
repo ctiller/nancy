@@ -63,6 +63,7 @@ impl Coordinator {
         // Setup cross-loop app state
         let mut processed_request_ids = std::collections::HashSet::new();
         let mut processed_completed_tasks = std::collections::HashSet::new();
+        let mut force_sync_broadcast = false;
 
         // Setup Axum IPC broadcast and updates queue
         let (tx_ready, _rx_ready) = broadcast::channel::<()>(16);
@@ -398,14 +399,28 @@ impl Coordinator {
                 }
             }
 
+            let mut will_sleep = false;
+
             if logged_any {
                 writer.commit_batch()?;
                 let _ = shared_tx_ready.send(()); // unblock waiting grinders natively via UDS!
-            } else {
+            } else if force_sync_broadcast {
+                let _ = shared_tx_ready.send(()); // unblock since we successfully pulled!
+            }
+
+            if !logged_any && !force_sync_broadcast {
+                will_sleep = true;
+            }
+            
+            force_sync_broadcast = false;
+
+            if will_sleep {
                 use tokio::time::{sleep, Duration};
                 tokio::select! {
                     _ = sleep(Duration::from_millis(1500)) => {} // safety loop
-                    _ = rx_updates.recv() => {} // cleanly awoken explicitly by grinder /updates-ready
+                    _ = rx_updates.recv() => {
+                        force_sync_broadcast = true;
+                    } // cleanly awoken explicitly by grinder /updates-ready
                 }
             }
         }
@@ -443,7 +458,9 @@ async fn updates_ready_handler(
     State(state): State<IpcState>,
     axum::Json(payload): axum::Json<crate::schema::ipc::UpdateReadyPayload>,
 ) {
+    let mut rx = state.tx_ready.subscribe();
     let _ = state.tx_updates.send(payload);
+    let _ = rx.recv().await;
 }
 
 pub async fn run<P: AsRef<Path>>(dir: P) -> Result<()> {
