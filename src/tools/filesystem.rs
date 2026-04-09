@@ -69,7 +69,7 @@ pub async fn grep_search(
     for path in &search_paths {
         let builder = WalkBuilder::new(path);
         if let Some(_filters) = &file_filters {
-            // Future implementation: map glob strings natively to the builder
+            // Future implementation: map glob strings to the builder
         }
         let walker = builder.build();
 
@@ -294,7 +294,7 @@ pub struct WritePayload {
     pub overwrite: Option<bool>,
 }
 
-/// Create fresh artifacts structurally or safely destroy previous architectures natively wrapping Overwrite protections.
+/// Create fresh artifacts structurally or safely destroy previous architectures wrapping Overwrite protections.
 #[llm_tool]
 pub async fn write_files(files: Vec<WritePayload>) -> Result<serde_json::Value> {
     for file in &files {
@@ -319,13 +319,13 @@ pub async fn write_files(files: Vec<WritePayload>) -> Result<serde_json::Value> 
     )
 }
 
-/// Fallback wrapper for extremely simple models mapping single reads without array layouts natively.
+/// Fallback wrapper for extremely simple models mapping single reads without array layouts.
 #[llm_tool]
 pub async fn read_file(target_file: String) -> Result<serde_json::Value> {
     view_files(vec![target_file], None).await
 }
 
-/// Fallback wrapper for extremely simple models mapping single writes without array payloads natively.
+/// Fallback wrapper for extremely simple models mapping single writes without array payloads.
 #[llm_tool]
 pub async fn write_file(
     target_file: String,
@@ -384,7 +384,7 @@ pub async fn manage_paths(operations: Vec<PathOperation>) -> Result<serde_json::
                         );
                     }
                     bail!(
-                        "Error resolving target '{:?}': Object conceptually absent inside standard runtime space natively.",
+                        "Error resolving target '{:?}': Object conceptually absent inside standard runtime space.",
                         target
                     );
                 }
@@ -407,13 +407,13 @@ pub async fn manage_paths(operations: Vec<PathOperation>) -> Result<serde_json::
                 if !source.exists() {
                     if let Some(suggestion) = suggest_closest_path(source) {
                         bail!(
-                            "Source Object '{:?}' resolving to missing pointer conceptually natively. Did you mean '{}'?",
+                            "Source Object '{:?}' resolving to missing pointer conceptually. Did you mean '{}'?",
                             source,
                             suggestion
                         );
                     }
                     bail!(
-                        "Source Object '{:?}' resolving to missing pointer conceptually natively.",
+                        "Source Object '{:?}' resolving to missing pointer conceptually.",
                         source
                     );
                 }
@@ -483,7 +483,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let path = dir.path().join("big.txt");
 
-        // Write exactly 2005 lines to deliberately overflow the new limit boundary natively
+        // Write exactly 2005 lines to deliberately overflow the new limit boundary
         let huge_content = "line\n".repeat(2005);
         fs::write(&path, huge_content).unwrap();
 
@@ -705,23 +705,23 @@ mod tests {
 
         // 1. Suggestion paths
         fs::write(dir.path().join("apple.txt"), "").unwrap();
-        fs::write(dir.path().join("apply.txt"), "").unwrap(); // Will overwrite closest matching distance tests iteratively natively 
+        fs::write(dir.path().join("apply.txt"), "").unwrap(); // Will overwrite closest matching distance tests iteratively 
         fs::write(dir.path().join("applt.txt"), "").unwrap(); // Extra file for min_dist branch replacements
 
-        // view_files hitting missing file fallback suggestion natively
+        // view_files hitting missing file fallback suggestion
         let view_tool = view_files::tool();
         let p_view = serde_json::json!({
             "target_paths": [dir.path().join("appla.txt").to_string_lossy()]
         });
         view_tool.call(p_view).await.unwrap();
 
-        // list_dir hitting missing file fallback suggestion natively
+        // list_dir hitting missing file fallback suggestion
         let list_tool = list_dir::tool();
         let p_list =
             serde_json::json!({"target_directory": dir.path().join("appla.txt").to_string_lossy()});
         let _ = list_tool.call(p_list).await;
 
-        // replace content fallback natively
+        // replace content fallback
         let replace = multi_replace_file_content::tool();
         let r = serde_json::json!({"target_file": dir.path().join("appla.txt").to_string_lossy(), "replacement_chunks": []});
         let _ = replace.call(r).await;
@@ -743,7 +743,7 @@ mod tests {
         });
         let _ = grep_tool.call(p_grep).await;
 
-        // 3. View files targeting directory to trigger fs::read_to_string natively error boundaries
+        // 3. View files targeting directory to trigger fs::read_to_string error boundaries
         let p_view_dir = serde_json::json!({"target_paths": [dir.path().to_string_lossy()]});
         let _ = view_tool.call(p_view_dir).await;
 
@@ -781,7 +781,7 @@ mod tests {
         let p_mk = serde_json::json!({"operations": [{"action": "mkdir", "target_path": dir.path().join("mk_dir").to_string_lossy()}]});
         manage.call(p_mk).await.unwrap();
 
-        // copy single file directly natively
+        // copy single file directly
         let p_cp = serde_json::json!({"operations": [{"action": "copy", "source_path": dir.path().join("apple.txt").to_string_lossy(), "target_path": dir.path().join("apple2.txt").to_string_lossy()}]});
         manage.call(p_cp).await.unwrap();
 

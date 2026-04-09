@@ -19,9 +19,9 @@ enum Commands {
     Grind,
     /// Run the coordinator dispatch queue loop
     Coordinator,
-    /// Provision orchestration environments natively locally
+    /// Provision orchestration environments locally
     Run,
-    /// Evaluate a task request tailored to a yaml definition natively
+    /// Evaluate a task request tailored to a yaml definition
     Eval {
         #[arg(index = 1)]
         action: Option<String>,
@@ -120,13 +120,13 @@ mod tests {
         let td = tempfile::tempdir()?;
         let td_path = td.path().to_path_buf();
         // Initialize mock repo gracefully securely
-        let repo = git2::Repository::init(&td_path).expect("Failed to init git repository natively");
+        let repo = git2::Repository::init(&td_path).expect("Failed to init git repository");
         if let Ok(mut index) = repo.index() {
             let tree_id = index.write_tree().unwrap();
             let sig = git2::Signature::now("Mock", "mock@localhost").unwrap();
             let tree = repo.find_tree(tree_id).unwrap();
             if let Ok(_commit) = repo.commit(Some("HEAD"), &sig, &sig, "Init", &tree, &[]) {
-                // Rename master to main natively gracefully
+                // Rename master to main gracefully
                 if let Ok(mut r) = repo.find_reference("refs/heads/master") {
                     let _ = r.rename("refs/heads/main", true, "Rename branch explicitly to main");
                 }
@@ -135,7 +135,7 @@ mod tests {
 
         let grind_dir = td_path.clone();
         
-        // Init identity so that coordinator/grind bounds don't blow up prior to spinning the loop natively!
+        // Init identity so that coordinator/grind bounds don't blow up prior to spinning the loop!
         let args_init = Args::try_parse_from(["nancy", "init"]).unwrap();
         execute_command(&args_init, grind_dir.clone()).await?;
         assert!(grind_dir.join(".nancy").exists());
@@ -158,7 +158,7 @@ mod tests {
             }
         }
 
-        // Test Run explicitly triggering loop correctly natively cleanly
+        // Test Run explicitly triggering loop correctly cleanly
         let args_run = Args::try_parse_from(["nancy", "run"]).unwrap();
         let run_dir = grind_dir.clone();
         tokio::select! {

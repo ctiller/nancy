@@ -6,7 +6,7 @@ date: "2026-04-07"
 # 0026. Eval Runner Architecture
 
 ## Context
-As Nancy's evaluation system scales to natively test multi-step agentic tasks, the evaluation harness needed robust determinism, native thread execution bindings, and strict test environment containment. The previous monolithic `eval_plan` command lacked test determinism and failed to seamlessly detach isolated verification states.
+As Nancy's evaluation system scales to test multi-step agentic tasks, the evaluation harness needed robust determinism, native thread execution bindings, and strict test environment containment. The previous monolithic `eval_plan` command lacked test determinism and failed to seamlessly detach isolated verification states.
 
 ## Decision
 We extracted the `EvalRunner` into `src/eval/mod.rs` to explicitly enforce an asynchronous test harness:

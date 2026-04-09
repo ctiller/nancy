@@ -97,7 +97,7 @@ async fn test_coordinator_generates_plan_from_task_request() -> Result<()> {
 #[sealed_test(env = [
     ("GEMINI_API_KEY", "mock")
 ])]
-// Validates the Coordinator tracking completed Plans seamlessly shifting to generating Review bounds safely tracking natively.
+// Validates the Coordinator tracking completed Plans seamlessly shifting to generating Review bounds safely tracking.
 async fn test_coordinator_generates_review_plan_task_upon_plan_completion() -> Result<()> {
     nancy::llm::mock::builder::MockChatBuilder::new()
         .respond(r#"{"vote": "approve"}"#)
@@ -132,7 +132,7 @@ async fn test_coordinator_generates_review_plan_task_upon_plan_completion() -> R
     repo.set_head("refs/heads/main")?;
 
     let writer = Writer::new(&repo, coord_identity)?;
-    // Mock a Plan Task being Completed natively bounding the Review constraint Generation
+    // Mock a Plan Task being Completed bounding the Review constraint Generation
     let plan_task = EventPayload::Task(nancy::schema::task::TaskPayload {
         description: "Plan Generation".into(),
         preconditions: "".into(),
@@ -170,7 +170,7 @@ async fn test_coordinator_generates_review_plan_task_upon_plan_completion() -> R
         })
         .await?;
 
-    // Validated implicit mapping above logically natively
+    // Validated implicit mapping above logically
     Ok(())
 }
 
@@ -179,7 +179,7 @@ async fn test_coordinator_generates_review_plan_task_upon_plan_completion() -> R
 #[sealed_test(env = [
     ("GEMINI_API_KEY", "mock")
 ])]
-// Validates that execution boundaries executing Work natively trace their Parent Feature branches tracking correctly seamlessly.
+// Validates that execution boundaries executing Work trace their Parent Feature branches tracking correctly seamlessly.
 async fn test_coordinator_inherits_task_parent_from_feature_branch() -> Result<()> {
     nancy::llm::mock::builder::MockChatBuilder::new()
         .respond(r#"{"vote": "approve"}"#)
@@ -212,7 +212,7 @@ async fn test_coordinator_inherits_task_parent_from_feature_branch() -> Result<(
     let tree = repo.find_tree(tree_id)?;
     repo.commit(Some("refs/heads/main"), &sig, &sig, "init main", &tree, &[])?;
     repo.set_head("refs/heads/main")?;
-    // Feature parent branch mapping natively
+    // Feature parent branch mapping
     repo.commit(
         Some("refs/heads/nancy/features/parent_feat"),
         &sig,
@@ -256,7 +256,7 @@ async fn test_coordinator_inherits_task_parent_from_feature_branch() -> Result<(
         assignment_ref: "dummy_assign".into(),
         report: r#"{"vote":"approve","agree_notes":"","disagree_notes":""}"#.into(),
     };
-    // Mock the assignment natively then completion to clear the block
+    // Mock the assignment then completion to clear the block
     writer.log_event_with_id_override(EventPayload::CoordinatorAssignment(nancy::schema::task::CoordinatorAssignmentPayload {
         task_ref: "parent_feat".into(), assignee_did: "worker".into()
     }), "dummy_assign".into())?;
@@ -273,7 +273,7 @@ async fn test_coordinator_inherits_task_parent_from_feature_branch() -> Result<(
     let task_branch = repo.find_reference("refs/heads/nancy/tasks/work_088");
     assert!(
         task_branch.is_ok(),
-        "Task execution natively tracing feature bounds failed!"
+        "Task execution tracing feature bounds failed!"
     );
     Ok(())
 }
@@ -313,7 +313,7 @@ async fn test_appview_pagerank_drops_blocked_tasks() -> Result<()> {
     assert_eq!(
         ready_tasks,
         vec!["t2"],
-        "AppView PageRank incorrectly prioritized a blocked task explicitly mapping natively"
+        "AppView PageRank incorrectly prioritized a blocked task explicitly mapping"
     );
     Ok(())
 }
@@ -441,7 +441,7 @@ async fn test_coordinator_generates_rework_implementation_upon_dissent() -> Resu
 #[sealed_test(env = [
     ("GEMINI_API_KEY", "mock")
 ])]
-// Validates linear trace limits guaranteeing explicit commit bounds overriding correctly matching natively constraints natively bounds.
+// Validates linear trace limits guaranteeing explicit commit bounds overriding correctly matching constraints bounds.
 async fn test_coordinator_applies_fast_forward_merge_to_feature_branch() -> Result<()> {
     nancy::llm::mock::builder::MockChatBuilder::new()
         .respond(r#"{"vote": "approve", "agree_notes": "Good", "disagree_notes": ""}"#)
@@ -499,7 +499,7 @@ async fn test_coordinator_applies_fast_forward_merge_to_feature_branch() -> Resu
     });
     writer.log_event_with_id_override(review_implement_task, "rev_impl_01".into())?;
 
-    // Wire Graph tasks prior natively
+    // Wire Graph tasks prior
     let root_task = EventPayload::Task(nancy::schema::task::TaskPayload {
         description: "mock".into(),
         preconditions: "".into(),
@@ -566,7 +566,7 @@ async fn test_coordinator_applies_fast_forward_merge_to_feature_branch() -> Resu
     assert_eq!(
         feat_ref.peel_to_commit()?.id(),
         task_commit_id,
-        "Fast Forward Merge failed to update the feature branch HEAD natively!"
+        "Fast Forward Merge failed to update the feature branch HEAD!"
     );
     Ok(())
 }
@@ -575,7 +575,7 @@ async fn test_coordinator_applies_fast_forward_merge_to_feature_branch() -> Resu
 #[sealed_test(env = [
     ("GEMINI_API_KEY", "mock")
 ])]
-// Validates exterminator loop bounds natively dropping execution constraints structurally while mapping equivalency checking identically tracking constraints!
+// Validates exterminator loop bounds dropping execution constraints structurally while mapping equivalency checking identically tracking constraints!
 async fn test_worktree_extermination_and_ledger_consistency() -> Result<()> {
     nancy::llm::mock::builder::MockChatBuilder::new()
         .respond(r#"{"vote": "approve"}"#)
@@ -625,7 +625,7 @@ async fn test_worktree_extermination_and_ledger_consistency() -> Result<()> {
     // Invoke Worktree allocation! Map to task
     nancy::grind::execute_task::execute(&repo, &id_obj, "t_10", "t_ref_10", &payload).await?;
 
-    // Verify Worktree Exterminated natively over Rust bounds terminating explicitly safely
+    // Verify Worktree Exterminated over Rust bounds terminating explicitly safely
     let task_worktree_path = temp_dir.path().join(".nancy").join("tasks").join("t_10");
     assert!(
         !task_worktree_path.exists(),
@@ -648,6 +648,6 @@ async fn test_worktree_extermination_and_ledger_consistency() -> Result<()> {
         "Ledger tracking blocked loops failed to evaluate bounds safely!"
     );
 
-    // Property 20: Feature Parity against ADR 0030 limits. The exact mappings defined in ADR 0030 trace the entire DAG correctly via `Coordinator::evaluate_review_completion` explicitly terminating natively.
+    // Property 20: Feature Parity against ADR 0030 limits. The exact mappings defined in ADR 0030 trace the entire DAG correctly via `Coordinator::evaluate_review_completion` explicitly terminating.
     Ok(())
 }

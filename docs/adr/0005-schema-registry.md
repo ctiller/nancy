@@ -6,7 +6,7 @@ Date: 2026-04-05
 Accepted
 
 ## Context
-As the `nancy` event log (CRDT) expands, we need a robust method for defining, versioning, and parsing various event payloads. Since different actions log different metadata, the structure cannot be a uniform flat JSON map. We need a strongly typed architecture to handle discriminated unions of these payloads natively in Rust without requiring heavy boilerplate JSON schema validations or raw dictionary accesses.
+As the `nancy` event log (CRDT) expands, we need a robust method for defining, versioning, and parsing various event payloads. Since different actions log different metadata, the structure cannot be a uniform flat JSON map. We need a strongly typed architecture to handle discriminated unions of these payloads in Rust without requiring heavy boilerplate JSON schema validations or raw dictionary accesses.
 
 ## Decision
 We decided to implement a Schema Registry under `src/schema/` leveraging `serde`'s native internally-tagged enums.

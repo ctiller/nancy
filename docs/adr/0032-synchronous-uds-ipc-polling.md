@@ -4,7 +4,7 @@
 Synchronous UDS IPC Polling for Update Acknowledgements
 
 ## Status
-**DEPRECATED** globally superseded natively by ADR 0033.
+**DEPRECATED** globally superseded by ADR 0033.
 
 ## Context
 Our system uses a Coordinator and several Grinder worker nodes. They communicate using a local Unix Domain Socket (UDS) via an HTTP server. 

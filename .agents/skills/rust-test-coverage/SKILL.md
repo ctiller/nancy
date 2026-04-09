@@ -5,7 +5,7 @@ description: Five critical techniques for systematically decoupling logic and ma
 
 # Rust Test Coverage Techniques (I/O & API Wrappers)
 
-When attempting to maximize structural unit-test coverage for deep pipelines natively touching unpredictable remote sockets (e.g. Gemini LLM endpoints, reqwest wrappers), relying cleanly on decoupling avoids deploying monolithic integration test setups.
+When attempting to maximize structural unit-test coverage for deep pipelines touching unpredictable remote sockets (e.g. Gemini LLM endpoints, reqwest wrappers), relying cleanly on decoupling avoids deploying monolithic integration test setups.
 
 These five precise techniques were used cleanly to increase coverage from < 3% to nearly 50% cleanly on core execution loop files mapping AI sockets:
 
@@ -13,7 +13,7 @@ These five precise techniques were used cleanly to increase coverage from < 3% t
 Never embed core parsing or mapping computations deeply inside internal asynchronous networking loops.
 Extract purely computational bounds independently (`parse_response()`, `build_internal_error()`), accepting and marshalling generic payloads cleanly separated from network structs (like `Session`, `Client`). 
 
-**Example**: Instead of modifying states deep in `loop { socket.await }`, pass boundaries via static inputs natively and push testing to cover the decoupled parameters reliably.
+**Example**: Instead of modifying states deep in `loop { socket.await }`, pass boundaries via static inputs and push testing to cover the decoupled parameters reliably.
 
 ## 2. Abstract Config Builders From Execution
 Do not build underlying client configuration (HTTP wrappers, Request schemas) purely inside `pub async fn run()`. 
@@ -24,14 +24,14 @@ You rarely need full-blown mocking libraries (`mockall`) for standard state vali
 Instead, inject custom fake stubs mapping precisely the same data fields (`DummyParsed { field: String }` mapping generic structural types) or instantiate native inner library payloads directly `StatusNotOk(GeminiError { ... })` and pass them into logic boundaries (like `should_retry`).
 
 ## 4. Conditional Context Bypassing (CI Safety)
-If tests touch global contexts generically (`std::env::var("API_KEY")`), conditionally `return` or explicitly mock contexts cleanly to avoid triggering unexpected pipeline blocks across automated deployments lacking correct local environment keys natively. Use `sealed_test` explicitly for enforcing scoped environment overrides gracefully.
+If tests touch global contexts generically (`std::env::var("API_KEY")`), conditionally `return` or explicitly mock contexts cleanly to avoid triggering unexpected pipeline blocks across automated deployments lacking correct local environment keys. Use `sealed_test` explicitly for enforcing scoped environment overrides gracefully.
 
 ```rust
 if std::env::var("LIVE_KEY").is_ok() {
-    return; // Safely bypass natively
+    return; // Safely bypass
 }
 ```
 
 ## 5. Strict Literal Typing in Dynamic Macros
-When using dynamically typed parsing macros natively inside generic tests (`serde_json::json!()`), ensure strict explicit primitive boundaries to prevent assertion diff mismatches.
-For example, floating-point literals inherently infer as `f64`. If testing an API built for `f32` architectures natively, enforce standard typings: `assert_eq!(payload, serde_json::json!(0.7_f32))` to correctly bind floating drift natively on assertions.
+When using dynamically typed parsing macros inside generic tests (`serde_json::json!()`), ensure strict explicit primitive boundaries to prevent assertion diff mismatches.
+For example, floating-point literals inherently infer as `f64`. If testing an API built for `f32` architectures, enforce standard typings: `assert_eq!(payload, serde_json::json!(0.7_f32))` to correctly bind floating drift on assertions.

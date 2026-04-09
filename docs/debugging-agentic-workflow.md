@@ -6,12 +6,12 @@ This guide outlines common patterns, configuration flags, and methodologies to e
 
 ## 1. Tracing the "Repository Ledger"
 
-Nancy natively traces all agent interactions (LLM Prompts, Tool Calls, Tool Responses) by emitting `EventPayload` structures to an internal Git ledger (on an orphaned branch `refs/heads/nancy/agents`). 
+Nancy traces all agent interactions (LLM Prompts, Tool Calls, Tool Responses) by emitting `EventPayload` structures to an internal Git ledger (on an orphaned branch `refs/heads/nancy/agents`). 
 
 **Viewing Traces:**
 - To verify what the Agents actually thought, planned, or executed, check the events persisted to `refs/heads/nancy/agents`.
 - In production runs, a global static `OnceLock` logger handles the persistence.
-- **Testing Observability:** The `crate::debug::test_repo::TestRepo` utility standardizes test provisioning and natively intercepts agent events. Upon `Drop` (test completion/failure), it will iterate through all local `nancy/*` branches and automatically dump internal agent states, choices, and LLM conversations directly to the console.
+- **Testing Observability:** The `crate::debug::test_repo::TestRepo` utility standardizes test provisioning and intercepts agent events. Upon `Drop` (test completion/failure), it will iterate through all local `nancy/*` branches and automatically dump internal agent states, choices, and LLM conversations directly to the console.
 
 **Disabling Traces during Testing:**
 - Set the `NANCY_NO_TRACE_EVENTS=1` environment variable to completely bypass event logging to the ledger.

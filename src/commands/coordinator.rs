@@ -189,7 +189,7 @@ async fn ready_for_poll_handler(
     }
 
     let new_state = *rx.borrow();
-    tracing::debug!("[Coordinator API] /ready-for-poll unblocked natively via local rx.changed! Result: {}", new_state);
+    tracing::debug!("[Coordinator API] /ready-for-poll unblocked via local rx.changed! Result: {}", new_state);
     axum::Json(crate::schema::ipc::ReadyForPollResponse { new_state_id: new_state })
 }
 
@@ -664,7 +664,7 @@ mod tests {
                         } else { false }
                     })
                 }).await
-            }).await.expect("Test deadlocked and timed out natively! Check diagnostic print traces!");
+            }).await.expect("Test deadlocked and timed out! Check diagnostic print traces!");
         });
         Ok(())
     }
@@ -739,7 +739,7 @@ mod tests {
                         } else { false }
                     })
                 }).await
-            }).await.expect("Test completely timed out natively via timeout boundary!");
+            }).await.expect("Test completely timed out via timeout boundary!");
         });
         Ok(())
     }
@@ -802,7 +802,7 @@ mod tests {
                 }
             }
         }
-        assert!(rework_logged, "Rework task not natively logged during test boundaries!");
+        assert!(rework_logged, "Rework task not logged during test boundaries!");
         Ok(())
     }
 
@@ -915,7 +915,7 @@ mod tests {
                 if t.action == TaskAction::Plan && t.description == "Test Request" { plan_found = true; }
             }
         }
-        assert!(plan_found, "Plan event not natively produced for request boundary mapping limits!");
+        assert!(plan_found, "Plan event not produced for request boundary mapping limits!");
         Ok(())
     }
 
@@ -947,7 +947,7 @@ mod tests {
         
         let mut processed = std::collections::HashSet::new();
         let handled = handle_work_assignments(&repo, &appview, &writer, &vec![worker.clone()], &mut processed)?;
-        assert!(handled, "Work assignments skipped cleanly without natively assigning bounds!");
+        assert!(handled, "Work assignments skipped cleanly without assigning bounds!");
         writer.commit_batch()?;
 
         let mut assigned = false;
@@ -957,7 +957,7 @@ mod tests {
                 if a.assignee_did == "mockworker" && a.task_ref == "impl1" { assigned = true; }
             }
         }
-        assert!(assigned, "CoordinatorAssignmentPayload structurally missing natively from the evaluation harness limits!");
+        assert!(assigned, "CoordinatorAssignmentPayload structurally missing from the evaluation harness limits!");
         Ok(())
     }
 

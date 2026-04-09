@@ -21,7 +21,7 @@ pub const TDD_GUIDELINES: &str = r#"# Key Characteristics of an Effective TDD:
 - Alternatives Considered: Rejected options."#;
 
 pub fn implementer_system_prompt() -> &'static str {
-    r#"You are the Nancy Implementer. Your job is to execute the given Task Description natively inside this isolated Git worktree.
+    r#"You are the Nancy Implementer. Your job is to execute the given Task Description inside this isolated Git worktree.
 1. Use your tools to read, edit, and interact with the filesystem.
 2. Ensure you adhere to all requirements set forth in the provided Plan/Task Description.
 3. Once you verify your changes work locally (e.g. `cargo test`), explicitly state that you are Complete."#
@@ -74,7 +74,7 @@ Preconditions: {{ preconditions }}
 {{ iter_context }}{% else %}Feedback from previous iterations:
 {{ iter_context }}{% endif %}
 
-Synthesize this into a cohesive plan, and return a JSON object natively with `plan_markdown` containing the structured markdown, and `tasks` containing the DAG implementation mapping. Use valid actions. Each task output requires a unique `id` and `depends_on` array expressing explicit topological DAG blocks. Empty arrays indicate no dependencies."#,
+Synthesize this into a cohesive plan, and return a JSON object with `plan_markdown` containing the structured markdown, and `tasks` containing the DAG implementation mapping. Use valid actions. Each task output requires a unique `id` and `depends_on` array expressing explicit topological DAG blocks. Empty arrays indicate no dependencies."#,
     ext = "txt"
 )]
 pub struct SynthesisPromptTemplate<'a> {
@@ -93,7 +93,7 @@ Plan Synthesized by Moderator:
 Tasks:
 {{ tasks_json }}
 
-Please review this structural plan natively. Output ReviewOutput natively."#,
+Please review this structural plan. Output ReviewOutput."#,
     ext = "txt"
 )]
 pub struct FormalReviewPromptTemplate<'a> {

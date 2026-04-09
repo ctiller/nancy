@@ -76,6 +76,6 @@ mod tests {
             plan_file.to_str().unwrap(),
             &td.path().join("out.yaml"),
         ));
-        assert!(res.is_err()); // Serde handles mapping errors cleanly natively safely!
+        assert!(res.is_err()); // Serde handles mapping errors cleanly safely!
     }
 }

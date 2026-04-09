@@ -52,7 +52,7 @@ impl LlmTool for RunCommand {
         match cmd_base {
             "ls" | "tree" => {
                 anyhow::bail!(
-                    "Execution denied. Please use the native `list_dir` tool to view directory contents instead of `{}`. It provides critical recursion protection natively.",
+                    "Execution denied. Please use the native `list_dir` tool to view directory contents instead of `{}`. It provides critical recursion protection.",
                     cmd_base
                 );
             }

@@ -264,9 +264,9 @@ mod tests {
             workers: vec![],
         };
 
-        // When no extra workers exist, extraction skips fast naturally securely natively.
+        // When no extra workers exist, extraction skips fast naturally securely.
         let traces = extract_traces(&repo, &id_obj);
-        assert!(traces.is_empty(), "Traces mapping failed to handle 0 worker constraints safely natively");
+        assert!(traces.is_empty(), "Traces mapping failed to handle 0 worker constraints safely");
     }
 
     #[tokio::test]
@@ -291,7 +291,7 @@ mod tests {
             }).await
         }).await;
         
-        assert!(res.is_ok(), "Native wait loop natively failed or deadlocked structurally");
+        assert!(res.is_ok(), "Native wait loop failed or deadlocked structurally");
         assert!(condition_met.load(std::sync::atomic::Ordering::SeqCst));
         Ok(())
     }

@@ -153,7 +153,7 @@ fn transpile_recursive(val: &mut Value, defs: &Option<Value>, depth: usize) {
                 }
             }
 
-            // 6. Cleanup `required` arrays natively optionally
+            // 6. Cleanup `required` arrays optionally
             if let Some(Value::Array(mut reqs)) = map.remove("required") {
                 if let Some(Value::Object(props)) = map.get("properties") {
                     reqs.retain(|r| {

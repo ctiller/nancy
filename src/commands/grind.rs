@@ -72,7 +72,7 @@ pub async fn grind<P: AsRef<Path>>(
             .await;
             
             if let Err(e) = res {
-                tracing::error!("[Grinder] execute_task dramatically failed natively! Force-flushing partial trace ledger bounds before exit: {:?}", e);
+                tracing::error!("[Grinder] execute_task dramatically failed! Force-flushing partial trace ledger bounds before exit: {:?}", e);
                 let _ = global_writer.commit_batch();
                 return Err(e);
             }
@@ -100,10 +100,10 @@ pub async fn grind<P: AsRef<Path>>(
                             tracing::error!("[Grinder] /ready-for-poll failed to decode response bounds.");
                         }
                     } else {
-                        tracing::error!("[Grinder] /ready-for-poll HTTP error natively.");
+                        tracing::error!("[Grinder] /ready-for-poll HTTP error.");
                     }
                 } else {
-                    panic!("Failed to build UDS client natively securely");
+                    panic!("Failed to build UDS client securely");
                 }
             } else {
                 panic!("UDS socket does not exist");
@@ -268,7 +268,7 @@ mod tests {
         let socket_path = nancy_dir.join("coordinator.sock");
         let listener = tokio::net::UnixListener::bind(&socket_path)?;
         
-        // Build a fake router that mocks Coordinator bounds synchronously natively
+        // Build a fake router that mocks Coordinator bounds synchronously
         let app = axum::Router::new()
             .route(
                 "/ready-for-poll",

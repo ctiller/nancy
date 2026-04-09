@@ -126,7 +126,7 @@ impl LlmClient {
                     match result {
                         Ok(Ok(res)) => res,
                         Ok(Err(err)) => serde_json::json!({ "error": err.to_string() }),
-                        Err(_) => serde_json::json!({ "error": "Tool execution timed out natively securely bounded!" }),
+                        Err(_) => serde_json::json!({ "error": "Tool execution timed out securely bounded!" }),
                     }
                 } else {
                     let valid_names: Vec<&str> = self.tools.iter().map(|t| t.name()).collect();
@@ -235,10 +235,10 @@ impl LlmClient {
                         Gemini::ask(gemini, &mut self.session)
                     ).await;
                     
-                    tracing::info!("==== [LLM Client] Received response successfully natively! ====");
+                    tracing::info!("==== [LLM Client] Received response successfully! ====");
                     match timeout_res {
                         Ok(res) => res,
-                        Err(_) => return Err(anyhow::anyhow!("Gemini API network request timed out (45s deadline exceeded) organically stopping indefinitely suspended tasks natively.")),
+                        Err(_) => return Err(anyhow::anyhow!("Gemini API network request timed out (45s deadline exceeded) organically stopping indefinitely suspended tasks.")),
                     }
                 };
 
@@ -379,7 +379,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_handle_tool_calls() {
-        // Construct chat containing function calls natively.
+        // Construct chat containing function calls.
         let json_resp = serde_json::json!({
             "candidates": [{
                 "content": {

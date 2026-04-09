@@ -23,17 +23,17 @@ This directory contains the documented architectural and design decisions for Na
 * [0017: Orphaned Branch Plan Architecture](0017-orphaned-branch-plan-architecture.md) - Maps multi-step logic into Git branches.
 * [0018: Modular Grinder Operations](0018-modular-grinder-operations.md) - Abstracts Grinder nodes to discrete handlers.
 * [0019: LLM Builder Architecture](0019-llm-builder-architecture.md) - Creates an extensible framework for Agent requests.
-* [0020: LLM Tool Bindings](0020-llm-tool-bindings.md) - Organizes structural external interfaces natively.
-* [0021: Autonomous Self Repair](0021-autonomous-self-repair.md) - Dictates retry loops inside agentic sessions natively.
+* [0020: LLM Tool Bindings](0020-llm-tool-bindings.md) - Organizes structural external interfaces.
+* [0021: Autonomous Self Repair](0021-autonomous-self-repair.md) - Dictates retry loops inside agentic sessions.
 * [0022: Native Grinder Tool Boundaries](0022-native-grinder-tool-boundaries.md) - Secures arbitrary local function executions softly.
 * [0023: LLM Tool Module Pattern](0023-llm-tool-module-pattern.md) - Organizes logical schema declarations safely.
 * [0024: Stateful LLM Client Architecture](0024-stateful-llm-client.md) - Captures conversation histories for long-term execution cleanly.
-* [0025: Git-Native Eval Tracing Architecture](0025-git-native-eval-tracing.md) - Extrapolates testing environments directly onto the file system natively.
+* [0025: Git-Native Eval Tracing Architecture](0025-git-native-eval-tracing.md) - Extrapolates testing environments directly onto the file system.
 * [0026: Eval Runner Architecture](0026-eval-runner-architecture.md) - Encapsulates verification frameworks accurately.
 * [0027: Compile-Time Markdown Serialization](0027-compile-time-markdown-serialization.md) - Auto-generates type structures safely.
 * [0028: Agentic Peer-Review Persona Registry](0028-agentic-persona-registry.md) - Governs isolated review agents dynamically.
 * [0029: Pre-Review System Architecture](0029-pre-review-system-architecture.md) - Creates independent consensus evaluation matrices successfully.
 * [0030: Unified Task DAG Orchestration](0030-unified-task-dag-orchestration.md) - Combines Review, Grinder, and Coordinator workflows.
 * ~[0031: Event-Driven UDS IPC](0031-event-driven-uds-ipc.md)~ **(DEPRECATED)** - Proposed initial sockets structurally (superseded entirely).
-* ~[0032: Synchronous UDS IPC Polling](0032-synchronous-uds-ipc-polling.md)~ **(DEPRECATED)** - Designed native broadcast synchronization architectures natively (superseded by Stateful channels).
-* [0033: Stateful UDS IPC Long-Polling](0033-stateful-uds-ipc-long-polling.md) **(CURRENT)** - Resolves IPC race boundaries utilizing monotonic state-tracked Long Polling natively seamlessly securely over Unix Domain Sockets cleanly seamlessly.
+* ~[0032: Synchronous UDS IPC Polling](0032-synchronous-uds-ipc-polling.md)~ **(DEPRECATED)** - Designed native broadcast synchronization architectures (superseded by Stateful channels).
+* [0033: Stateful UDS IPC Long-Polling](0033-stateful-uds-ipc-long-polling.md) **(CURRENT)** - Resolves IPC race boundaries utilizing monotonic state-tracked Long Polling seamlessly securely over Unix Domain Sockets cleanly seamlessly.

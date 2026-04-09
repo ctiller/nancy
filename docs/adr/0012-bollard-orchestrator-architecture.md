@@ -9,7 +9,7 @@ The previous iterations of Nancy operated as single-node continuous pollers quer
 ## Decision
 We establish a formalized Multi-Agent architecture governed by **The Coordinator** (the root node identity). The system utilizes:
 1. **Immutable Event Schemas**: Event bindings like `TaskAssigned`, `TaskComplete`, and `BlockedBy` define relational operations. State is strictly derived.
-2. **PageRank Scheduler (`AppView`)**: Calculates priority tasks evaluating subgraph blockages resolved recursively preventing pipeline stalemates natively. 
+2. **PageRank Scheduler (`AppView`)**: Calculates priority tasks evaluating subgraph blockages resolved recursively preventing pipeline stalemates. 
 3. **Identity Modularity**: Utilizing `Identity::Coordinator` vs `Identity::Grinder` definitions isolates secret contexts. Coordinators generate workers securely injecting internal references strictly mapping required `DidOwner` boundaries.
 4. **Bollard Provisioning (`nancy run`)**: Implemented explicit `ubuntu:latest` container wrappers allocating dynamic Git Worktrees referencing precise `refs/heads/nancy/{did}/task-{id}` branching rules shielding code paths!
 5. **Stateless Grinders (`nancy grind`)**: Redefined Grinder runloops processing internal bindings resolving standard modifications independently matching explicitly polled directives validated directly against the Root Identifier Ledger.

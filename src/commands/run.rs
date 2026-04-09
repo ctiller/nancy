@@ -176,7 +176,7 @@ pub async fn run<P: AsRef<Path>>(dir: P) -> Result<()> {
         if !target_path.exists() {
             let branch_name = format!("refs/heads/nancy/{}/task-{}", worker.did, safe_task_ref);
 
-            // Create branch natively or fallback
+            // Create branch or fallback
             let shell_cmd = format!(
                 "git worktree add -b {} {} main || git worktree add {} {}",
                 branch_name,
@@ -401,7 +401,7 @@ mod tests {
                 {
                     tracing::info!("Bypassing Daemon timeout: {}", e);
 
-                    // Mock the Docker server natively to run coverage cleanly iteratively!
+                    // Mock the Docker server to run coverage cleanly iteratively!
                     let app = axum::Router::new()
                         .fallback(axum::routing::any(|| async {
                             axum::Json(serde_json::json!({

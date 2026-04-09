@@ -1,7 +1,7 @@
 # ADR 0020: LLM Tool Bindings & Macro Architecture
 
 ## Context
-Orchestrating agentic loops via Gemini requires mechanically converting dynamically defined Rust behaviors into tool APIs securely natively across `gemini-client-api` schemas. As we introduce LLM interaction, we need an ergonomic way for internal developers to define tool functions, automatically parse their intent constraints (descriptions mapped natively using doc comments), and embed them into the builder safely.
+Orchestrating agentic loops via Gemini requires mechanically converting dynamically defined Rust behaviors into tool APIs securely across `gemini-client-api` schemas. As we introduce LLM interaction, we need an ergonomic way for internal developers to define tool functions, automatically parse their intent constraints (descriptions mapped using doc comments), and embed them into the builder safely.
 
 ## Decision
 We've introduced dynamic Tool Bindings utilizing the new internal `llm-macros` procedural macro crate paired with `async_trait`. 
@@ -11,7 +11,7 @@ A multi-threaded dynamic `LlmTool` trait encapsulates internal agentic handlers 
 
 ### Procedural Generation
 Because parsing dynamic Rust closure semantics mechanically requires abstract AST logic, we constructed the `/llm-macros` Workspace crate alongside our primary repository.
-- `#[llm_tool]`: Interrogates function signatures strictly, hijacking regular `///` Rust doc comments seamlessly rendering descriptions into API definitions natively.
+- `#[llm_tool]`: Interrogates function signatures strictly, hijacking regular `///` Rust doc comments seamlessly rendering descriptions into API definitions.
 - `make_tool!`: Explicitly evaluates typed closure parameters (e.g. `|args: MyStruct|`) and dynamically builds a secure anonymous Type resolving struct constraints efficiently.
 
 ## Consequences

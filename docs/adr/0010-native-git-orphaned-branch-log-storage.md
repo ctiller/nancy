@@ -16,5 +16,5 @@ We decided to leverage the underlying Git `libgit2` object database locally as a
 
 ## Consequences
 - **Positive:** Identities can safely append massive distributed databases underneath standard Git workflows, completely invisibly to the developer's raw application codebase.
-- **Positive:** Data sync protocols are resolved entirely for free via `git fetch` natively executing network layer DAG transfers.
+- **Positive:** Data sync protocols are resolved entirely for free via `git fetch` executing network layer DAG transfers.
 - **Negative:** Accessing, querying, or inspecting logs requires `nancy` software CLI tooling, as the files do not physically exist in ordinary OS file paths unless explicitly checked out.

@@ -8,6 +8,6 @@ During the recent refinement of the `CoordinatorAssignmentPayload` execution tra
 2. **Reinstate `PlanPayload`**: While `PlanTask` was introduced to handle actual assignment events, we restored `PlanPayload` back into `task.rs` to persist as the discrete system representation of an agentic *Plan* generation (as a distinct ledger event before tasks are branched out).
 
 ## Consequences
-- The event ledger drops unsupported query payloads natively, tightening the schema surface.
+- The event ledger drops unsupported query payloads, tightening the schema surface.
 - `EventPayload::Plan` restores the ability to trace generated plans historically through the ledger before they translate into granular execution directives.
 - Required updating strict scoped testing modules (reintegrating `DidOwner` imports specifically) to mechanically adhere to the project's strict 100% LLVM coverage requirements on the newly restricted registry structure.

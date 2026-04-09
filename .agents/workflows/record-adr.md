@@ -3,7 +3,7 @@ description: Trigger this workflow implicitly on ALL architectural, structural, 
 ---
 This workflow enforces the "Definition of Done: Documentation" rule from `.agents/rules/project.md`.
 
-Use this workflow whenever you make ANY architectural, structural, or conceptual decisions during a project task. This natively includes making choices regarding testing frameworks, dependency policies, CLI structures, schema definitions, or any workflow implementation that establishes a new project standard.
+Use this workflow whenever you make ANY architectural, structural, or conceptual decisions during a project task. This includes making choices regarding testing frameworks, dependency policies, CLI structures, schema definitions, or any workflow implementation that establishes a new project standard.
 
 1. Review existing ADRs using `list_dir` on the `docs/adr/` directory to identify the next sequential number.
 2. Outline the ADR with the following headers:

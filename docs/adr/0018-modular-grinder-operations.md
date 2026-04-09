@@ -6,7 +6,7 @@ The primary orchestration loop for worker agents (`src/commands/grind.rs`) maps 
 ## Decision
 We are relocating the distinct business execution boundaries out of the core event polling loop and into an inclusive `src/grind/` module framework. 
 - The `commands/grind.rs` file acts strictly as the router, extracting assignment states and dispatching them structurally.
-- Natively distinct tasks are allocated explicit decoupled files (e.g., `src/grind/plan_task.rs` handling `PlanTask` invocations).
+- distinct tasks are allocated explicit decoupled files (e.g., `src/grind/plan_task.rs` handling `PlanTask` invocations).
 
 ## Consequences
 - Requires explicitly passing contextual ownerships (e.g., `Repository`, `Identity`) or structs mapping them into these handlers cleanly.

@@ -22,7 +22,7 @@ Review tasks (`ReviewPlan` & `ReviewImplementation`) act as terminal branch-acce
 - **Action Dissent Resolution**: Disagreement routes strictly safe: If *any* reviewer flags a DAG node as requiring planning depth, it bypasses implementations and is firmly assigned `TaskAction::Plan`.
 
 ### 3. Review Session Files & Event Log Bounds
-`ReviewSessionState` instances track massive Gemini LLM conversation context natively outside the constrained SQLite event log structure. Instead, states are mapped inside lightweight, localized JSON files committed to the `agents` branch (e.g., `reviews/session_<commit_hash>_<task_id>.json`).
+`ReviewSessionState` instances track massive Gemini LLM conversation context outside the constrained SQLite event log structure. Instead, states are mapped inside lightweight, localized JSON files committed to the `agents` branch (e.g., `reviews/session_<commit_hash>_<task_id>.json`).
 
 ### 4. Branching Rules & Lifetimes
 Task executions enforce complete node isolation across mapped Git Worktree branch boundaries, strictly decoupling work execution footprints cleanly.
@@ -31,13 +31,13 @@ Task executions enforce complete node isolation across mapped Git Worktree branc
 | :--- | :--- | :--- |
 | **Creation (Plan)** | Coordinator processes `TaskRequest` | Yields a `TaskPayload` targeting a new **orphaned branch** (`refs/heads/nancy/plans/<request_id>`) protecting design ecosystems. |
 | **Creation (Feature)** | Coordinator observes `TaskAction::ReviewPlan` completes | Verification of DAG unblocks standard routing. Coordinator bounds a **base feature branch** (`refs/heads/nancy/features/<root_task_id>`) mapped from `main`. |
-| **Creation (Task)** | Coordinator unblocks a DAG node | Spawns an **isolated sub-branch** assigned natively off its parent branch's HEAD (`refs/heads/nancy/tasks/<task_id>`). |
+| **Creation (Task)** | Coordinator unblocks a DAG node | Spawns an **isolated sub-branch** assigned off its parent branch's HEAD (`refs/heads/nancy/tasks/<task_id>`). |
 | **Execution (Active)** | Grinder container accepts pending task | Initializes physical **Git Worktrees**. `Implement` receives a single worktree. `Plan` tasks receive a **dual-worktree setup** mapping both the orphaned plan location and the target execution codebase footprint simultaneously. |
 | **Execution (Review)** | Grinder accepts `TaskAction::Review*` | Generates a generic local review checkout mapping unmerged execution states, generating diffs for read-only panel introspection. |
 | **Completion** | Grinder finishes boundaries execution | All Physical Git Worktrees are strictly **destroyed** (`git worktree remove`) to recover footprint capacities immediately. |
 | **Approval (Merge)** | Terminal `Review*` functionally approves | The target execution branch is **merged** into its native parent. **CRITICAL**: The condition exclusively restricts non-linear commits (`--ff-only`). |
 | **Conflict Resolution**| Approval merge fails FF parameters | If the target parent branch advanced in parallel (rejecting FF verification), Coordinator spawns a **new task** branching entirely off the new parent HEAD, isolating rework patching states. |
-| **Cleanup** | Secure validation upstream | The task sub-branch is permanently **deleted**. Plan branches natively persist maintaining dedicated structural ecosystems. |
+| **Cleanup** | Secure validation upstream | The task sub-branch is permanently **deleted**. Plan branches persist maintaining dedicated structural ecosystems. |
 
 ### 5. Architectural Guardrails
 - **Anti-Degeneracy**: Endless 1:1 `TaskAction::Plan` loops are explicitly intercepted and proactively failed upstream by the Coordinator logic.
@@ -45,4 +45,4 @@ Task executions enforce complete node isolation across mapped Git Worktree branc
 ## Consequences
 - The Coordinator and Grinder codepaths become structurally agnostic to the business logic phase, simplifying scale operations and logic decoupling.
 - Deep, deterministic integration with Git worktree lifecycle cleanly isolates active model boundaries escaping corruption vulnerabilities or workspace contamination.
-- Explicit JSON storage mapping of review states directly bypasses massive JSON event log bloat while preserving infinite context iterations automatically tracked linearly mapped natively onto commit sequences.
+- Explicit JSON storage mapping of review states directly bypasses massive JSON event log bloat while preserving infinite context iterations automatically tracked linearly mapped onto commit sequences.

@@ -9,7 +9,7 @@ As the Nancy platform expands into handling advanced tasks such as task planning
 There was a design discussion regarding whether the `Coordinator` should construct specialized LLM queries or execute simple LLM tasks directly, as opposed to dispatching them to worker instances. Mixing LLM invocation into the orchestrator conflates the responsibilities of scheduling vs. execution and poses severe operational, security, and stability risks (e.g., blocking the main event-loop, token limit crashes, or execution of hostile generated code).
 
 ## Decision
-The `Coordinator` is strictly forbidden from executing LLM requests natively. 
+The `Coordinator` is strictly forbidden from executing LLM requests. 
 All LLM activity—ranging from Planning, Decomposition, Code Review, and Implementation—must be firmly contained within the `Grinder` nodes. 
 The Coordinator’s role is purely to map abstract tasks dynamically to the event ledger and delegate them as formal Task actions (e.g., `Plan`, `Implement`, `ReviewImplementation`). 
 

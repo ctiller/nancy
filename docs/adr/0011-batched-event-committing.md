@@ -6,7 +6,7 @@ Date: 2026-04-06
 Accepted
 
 ## Context
-When performing extensive data syncing, `nancy` requires extreme log append efficiency. The original event queue instantiated a completely separate, fully distinct native Git object sequence tree manipulation representing every single underlying line execution inside `0000X.log`. Creating 15,000 separate `Blobs`, `TreeBuilders`, and `Commits` consecutively forced an $O(n^2)$ read/compute complexity parsing limits resulting in minutes of CPU lockup bounding the chunk thresholds natively. 
+When performing extensive data syncing, `nancy` requires extreme log append efficiency. The original event queue instantiated a completely separate, fully distinct native Git object sequence tree manipulation representing every single underlying line execution inside `0000X.log`. Creating 15,000 separate `Blobs`, `TreeBuilders`, and `Commits` consecutively forced an $O(n^2)$ read/compute complexity parsing limits resulting in minutes of CPU lockup bounding the chunk thresholds. 
 
 ## Decision
 We switched to a lazily evaluated **Batched Sequence Buffer** constraint.
@@ -16,5 +16,5 @@ We switched to a lazily evaluated **Batched Sequence Buffer** constraint.
 
 ## Consequences
 - **Positive:** Massive log sequences (e.g., thousands of events) process in fractional milliseconds, seamlessly executing Git bounds check constraints.
-- **Positive:** We strictly minimized disk/object writes preserving performance targets natively without relying on file `.log` descriptors.
-- **Negative:** Panic handlers killing execution abruptly before scope closure `.drop()` execution can drop batched un-committed logs natively spanning the sequence execution window.
+- **Positive:** We strictly minimized disk/object writes preserving performance targets without relying on file `.log` descriptors.
+- **Negative:** Panic handlers killing execution abruptly before scope closure `.drop()` execution can drop batched un-committed logs spanning the sequence execution window.

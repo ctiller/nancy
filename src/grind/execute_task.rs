@@ -133,7 +133,7 @@ async fn handle_plan_task(
     
     let mut synthesizer = crate::llm::thinking_llm("moderator_synthesizer")
         .with_writer(writer)
-        .system_prompt(&format!("You are the Nancy Moderator. Synthesize the final execution plan and its DAG task mapping purely into the requested strict JSON format natively.\n\n{}", crate::grind::prompts::TDD_GUIDELINES))
+        .system_prompt(&format!("You are the Nancy Moderator. Synthesize the final execution plan and its DAG task mapping purely into the requested strict JSON format.\n\n{}", crate::grind::prompts::TDD_GUIDELINES))
         .build()?;
 
     loop {
@@ -157,7 +157,7 @@ async fn handle_plan_task(
             Ok(out) => out,
             Err(e) => {
                 tracing::warn!("Plan CI validation failed: {}. Looping.", e);
-                feedback_context.push_str(&format!("Your JSON task array failed to parse natively: {}. Fix the syntax immediately.\n", e));
+                feedback_context.push_str(&format!("Your JSON task array failed to parse: {}. Fix the syntax immediately.\n", e));
                 continue;
             }
         };
@@ -191,7 +191,7 @@ async fn handle_plan_task(
         }
 
         if matches!(consensus, crate::schema::task::Consensus::ChangesRequired | crate::schema::task::Consensus::Veto) {
-            tracing::info!("Review Panel rejected plan. Resynthesizing natively...");
+            tracing::info!("Review Panel rejected plan. Resynthesizing...");
             feedback_context.push_str(&format!("Review Feedback rejected the structural design: {}\n", general_notes));
             continue;
         }
@@ -232,7 +232,7 @@ async fn handle_plan_task(
             }
         }
         
-        return Ok(format!("Plan successfully generated natively via Multi-Agent loops functionally."));
+        return Ok(format!("Plan successfully generated via Multi-Agent loops functionally."));
     }
 }
 
@@ -270,7 +270,7 @@ async fn handle_review_task(
         .build()?;
 
     let team_selection = coordinator_client
-        .ask::<TeamSelectionPayload>("Select team based on diff bounds natively...")
+        .ask::<TeamSelectionPayload>("Select team based on diff bounds...")
         .await?;
 
     let begin_oid = git2::Oid::from_str(&head_minus_one)?;
@@ -386,7 +386,7 @@ pub async fn execute(
     ))?;
     writer.commit_batch()?;
 
-    tracing::info!("Cleaning up worktrees safely bounded securely natively...");
+    tracing::info!("Cleaning up worktrees safely bounded securely...");
 
     if task_payload.action == TaskAction::Plan {
         let plan_exec_path = target_path.join("codebase_checkout");
@@ -733,7 +733,7 @@ mod tests {
             .respond("Expert ideation...")
             // Iteration 1: Return parse error array payload
             .respond(r#"["unparsable]"#)
-            // Iteration 2: Return structural self-cycle to trigger DAG bounds natively
+            // Iteration 2: Return structural self-cycle to trigger DAG bounds
             .respond(r#"{"plan_markdown": "test", "tasks": [{"id": "t1", "description": "", "preconditions": "", "postconditions": "", "validation_strategy": "", "action": "implement", "branch": "", "depends_on": ["t1"]}]}"#)
             // Iteration 3: Structurally valid mapping including a BlockedBy target naturally triggering events
             .respond(r#"{"plan_markdown": "Mock", "tasks": [{"id": "t1", "description": "", "preconditions": "", "postconditions": "", "validation_strategy": "", "action": "implement", "branch": "", "depends_on": []}, {"id": "t2", "description": "", "preconditions": "", "postconditions": "", "validation_strategy": "", "action": "implement", "branch": "", "depends_on": ["t1"]}]}"#);
@@ -744,7 +744,7 @@ mod tests {
         // Iteration 4: Moderator resynthesizes plan 
         builder = builder.respond(r#"{"plan_markdown": "Mock 2", "tasks": [{"id": "t1", "description": "", "preconditions": "", "postconditions": "", "validation_strategy": "", "action": "implement", "branch": "", "depends_on": []}, {"id": "t2", "description": "", "preconditions": "", "postconditions": "", "validation_strategy": "", "action": "implement", "branch": "", "depends_on": ["t1"]}]}"#);
 
-        // Iteration 4: Formal review natively accepts
+        // Iteration 4: Formal review accepts
         for _ in 0..6 {
             builder = builder.respond(r#"{"vote": "approve", "agree_notes": "Looks good", "disagree_notes": ""}"#);
         }
