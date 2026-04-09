@@ -38,7 +38,7 @@ tempfile = "3.27.0"
 tokio = { version = "1.51.0", features = ["full", "test-util"] }
 tokio-stream = "0.1.18"
 tower = "0.5.3"
-tower-http = { version = "0.6", features = ["fs", "cors"] }
+tower-http = { version = "0.6", features = ["fs", "cors", "trace"] }
 uuid = { version = "1.23.0", features = ["v4"] }
 rust-embed = "8.5"
 mime_guess = "2.0"
@@ -60,5 +60,6 @@ name = "nancy"
 output-name = "nancy"
 bin-package = "nancy"
 lib-package = "web"
+lib-features = ["hydrate"]
 style-file = "style/nancy.css"
 assets-dir = "public"

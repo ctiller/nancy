@@ -6,8 +6,7 @@ use leptos_router::components::{Router, Route, Routes};
 use leptos_router::path;
 
 #[component]
-pub fn App() -> impl IntoView {
-    // Provides context that manages stylesheets, titles, meta tags, etc.
+pub fn Shell() -> impl IntoView {
     provide_meta_context();
 
     view! {
@@ -17,24 +16,48 @@ pub fn App() -> impl IntoView {
                 <meta charset="utf-8"/>
                 <meta name="viewport" content="width=device-width, initial-scale=1"/>
                 <MetaTags/>
+                {
+                    #[cfg(feature = "ssr")]
+                    {
+                        let options = leptos::prelude::use_context::<leptos::config::LeptosOptions>()
+                            .expect("LeptosOptions missing in SSR context");
+                        view! { <HydrationScripts options=options/> }.into_any()
+                    }
+                    #[cfg(not(feature = "ssr"))]
+                    {
+                        view! { "" }.into_any()
+                    }
+                }
                 <Stylesheet id="leptos" href="/pkg/nancy.css"/>
                 <Title text="Nancy Coordinator UI"/>
             </head>
             <body>
-                <Router>
-                    <Navbar />
-                    <main class="main-content">
-                        <Routes fallback=NotFound>
-                            <Route path=path!("") view=CommandView/>
-                            <Route path=path!("tasks") view=TasksView/>
-                            <Route path=path!("agents") view=AgentsView/>
-                            <Route path=path!("repo") view=RepoView/>
-                            <Route path=path!("logs") view=SettingsLogsView/>
-                        </Routes>
-                    </main>
-                </Router>
+                <App />
             </body>
         </html>
+    }
+}
+
+#[component]
+pub fn App() -> impl IntoView {
+    // Provides context that manages stylesheets, titles, meta tags, etc.
+    provide_meta_context();
+
+    view! {
+        <div id="root">
+            <Router>
+                <Navbar />
+                <main class="main-content">
+                    <Routes fallback=NotFound>
+                        <Route path=path!("") view=CommandView/>
+                        <Route path=path!("tasks") view=TasksView/>
+                        <Route path=path!("agents") view=AgentsView/>
+                        <Route path=path!("repo") view=RepoView/>
+                        <Route path=path!("logs") view=SettingsLogsView/>
+                    </Routes>
+                </main>
+            </Router>
+        </div>
     }
 }
 
@@ -136,33 +159,44 @@ fn FileTree(
             <div class="file-tree" style="margin-left: 12px; font-family: monospace; font-size: 0.9rem;">
                 {move || match files.get() {
                     Some(Ok(nodes)) => {
-                        nodes.into_iter().map(|node| {
-                            let is_dir = node.is_dir;
-                            let path = node.path.clone();
-                            let name = node.name.clone();
-                            let (expanded, set_expanded) = signal(false);
-                            
-                            view! {
-                                <div class="file-node" style="margin-top: 4px;">
-                                    <div 
-                                        style=move || format!("cursor: pointer; padding: 4px; border-radius: 4px; display:flex; gap: 8px; align-items:center; {}", if is_dir { "font-weight: bold; color: var(--accent-cyan);" } else { "" })
-                                        on:click=move |_| {
-                                            if is_dir {
-                                                set_expanded.update(|e| *e = !*e);
-                                            } else {
-                                                set_active_file.set(Some(path.clone()));
-                                            }
-                                        }
-                                    >
-                                        <span style="font-size: 1.1rem;">{move || if is_dir { if expanded.get() { "📂" } else { "📁" } } else { "📄" }}</span>
-                                        <span>{name}</span>
-                                    </div>
-                                    <Show when=move || expanded.get()>
-                                        <FileTree current_dir=Some(node.path.clone()) set_active_file=set_active_file />
-                                    </Show>
-                                </div>
-                            }
-                        }).collect_view().into_any()
+                        let nodes_clone = nodes.clone();
+                        view! {
+                            <For
+                                each=move || nodes_clone.clone()
+                                key=|node| node.path.clone()
+                                children=move |node| {
+                                    let is_dir = node.is_dir;
+                                    let path = node.path.clone();
+                                    let name = node.name.clone();
+                                    let (expanded, set_expanded) = signal(false);
+                                    
+                                    view! {
+                                        <div class="file-node" style="margin-top: 4px;">
+                                            <div 
+                                                style=move || format!("cursor: pointer; padding: 4px; border-radius: 4px; display:flex; gap: 8px; align-items:center; {}", if is_dir { "font-weight: bold; color: var(--accent-cyan);" } else { "" })
+                                                on:click=move |_| {
+                                                    if is_dir {
+                                                        set_expanded.update(|e| *e = !*e);
+                                                    } else {
+                                                        set_active_file.set(Some(path.clone()));
+                                                    }
+                                                }
+                                            >
+                                                <span style="font-size: 1.1rem;">{move || if is_dir { if expanded.get() { "📂" } else { "📁" } } else { "📄" }}</span>
+                                                <span>{name}</span>
+                                            </div>
+                                            <Show when=move || expanded.get()>
+                                                {
+                                                    let p = node.path.clone();
+                                                    let set_act = set_active_file;
+                                                    move || view! { <FileTree current_dir=Some(p.clone()) set_active_file=set_act /> }
+                                                }
+                                            </Show>
+                                        </div>
+                                    }
+                                }
+                            />
+                        }.into_any()
                     },
                     Some(Err(e)) => view! { <div style="color: red;">{format!("Error: {:?}", e)}</div> }.into_any(),
                     None => view! { <div>"..."</div> }.into_any(),
@@ -249,5 +283,6 @@ fn NotFound() -> impl IntoView {
 pub fn hydrate() {
     // Initializes panic hook and logger.
     console_error_panic_hook::set_once();
-    leptos::mount_to_body(App);
+    leptos::logging::log!("Nancy Web UI Hydrating...");
+    leptos::mount::hydrate_body(App);
 }

@@ -6,7 +6,8 @@ use axum::{
 };
 use leptos_axum::{generate_route_list, LeptosRoutes};
 use std::sync::atomic::Ordering;
-use web::App;
+use tower_http::trace::TraceLayer;
+use web::{App, Shell};
 
 #[derive(rust_embed::RustEmbed, Clone)]
 #[folder = "target/site/"]
@@ -58,12 +59,21 @@ async fn fs_asset_handler(axum::extract::Path(path): axum::extract::Path<String>
 pub fn spawn_web_server(tcp_listener: tokio::net::TcpListener) -> tokio::task::JoinHandle<()> {
     let conf = leptos::prelude::get_configuration(None).unwrap();
     let leptos_options = conf.leptos_options;
-    let routes = generate_route_list(App);
+    let options_clone = leptos_options.clone();
+    let routes = generate_route_list(move || {
+        leptos::prelude::provide_context(options_clone.clone());
+        App()
+    });
 
+    let options_clone = leptos_options.clone();
     let web_app = Router::new()
+        .route("/api/{*fn_name}", axum::routing::post(leptos_axum::handle_server_fns))
         .route("/api/fs/{*path}", get(fs_asset_handler))
-        .leptos_routes(&leptos_options, routes, App)
+        .leptos_routes_with_context(&leptos_options, routes, move || {
+            leptos::prelude::provide_context(options_clone.clone());
+        }, web::Shell)
         .fallback(static_asset_handler)
+        .layer(TraceLayer::new_for_http())
         .with_state(leptos_options);
 
     tokio::spawn(async move {
