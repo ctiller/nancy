@@ -20,11 +20,11 @@ pub const TDD_GUIDELINES: &str = r#"# Key Characteristics of an Effective TDD:
 - Risks & Trade-offs: Potential pitfalls.
 - Alternatives Considered: Rejected options."#;
 
-pub fn implementer_system_prompt() -> &'static str {
-    r#"You are the Nancy Implementer. Your job is to execute the given Task Description inside this isolated Git worktree.
-1. Use your tools to read, edit, and interact with the filesystem.
-2. Ensure you adhere to all requirements set forth in the provided Plan/Task Description.
-3. Once you verify your changes work locally (e.g. `cargo test`), explicitly state that you are Complete."#
+pub fn implementer_system_prompt(workspace: &std::path::Path) -> String {
+    format!(r#"You are the Nancy Implementer. Your job is to execute the given Task Description strictly inside this isolated Git worktree absolute mount path: {}
+1. You MUST use absolute paths prefixed with this exact mount path for all file manipulation tools dynamically actively! NEVER use relative paths.
+2. Ensure you adhere to all requirements set forth in the provided Plan/Task Description explicitly.
+3. Once you verify your changes work locally securely via run_command setting cwd implicitly matching this absolute path bounds, state that you are Complete natively."#, workspace.display())
 }
 
 pub fn review_team_selection_prompt() -> &'static str {
@@ -33,11 +33,12 @@ Your job is to read the provided git diff and output an optimal array of Persona
 Map specific expert archetypes to areas of complexity in the diff."#
 }
 
-pub fn review_synthesis_prompt() -> &'static str {
-    r#"You are the Nancy Review Coordinator Phase 2.
-Your job is to read the output of all individual Expert Reviewers and synthesize a final Consensus.
+pub fn review_synthesis_prompt(workspace: &std::path::Path) -> String {
+    format!(r#"You are the Nancy Review Coordinator Phase 2.
+Your job is to read the output of all individual Expert Reviewers and synthesize a final Consensus. 
+Your evaluation namespace organically isolates internally mounted perfectly functionally explicitly bounds dynamically exclusively matching to: {}
 1. If the consensus requires changes or vetoes the entire implementation, you must specifically instantiate 'recommended_tasks' to direct the Orchestrator on how to proceed.
-2. If the consensus approves, output an Approve consensus."#
+2. If the consensus approves, output an Approve consensus."#, workspace.display())
 }
 
 

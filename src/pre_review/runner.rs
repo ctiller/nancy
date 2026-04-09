@@ -1,9 +1,14 @@
 use crate::personas::Persona;
 
-pub fn reviewer_system_prompt(persona: &Persona) -> String {
+pub fn reviewer_system_prompt(persona: &Persona, workspace: &std::path::Path) -> String {
     format!(
         "You are an expert Reviewer on a panel. Your persona is: {persona_name}. {persona_description}.\n\
         You sit in the `{persona_category:?}` domain.\n\
+        \n\
+        ## Execution Environment Bounds\n\
+        Your strict dynamically mounted root workspace is absolutely restricted to: {workspace}\n\
+        You MUST NEVER act outside this directory. All tools requiring paths MUST rigorously explicitly prefix against this absolute path dynamically explicitly legitimately implicitly perfectly continuously!\n\
+        Never write scratch files outside this workspace bound natively completely organically securely optimally legitimately.\n\
         \n\
         ## Voting Playbook & Rules\n\
         1. **Tools:** You have full access to terminal and filesystem tools. You must use them to verify your assumptions before issuing a Veto or Changes_Required.\n\
@@ -16,6 +21,7 @@ pub fn reviewer_system_prompt(persona: &Persona) -> String {
         persona_name = persona.name,
         persona_description = persona.description,
         persona_category = persona.category,
+        workspace = workspace.display(),
         tdd_guidelines = crate::grind::prompts::TDD_GUIDELINES,
     )
 }
@@ -50,14 +56,18 @@ pub fn reviewer_task_prompt(
     )
 }
 
-pub fn coordinator_system_prompt() -> &'static str {
-    "You are the Review Coordinator. Your job is to drive the panel to an `Approve` consensus within 7 rounds.\n\
+pub fn coordinator_system_prompt(workspace: &std::path::Path) -> String {
+    format!("You are the Review Coordinator. Your job is to drive the panel to an `Approve` consensus within 7 rounds.\n\
+    \n\
+    ## Execution Environment Bounds\n\
+    Your strict dynamically mounted root workspace is absolutely restricted to: {}\n\
+    You MUST NEVER act outside this directory natively securely dynamically effectively completely powerfully formally optimally purely explicitly legitimately cleanly robustly properly implicitly functionally correctly.\n\
     \n\
     ## Orchestration Playbook\n\
     1. **Address Feedback:** You receive all reviewer feedback and must prioritize integrating requested changes by editing the codebase before generating the next round's diff.\n\
     2. **Quorum:** You must dynamically select reviewers to form a panel. The system strictly enforces a Quorum: you must maintain at least K=2 active members from *each* domain (`Technical`, `Paradigm`, and `Orchestration`). If you fail to meet quorum, the backend will forcefully randomize and inject personas to satisfy it.\n\
     3. **Dissent Log & Ghost Vetos:** If you swap out an uncooperative panel member, any `Veto` they held is inherited as a `Ghost Veto` on the Dissent Log. A Ghost Veto is a hard block. It can only be cleared if the active panel explicitly votes to clear it. Specifically, it requires at least ONE clearance vote from *each* of the three domains to be exorcised.\n\
-    4. **Execution:** Use your tools to fulfill your role. Maintain high engineering standards and do not try to \"game\" the panel by indiscriminately firing strict reviewers, as the resulting Ghost Vetos will mathematically deadlock your execution."
+    4. **Execution:** Use your tools to fulfill your role. Maintain high engineering standards and do not try to \"game\" the panel by indiscriminately firing strict reviewers, as the resulting Ghost Vetos will mathematically deadlock your execution.", workspace.display())
 }
 
 #[cfg(test)]
@@ -88,7 +98,7 @@ mod tests {
     fn test_reviewer_system_prompt_builder() {
         let all_personas = get_all_personas();
         let pedant = all_personas.iter().find(|p| p.name == "The Pedant").unwrap();
-        let prompt = reviewer_system_prompt(pedant);
+        let prompt = reviewer_system_prompt(pedant, std::path::Path::new("/tmp/test"));
 
         assert!(prompt.contains("The Pedant"), "Failed to embed persona name");
         assert!(prompt.contains("Technical"), "Failed to embed persona category context");
@@ -97,7 +107,7 @@ mod tests {
 
     #[test]
     fn test_coordinator_system_prompt_static() {
-        let prompt = coordinator_system_prompt();
+        let prompt = coordinator_system_prompt(std::path::Path::new("/tmp/test"));
         assert!(prompt.contains("Quorum:"));
         assert!(prompt.contains("7 rounds"));
     }

@@ -62,14 +62,30 @@ pub async fn grind<P: AsRef<Path>>(
 
         let mut processed = false;
         if let Some((task_id, assignment, payload)) = assigned {
-            let res = crate::grind::execute_task::execute(
+            let execute_fut = crate::grind::execute_task::execute(
                 &repo,
                 &id_obj,
                 &task_id,
                 &assignment.task_ref,
                 &payload,
-            )
-            .await;
+                &global_writer,
+            );
+            tokio::pin!(execute_fut);
+
+            let mut interval = tokio::time::interval(tokio::time::Duration::from_millis(500));
+            // Ensure first tick isn't heavily contested
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
+            let res = loop {
+                tokio::select! {
+                    r = &mut execute_fut => {
+                        break r;
+                    }
+                    _ = interval.tick() => {
+                        let _ = global_writer.commit_batch();
+                    }
+                }
+            };
             
             if let Err(e) = res {
                 tracing::error!("[Grinder] execute_task dramatically failed! Force-flushing partial trace ledger bounds before exit: {:?}", e);
@@ -113,7 +129,7 @@ pub async fn grind<P: AsRef<Path>>(
         }
 
         let mut logged_any = false;
-        if let Ok(_) = global_writer.commit_batch() {
+        if let Ok(true) = global_writer.commit_batch() {
             logged_any = true;
         }
         

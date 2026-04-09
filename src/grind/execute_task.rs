@@ -110,7 +110,7 @@ async fn handle_plan_task(
         .ask::<TeamSelectionPayload>(&format!("Task description: {}", task_payload.description))
         .await?;
         
-    let mut session = crate::pre_review::session::ReviewSession::new();
+    let mut session = crate::pre_review::session::ReviewSession::new(target_path.to_path_buf());
 
     let mut compiled_ideations = String::new();
     let safe_experts = team_selection.experts.clone();
@@ -237,14 +237,14 @@ async fn handle_plan_task(
 }
 
 async fn handle_implement_task(
-    _target_path: &std::path::Path,
+    target_path: &std::path::Path,
     task_payload: &TaskPayload,
     writer: &Writer<'_>,
 ) -> Result<String> {
     let mut client = crate::llm::thinking_llm("implementer")
         .with_writer(writer)
         .tools(crate::tools::agent_tools())
-        .system_prompt(crate::grind::prompts::implementer_system_prompt())
+        .system_prompt(&crate::grind::prompts::implementer_system_prompt(&target_path))
         .build()?;
 
     let out = client.ask::<String>(&task_payload.description).await?;
@@ -262,7 +262,7 @@ async fn handle_review_task(
     let head_minus_one = target_repo.revparse_single("HEAD~1")
         .map(|obj| obj.id().to_string())
         .unwrap_or_else(|_| "4b825dc642cb6eb9a060e54bf8d69288fbee4904".to_string());
-    let mut session = crate::pre_review::session::ReviewSession::new();
+    let mut session = crate::pre_review::session::ReviewSession::new(target_path.to_path_buf());
 
     let mut coordinator_client = crate::llm::thinking_llm("review_coordinator")
         .with_writer(writer)
@@ -304,7 +304,7 @@ async fn handle_review_task(
 
     let mut synthesis_client = crate::llm::thinking_llm("review_synthesis")
         .with_writer(writer)
-        .system_prompt(crate::grind::prompts::review_synthesis_prompt())
+        .system_prompt(&crate::grind::prompts::review_synthesis_prompt(&target_path))
         .build()?;
 
     let valid_outputs: Vec<_> = outputs.into_iter().filter_map(|x| x.ok()).collect();
@@ -326,12 +326,13 @@ async fn handle_review_task(
     Ok(serde_json::to_string(&report)?)
 }
 
-pub async fn execute(
-    repo: &Repository,
+pub async fn execute<'a>(
+    repo: &'a Repository,
     id_obj: &Identity,
     assignment_id: &str,
     task_ref: &str,
     task_payload: &TaskPayload,
+    writer: &crate::events::writer::Writer<'a>,
 ) -> Result<()> {
     tracing::info!("Executing {:?} task: {}", task_payload.action, task_ref);
 
@@ -366,8 +367,7 @@ pub async fn execute(
             .status()?;
     }
 
-    let writer = Writer::new(repo, id_obj.clone())?;
-
+    // The writer is provided organically by the orchestrator polling loop
     let report_str = match task_payload.action {
         TaskAction::Plan => handle_plan_task(&target_path, task_payload, &writer).await?,
         TaskAction::Implement => {
@@ -384,7 +384,6 @@ pub async fn execute(
             report: report_str,
         },
     ))?;
-    writer.commit_batch()?;
 
     tracing::info!("Cleaning up worktrees safely bounded securely...");
 
@@ -439,7 +438,8 @@ mod tests {
             plan: None,
         };
 
-        let res = execute(&repo, &identity, "assign_123", "task_ref_7xyz", &payload).await;
+        let writer = Writer::new(repo, identity.clone())?;
+        let res = execute(&repo, &identity, "assign_123", "task_ref_7xyz", &payload, &writer).await;
         assert!(res.is_err());
         assert!(res.unwrap_err().to_string().contains("Failed to spawn worktree"));
 
@@ -502,12 +502,15 @@ mod tests {
         builder.respond(r#"{"vote": "approve", "agree_notes": "", "disagree_notes": "", "overridden_vetoes": [], "consensus": "approve", "new_vetoes": [], "cleared_vetoes": [], "recommended_tasks": [], "general_notes": ""}"#)
             .commit();
 
+        let writer = Writer::new(repo, identity.clone())?;
+
         let res = execute(
             &repo,
             &identity,
             "assign_success",
             "task_ref_success",
             &payload,
+            &writer,
         )
         .await;
         
@@ -572,12 +575,15 @@ mod tests {
             plan: None,
         };
 
+        let writer = Writer::new(repo, identity.clone())?;
+
         let res = execute(
             &repo,
             &identity,
             "assign_review",
             "task_ref_review",
             &payload,
+            &writer,
         ).await;
         
         assert!(res.is_ok(), "Safely compiled execution trace logic naturally bounds the mock dynamically: {:?}", res);
@@ -629,12 +635,15 @@ mod tests {
             plan: None,
         };
 
+        let writer = Writer::new(repo, identity.clone())?;
+
         let res = execute(
             &repo,
             &identity,
             "assign_impl",
             "task_ref_impl",
             &payload,
+            &writer,
         ).await;
         
         assert!(res.is_ok(), "test failed with {:?}", res.err().unwrap());
@@ -693,12 +702,15 @@ mod tests {
             plan: None,
         };
 
+        let writer = Writer::new(repo, identity.clone())?;
+
         let res = execute(
             &repo,
             &identity,
             "assign_retry",
             "task_ref_retry",
             &payload,
+            &writer,
         ).await;
         assert!(res.unwrap_err().to_string().contains("Exceeded max synthesis loops!"));
 
@@ -770,12 +782,15 @@ mod tests {
             plan: None,
         };
 
+        let writer = Writer::new(repo, identity.clone())?;
+
         let res = execute(
             &repo,
             &identity,
             "assign_complex",
             "task_ref_complex",
             &payload,
+            &writer,
         ).await;
         
         assert!(res.is_ok(), "test failed with {:?}", res.err().unwrap());

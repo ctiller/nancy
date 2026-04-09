@@ -623,7 +623,8 @@ async fn test_worktree_extermination_and_ledger_consistency() -> Result<()> {
     };
 
     // Invoke Worktree allocation! Map to task
-    nancy::grind::execute_task::execute(&repo, &id_obj, "t_10", "t_ref_10", &payload).await?;
+    let writer = nancy::events::writer::Writer::new(&repo, id_obj.clone())?;
+    nancy::grind::execute_task::execute(&repo, &id_obj, "t_10", "t_ref_10", &payload, &writer).await?;
 
     // Verify Worktree Exterminated over Rust bounds terminating explicitly safely
     let task_worktree_path = temp_dir.path().join(".nancy").join("tasks").join("t_10");

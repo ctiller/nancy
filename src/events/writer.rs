@@ -96,7 +96,7 @@ impl<'a> Writer<'a> {
         Ok(id_override)
     }
 
-    pub fn commit_batch(&self) -> Result<()> {
+    pub fn commit_batch(&self) -> Result<bool> {
         let mut rx = self.trace_rx.borrow_mut();
         while let Ok(event) = rx.try_recv() {
             self.log_event(event)?;
@@ -104,7 +104,7 @@ impl<'a> Writer<'a> {
 
         let mut pending = self.pending_events.borrow_mut();
         if pending.is_empty() {
-            return Ok(());
+            return Ok(false);
         }
 
         let safe_did = self.identity.get_did_owner().did.replace(":", "_");
@@ -225,16 +225,14 @@ impl<'a> Writer<'a> {
         )?;
 
         pending.clear();
-        Ok(())
+        Ok(true)
     }
 }
 
 impl<'a> Drop for Writer<'a> {
     fn drop(&mut self) {
-        if !self.pending_events.borrow().is_empty() {
-            if let Err(e) = self.commit_batch() {
-                tracing::error!("nancy: Failed to auto-commit batch writer: {}", e);
-            }
+        if let Err(e) = self.commit_batch() {
+            tracing::error!("nancy: Failed to auto-commit batch writer: {}", e);
         }
     }
 }

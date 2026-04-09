@@ -13,13 +13,15 @@ use crate::pre_review::runner::{reviewer_system_prompt, reviewer_task_prompt};
 pub struct ReviewSession {
     pub reviewers: HashMap<String, LlmClient>,
     pub previous_invalid_panel: HashSet<String>,
+    pub workspace: std::path::PathBuf,
 }
 
 impl ReviewSession {
-    pub fn new() -> Self {
+    pub fn new(workspace: std::path::PathBuf) -> Self {
         Self {
             reviewers: HashMap::new(),
             previous_invalid_panel: HashSet::new(),
+            workspace,
         }
     }
 
@@ -89,7 +91,7 @@ impl ReviewSession {
                     continue;
                 };
 
-                let sys_prompt = reviewer_system_prompt(persona);
+                let sys_prompt = reviewer_system_prompt(persona, &self.workspace);
                 let client_name = format!("reviewer_{}", persona.name.replace(" ", "_").to_lowercase());
 
                 let new_client = thinking_llm(&client_name)
@@ -121,7 +123,7 @@ mod tests {
 
     #[test]
     fn test_quorum_valid_initial_state() {
-        let mut session = ReviewSession::new();
+        let mut session = ReviewSession::new(std::path::PathBuf::from("/tmp/nancy"));
         
         // Dynamically extract K=2 valid permutations bounds directly from compiler
         let all = crate::personas::get_all_personas();
@@ -136,7 +138,7 @@ mod tests {
 
     #[test]
     fn test_quorum_enforcement_backfill() {
-        let mut session = ReviewSession::new();
+        let mut session = ReviewSession::new(std::path::PathBuf::from("/tmp/nancy"));
         
         let initial_experts = vec!["The Pedant".to_string()]; // 1 Paradigm
         let final_panel = session.enforce_quorum(&initial_experts);
@@ -164,7 +166,7 @@ mod tests {
         }
         mock_chat.commit();
         
-        let mut session = ReviewSession::new();
+        let mut session = ReviewSession::new(std::path::PathBuf::from("/tmp/nancy"));
         let experts = vec!["The Pedant".to_string()];
         
         let _ = session.enforce_quorum(&experts);
@@ -186,7 +188,7 @@ mod tests {
         ("NANCY_NO_TRACE_EVENTS", "1")
     ])]
     async fn test_ask_reviewers_invalid_id_ignored() {
-        let mut session = ReviewSession::new();
+        let mut session = ReviewSession::new(std::path::PathBuf::from("/tmp/nancy"));
 
         crate::llm::mock::builder::MockChatBuilder::new()
             .respond(r#"{"vote": "approve", "agree_notes": "Good", "disagree_notes": ""}"#)
