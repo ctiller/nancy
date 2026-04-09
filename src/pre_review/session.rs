@@ -94,9 +94,13 @@ impl ReviewSession {
                 let sys_prompt = reviewer_system_prompt(persona, &self.workspace);
                 let client_name = format!("reviewer_{}", persona.name.replace(" ", "_").to_lowercase());
 
+                let tools = crate::tools::AgentToolsBuilder::new()
+                    .with_read_path(&self.workspace)
+                    .build();
+
                 let new_client = thinking_llm(&client_name)
                     .system_prompt(&sys_prompt)
-                    .tools(crate::tools::agent_tools())
+                    .tools(tools)
                     .build()?;
                     
                 self.reviewers.insert(expert_id.clone(), new_client);

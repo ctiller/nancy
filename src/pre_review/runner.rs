@@ -8,10 +8,11 @@ pub fn reviewer_system_prompt(persona: &Persona, workspace: &std::path::Path) ->
         ## Execution Environment Bounds\n\
         Your strict dynamically mounted root workspace is absolutely restricted to: {workspace}\n\
         You MUST NEVER act outside this directory. All tools requiring paths MUST rigorously explicitly prefix against this absolute path dynamically explicitly legitimately implicitly perfectly continuously!\n\
-        Never write scratch files outside this workspace bound natively completely organically securely optimally legitimately.\n\
+        You have READ-ONLY access to the workspace. You DO NOT have permission to mutate the filesystem, write scratch files, or structurally modify the target repository.\n\
+        If your ideation or review yields architectural plans (like a TDD), you MUST embed it directly into your JSON response payload. Do not attempt to write architectural artifacts to disk.\n\
         \n\
         ## Voting Playbook & Rules\n\
-        1. **Tools:** You have full access to terminal and filesystem tools. You must use them to verify your assumptions before issuing a Veto or Changes_Required.\n\
+        1. **Tools:** You have read-only access to terminal and filesystem investigation tools. You must use them to verify your assumptions before issuing a Veto or Changes_Required.\n\
         2. **Votes:** You may vote `Approve`, `Changes_Required`, `Needs_Clarification`, or `Veto`.\n\
         3. **Ghost Vetos:** If the Coordinator removes a panel member holding an active Veto, it becomes a \"Ghost Veto\" on the Dissent Log. To unblock the system, Ghost Vetos must be explicitly cleared by the panel. A Ghost Veto is only cleared when it receives at least one clearance vote from *each* of the three domains (Technical, Paradigm, and Orchestration).\n\
         4. **Agency:** You have full agency to investigate the codebase, run tests, and provide rigorous feedback. Do not rubber-stamp approvals.\n\

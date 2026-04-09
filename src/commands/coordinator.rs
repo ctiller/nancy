@@ -406,9 +406,23 @@ fn handle_task_requests(
             _ => continue,
         };
 
-        let target_branch = repo.head()
-            .map(|h| h.name().unwrap_or("refs/heads/main").to_string())
-            .unwrap_or_else(|_| "refs/heads/main".to_string());
+        let default_fallback = if repo.find_reference("refs/heads/main").is_ok() {
+            "refs/heads/main".to_string()
+        } else {
+            "refs/heads/master".to_string()
+        };
+
+        let mut target_branch = repo.head()
+            .map(|h| h.name().unwrap_or(&default_fallback).to_string())
+            .unwrap_or_else(|_| default_fallback.clone());
+            
+        if target_branch.starts_with("refs/heads/nancy/") 
+            && !target_branch.starts_with("refs/heads/nancy/tasks/")
+            && !target_branch.starts_with("refs/heads/nancy/features/") 
+        {
+            tracing::warn!("Task target branch resolved to a protected control branch: {}. Falling back dynamically.", target_branch);
+            target_branch = default_fallback;
+        }
             
         use crate::schema::task::{BlockedByPayload, TaskAction, TaskPayload};
             

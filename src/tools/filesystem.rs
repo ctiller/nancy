@@ -7,7 +7,56 @@ use serde::Deserialize;
 use std::path::Path;
 use tokio::fs;
 
+use std::path::PathBuf;
+use std::sync::Arc;
+
 const MAX_LINES_PER_VIEW: usize = 2000;
+
+#[derive(Clone)]
+pub struct Permissions {
+    pub read_dirs: Vec<PathBuf>,
+    pub write_dirs: Vec<PathBuf>,
+}
+
+impl Permissions {
+    fn check_access(dirs: &[PathBuf], path: &Path) -> bool {
+        let mut target_to_check = path.to_path_buf();
+        if !target_to_check.is_absolute() {
+            if let Ok(cwd) = std::env::current_dir() {
+                target_to_check = cwd.join(target_to_check);
+            }
+        }
+
+        while !target_to_check.exists() {
+            if let Some(parent) = target_to_check.parent() {
+                target_to_check = parent.to_path_buf();
+            } else {
+                break;
+            }
+        }
+
+        let canonical_target = match target_to_check.canonicalize() {
+            Ok(p) => p,
+            Err(_) => return false,
+        };
+        for allowed in dirs {
+            if let Ok(canon_allowed) = allowed.canonicalize() {
+                if canonical_target.starts_with(&canon_allowed) {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    pub fn can_read(&self, path: &Path) -> bool {
+        Self::check_access(&self.read_dirs, path)
+    }
+
+    pub fn can_write(&self, path: &Path) -> bool {
+        Self::check_access(&self.write_dirs, path)
+    }
+}
 
 #[derive(JsonSchema, Deserialize)]
 pub struct FileFilters {
@@ -47,8 +96,8 @@ fn suggest_closest_path(target: &Path) -> Option<String> {
 }
 
 /// Search for exact or regex strings across the filesystem. Respects .gitignore automatically.
-#[llm_tool]
-pub async fn grep_search(
+pub async fn grep_search_impl(
+    perms: Arc<Permissions>,
     query: String,
     search_paths: Vec<String>,
     is_regex: Option<bool>,
@@ -67,6 +116,9 @@ pub async fn grep_search(
     let mut results = Vec::new();
 
     for path in &search_paths {
+        if !perms.can_read(Path::new(path)) {
+            bail!("Execution denied: Explicit permission missing to natively access structural component bound: {}", path);
+        }
         let builder = WalkBuilder::new(path);
         if let Some(_filters) = &file_filters {
             // Future implementation: map glob strings to the builder
@@ -111,8 +163,8 @@ pub async fn grep_search(
 }
 
 /// List the contents of a directory. Has built-in recursion bounding to protect context loops.
-#[llm_tool]
-pub async fn list_dir(
+pub async fn list_dir_impl(
+    perms: Arc<Permissions>,
     target_directory: String,
     recursive: Option<bool>,
 ) -> Result<serde_json::Value> {
@@ -120,6 +172,11 @@ pub async fn list_dir(
     let max_depth = if is_recursive { 3 } else { 1 };
 
     let path = Path::new(&target_directory);
+    
+    if !perms.can_read(path) {
+        bail!("Execution denied: Explicit permission missing against mapped boundary target: {}", target_directory);
+    }
+    
     if !path.exists() {
         if let Some(suggestion) = suggest_closest_path(path) {
             bail!(
@@ -166,8 +223,8 @@ pub struct PaginationBounds {
 }
 
 /// Read complete files or exact line ranges. Extremely large files will gracefully error explicitly prompting pagination.
-#[llm_tool]
-pub async fn view_files(
+pub async fn view_files_impl(
+    perms: Arc<Permissions>,
     target_paths: Vec<String>,
     pagination: Option<Vec<PaginationBounds>>,
 ) -> Result<serde_json::Value> {
@@ -175,6 +232,11 @@ pub async fn view_files(
 
     for (i, target) in target_paths.iter().enumerate() {
         let path = Path::new(target);
+        if !perms.can_read(path) {
+            results.push(serde_json::json!({ "file": target, "error": "Execution denied: Explicit permission missing to structurally map boundary target natively." }));
+            continue;
+        }
+        
         if !path.exists() {
             if let Some(suggestion) = suggest_closest_path(path) {
                 results.push(serde_json::json!({ "file": target, "error": format!("File does not exist. Did you mean '{}'?", suggestion) }));
@@ -241,12 +303,16 @@ pub struct ReplacementChunk {
 }
 
 /// Precision code manipulation modifying precise structural loops inside buffers
-#[llm_tool]
-pub async fn multi_replace_file_content(
+pub async fn multi_replace_file_content_impl(
+    perms: Arc<Permissions>,
     target_file: String,
     replacement_chunks: Vec<ReplacementChunk>,
 ) -> Result<serde_json::Value> {
     let path = Path::new(&target_file);
+    if !perms.can_write(path) {
+        bail!("Execution denied: Explicit permission missing to natively mutate boundary target: {}", target_file);
+    }
+    
     if !path.exists() {
         if let Some(suggestion) = suggest_closest_path(path) {
             bail!(
@@ -295,10 +361,13 @@ pub struct WritePayload {
 }
 
 /// Create fresh artifacts structurally or safely destroy previous architectures wrapping Overwrite protections.
-#[llm_tool]
-pub async fn write_files(files: Vec<WritePayload>) -> Result<serde_json::Value> {
+pub async fn write_files_impl(perms: Arc<Permissions>, files: Vec<WritePayload>) -> Result<serde_json::Value> {
     for file in &files {
         let path = Path::new(&file.target_path);
+        
+        if !perms.can_write(path) {
+            bail!("Execution denied: Explicit permission missing to natively write to boundary target explicitly: {}", file.target_path);
+        }
 
         if path.exists() && !file.overwrite.unwrap_or(false) {
             bail!(
@@ -320,19 +389,18 @@ pub async fn write_files(files: Vec<WritePayload>) -> Result<serde_json::Value> 
 }
 
 /// Fallback wrapper for extremely simple models mapping single reads without array layouts.
-#[llm_tool]
-pub async fn read_file(target_file: String) -> Result<serde_json::Value> {
-    view_files(vec![target_file], None).await
+pub async fn read_file_impl(perms: Arc<Permissions>, target_file: String) -> Result<serde_json::Value> {
+    view_files_impl(perms, vec![target_file], None).await
 }
 
 /// Fallback wrapper for extremely simple models mapping single writes without array payloads.
-#[llm_tool]
-pub async fn write_file(
+pub async fn write_file_impl(
+    perms: Arc<Permissions>,
     target_file: String,
     content: String,
     overwrite: Option<bool>,
 ) -> Result<serde_json::Value> {
-    write_files(vec![WritePayload {
+    write_files_impl(perms, vec![WritePayload {
         target_path: target_file,
         content,
         overwrite,
@@ -368,10 +436,12 @@ async fn copy_dir_all(src: &Path, dst: &Path) -> Result<(), std::io::Error> {
 }
 
 /// Execute standardized layout transitions logically avoiding external linux bash boundaries securely.
-#[llm_tool]
-pub async fn manage_paths(operations: Vec<PathOperation>) -> Result<serde_json::Value> {
+pub async fn manage_paths_impl(perms: Arc<Permissions>, operations: Vec<PathOperation>) -> Result<serde_json::Value> {
     for op in &operations {
         let target = Path::new(&op.target_path);
+        if !perms.can_write(target) {
+            bail!("Execution denied: Explicit permission missing to structurally manage target boundary: {}", op.target_path);
+        }
 
         match op.action.as_str() {
             "delete" => {
@@ -403,6 +473,9 @@ pub async fn manage_paths(operations: Vec<PathOperation>) -> Result<serde_json::
                     .as_ref()
                     .context("source_path explicitly required for mapping transitions")?;
                 let source = Path::new(source_raw);
+                if !perms.can_read(source) {
+                    bail!("Execution denied: Explicit permission missing to natively extract logically mapped boundary: {}", source_raw);
+                }
 
                 if !source.exists() {
                     if let Some(suggestion) = suggest_closest_path(source) {
@@ -438,6 +511,58 @@ pub async fn manage_paths(operations: Vec<PathOperation>) -> Result<serde_json::
     Ok(serde_json::json!({ "status": "Successfully managed system objects cleanly" }))
 }
 
+pub fn create_filesystem_tools(permissions: Arc<Permissions>) -> Vec<Box<dyn crate::llm::tool::LlmTool>> {
+    let p_grep = Arc::clone(&permissions);
+    let grep = llm_macros::make_tool!("grep_search", "Search for exact or regex strings across the filesystem. Respects .gitignore automatically.", move |query: String, search_paths: Vec<String>, is_regex: Option<bool>, file_filters: Option<FileFilters>, match_per_line: Option<bool>| {
+        let perms = Arc::clone(&p_grep);
+        async move { grep_search_impl(perms, query, search_paths, is_regex, file_filters, match_per_line).await }
+    });
+
+    let p_list = Arc::clone(&permissions);
+    let list = llm_macros::make_tool!("list_dir", "List the contents of a directory. Has built-in recursion bounding to protect context loops.", move |target_directory: String, recursive: Option<bool>| {
+        let perms = Arc::clone(&p_list);
+        async move { list_dir_impl(perms, target_directory, recursive).await }
+    });
+
+    let p_view = Arc::clone(&permissions);
+    let view = llm_macros::make_tool!("view_files", "Read complete files or exact line ranges. Extremely large files will gracefully error explicitly prompting pagination.", move |target_paths: Vec<String>, pagination: Option<Vec<PaginationBounds>>| {
+        let perms = Arc::clone(&p_view);
+        async move { view_files_impl(perms, target_paths, pagination).await }
+    });
+
+    let p_multi = Arc::clone(&permissions);
+    let multi = llm_macros::make_tool!("multi_replace_file_content", "Precision code manipulation modifying precise structural loops inside buffers", move |target_file: String, replacement_chunks: Vec<ReplacementChunk>| {
+        let perms = Arc::clone(&p_multi);
+        async move { multi_replace_file_content_impl(perms, target_file, replacement_chunks).await }
+    });
+
+    let p_write = Arc::clone(&permissions);
+    let write = llm_macros::make_tool!("write_files", "Create fresh artifacts structurally or safely destroy previous architectures wrapping Overwrite protections.", move |files: Vec<WritePayload>| {
+        let perms = Arc::clone(&p_write);
+        async move { write_files_impl(perms, files).await }
+    });
+
+    let p_manage = Arc::clone(&permissions);
+    let manage = llm_macros::make_tool!("manage_paths", "Execute standardized layout transitions logically avoiding external linux bash boundaries securely.", move |operations: Vec<PathOperation>| {
+        let perms = Arc::clone(&p_manage);
+        async move { manage_paths_impl(perms, operations).await }
+    });
+
+    let p_rr = Arc::clone(&permissions);
+    let rr = llm_macros::make_tool!("read_file", "Fallback wrapper for extremely simple models mapping single reads without array layouts.", move |target_file: String| {
+        let perms = Arc::clone(&p_rr);
+        async move { read_file_impl(perms, target_file).await }
+    });
+
+    let p_ww = Arc::clone(&permissions);
+    let ww = llm_macros::make_tool!("write_file", "Fallback wrapper for extremely simple models mapping single writes without array payloads.", move |target_file: String, content: String, overwrite: Option<bool>| {
+        let perms = Arc::clone(&p_ww);
+        async move { write_file_impl(perms, target_file, content, overwrite).await }
+    });
+
+    vec![grep, list, view, multi, write, manage, rr, ww]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -445,13 +570,45 @@ mod tests {
     use std::fs;
     use tempfile::tempdir;
 
+    fn get_test_tool(name: &str) -> Box<dyn crate::llm::tool::LlmTool> {
+        let perms = Arc::new(Permissions { read_dirs: vec![PathBuf::from("/")], write_dirs: vec![PathBuf::from("/")] });
+        let tools = create_filesystem_tools(perms);
+        tools.into_iter().find(|t| t.name() == name).unwrap()
+    }
+
+    #[test]
+    fn test_permissions_edge_cases() {
+        let dir = tempdir().unwrap();
+        let file_path = dir.path().join("test.txt");
+        std::fs::write(&file_path, "hello").unwrap();
+
+        let root_str = if cfg!(windows) { "C:\\" } else { "/" };
+        
+        let perms = Permissions {
+            read_dirs: vec![dir.path().to_path_buf(), PathBuf::from("/nonexistent/fake/dir")],
+            write_dirs: vec![],
+        };
+
+        // Relative path resolution safely tested by failing safely (hits lines 25-27)
+        assert!(!perms.can_read(Path::new("some/random/unreliable/relative_path.json")));
+
+        // Path that completely doesn't exist and hits break (hits lines 30-34)
+        assert!(!perms.can_read(Path::new("/a/b/c/d/e/f/g/h/i/j/k/l")));
+
+        // Allowed dir canonicalize fail (hits lines 46-47)
+        // /nonexistent/fake/dir cannot be canonicalized
+
+        // Return false fallback (hits line 49)
+        assert!(!perms.can_read(Path::new(root_str)));
+    }
+
     #[tokio::test]
     async fn test_write_and_manage_paths() {
         let dir = tempdir().unwrap();
         let file_path = dir.path().join("test.txt");
         let new_path = dir.path().join("moved.txt");
 
-        let write_tool = write_files::tool();
+        let write_tool = get_test_tool("write_files");
         let p = serde_json::json!({
             "files": [{
                 "target_path": file_path.to_string_lossy(),
@@ -464,7 +621,7 @@ mod tests {
         assert!(res.get("status").is_some());
         assert_eq!(fs::read_to_string(&file_path).unwrap(), "hello world");
 
-        let manage_tool = manage_paths::tool();
+        let manage_tool = get_test_tool("manage_paths");
         let m = serde_json::json!({
             "operations": [{
                 "action": "move",
@@ -487,7 +644,7 @@ mod tests {
         let huge_content = "line\n".repeat(2005);
         fs::write(&path, huge_content).unwrap();
 
-        let read_tool = view_files::tool();
+        let read_tool = get_test_tool("view_files");
         let v = serde_json::json!({
             "target_paths": [path.to_string_lossy()]
         });
@@ -510,7 +667,7 @@ mod tests {
         let file_path = dir.path().join("findme.txt");
         fs::write(&file_path, "hidden secret\nanother line\nhidden agenda").unwrap();
 
-        let tool = grep_search::tool();
+        let tool = get_test_tool("grep_search");
         let p = serde_json::json!({
             "query": "hidden",
             "search_paths": [dir.path().to_string_lossy()]
@@ -529,7 +686,7 @@ mod tests {
         fs::create_dir_all(dir.path().join("subdir")).unwrap();
         fs::write(dir.path().join("file.txt"), "hello").unwrap();
 
-        let tool = list_dir::tool();
+        let tool = get_test_tool("list_dir");
         let p = serde_json::json!({
             "target_directory": dir.path().to_string_lossy(),
             "recursive": true
@@ -546,7 +703,7 @@ mod tests {
         let file_path = dir.path().join("modify.txt");
         fs::write(&file_path, "START\nreplace this\nEND").unwrap();
 
-        let tool = multi_replace_file_content::tool();
+        let tool = get_test_tool("multi_replace_file_content");
         let p = serde_json::json!({
             "target_file": file_path.to_string_lossy(),
             "replacement_chunks": [{
@@ -565,14 +722,14 @@ mod tests {
         let dir = tempdir().unwrap();
         let path = dir.path().join("simple.txt");
 
-        let wt = write_file::tool();
+        let wt = get_test_tool("write_file");
         let p = serde_json::json!({
             "target_file": path.to_string_lossy(),
             "content": "simple string"
         });
         wt.call(p).await.unwrap();
 
-        let rt = read_file::tool();
+        let rt = get_test_tool("read_file");
         let r = serde_json::json!({
             "target_file": path.to_string_lossy()
         });
@@ -586,7 +743,7 @@ mod tests {
     async fn test_filesystem_coverage_gaps() {
         let dir = tempdir().unwrap();
 
-        let list_tool = list_dir::tool();
+        let list_tool = get_test_tool("list_dir");
         let res = list_tool
             .call(serde_json::json!({
                 "target_directory": dir.path().join("non_existent").to_string_lossy(),
@@ -594,7 +751,7 @@ mod tests {
             .await;
         assert!(res.is_err());
 
-        let grep_tool = grep_search::tool();
+        let grep_tool = get_test_tool("grep_search");
         fs::write(dir.path().join("regex.txt"), "some 123 pattern").unwrap();
         let p = serde_json::json!({
             "query": "[0-9]+",
@@ -612,7 +769,7 @@ mod tests {
         });
         assert!(grep_tool.call(p_bad).await.is_err());
 
-        let view_tool = view_files::tool();
+        let view_tool = get_test_tool("view_files");
         let v = serde_json::json!({
             "target_paths": [dir.path().join("missing.txt").to_string_lossy()]
         });
@@ -638,7 +795,7 @@ mod tests {
             "line2"
         );
 
-        let replace_tool = multi_replace_file_content::tool();
+        let replace_tool = get_test_tool("multi_replace_file_content");
         let fpath = dir.path().join("rep.txt");
         fs::write(&fpath, "dupe\ndupe\n").unwrap();
 
@@ -660,13 +817,13 @@ mod tests {
         });
         assert!(replace_tool.call(p_missing).await.is_err());
 
-        let write_tool = write_files::tool();
+        let write_tool = get_test_tool("write_files");
         let p_wr = serde_json::json!({
             "files": [{"target_path": fpath.to_string_lossy(), "content": "block"}]
         });
         assert!(write_tool.call(p_wr).await.is_err());
 
-        let manage_tool = manage_paths::tool();
+        let manage_tool = get_test_tool("manage_paths");
         let md1 = serde_json::json!({
             "operations": [{"action": "delete", "target_path": dir.path().join("missing.txt").to_string_lossy()}]
         });
@@ -709,24 +866,24 @@ mod tests {
         fs::write(dir.path().join("applt.txt"), "").unwrap(); // Extra file for min_dist branch replacements
 
         // view_files hitting missing file fallback suggestion
-        let view_tool = view_files::tool();
+        let view_tool = get_test_tool("view_files");
         let p_view = serde_json::json!({
             "target_paths": [dir.path().join("appla.txt").to_string_lossy()]
         });
         view_tool.call(p_view).await.unwrap();
 
         // list_dir hitting missing file fallback suggestion
-        let list_tool = list_dir::tool();
+        let list_tool = get_test_tool("list_dir");
         let p_list =
             serde_json::json!({"target_directory": dir.path().join("appla.txt").to_string_lossy()});
         let _ = list_tool.call(p_list).await;
 
         // replace content fallback
-        let replace = multi_replace_file_content::tool();
+        let replace = get_test_tool("multi_replace_file_content");
         let r = serde_json::json!({"target_file": dir.path().join("appla.txt").to_string_lossy(), "replacement_chunks": []});
         let _ = replace.call(r).await;
 
-        let manage = manage_paths::tool();
+        let manage = get_test_tool("manage_paths");
         let d = serde_json::json!({"operations": [{"action": "delete", "target_path": dir.path().join("appla.txt").to_string_lossy()}]});
         let _ = manage.call(d).await;
 
@@ -735,7 +892,7 @@ mod tests {
         let _ = manage.call(m).await;
 
         // 2. Grep search file filter
-        let grep_tool = grep_search::tool();
+        let grep_tool = get_test_tool("grep_search");
         let p_grep = serde_json::json!({
             "query": "hidden",
             "search_paths": [dir.path().to_string_lossy()],
@@ -786,7 +943,7 @@ mod tests {
         manage.call(p_cp).await.unwrap();
 
         // write files parent dir fallback
-        let write_tool = write_files::tool();
+        let write_tool = get_test_tool("write_files");
         let p_wr = serde_json::json!({
             "files": [{"target_path": dir.path().join("parent").join("d.txt").to_string_lossy(), "content": "block"}]
         });

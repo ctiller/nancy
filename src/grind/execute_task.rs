@@ -241,9 +241,14 @@ async fn handle_implement_task(
     task_payload: &TaskPayload,
     writer: &Writer<'_>,
 ) -> Result<String> {
+    let tools = crate::tools::AgentToolsBuilder::new()
+        .with_read_path(target_path)
+        .with_write_path(target_path)
+        .build();
+
     let mut client = crate::llm::thinking_llm("implementer")
         .with_writer(writer)
-        .tools(crate::tools::agent_tools())
+        .tools(tools)
         .system_prompt(&crate::grind::prompts::implementer_system_prompt(&target_path))
         .build()?;
 
@@ -340,12 +345,28 @@ pub async fn execute<'a>(
     let safe_ref = task_ref.replace(":", "_").replace("/", "_");
     let target_path = workdir.join("worktrees").join(&safe_ref);
 
+    let mut safe_target_branch = task_payload.branch.strip_prefix("refs/heads/").unwrap_or(&task_payload.branch).to_string();
+    
+    let default_fallback = if repo.find_reference("refs/heads/main").is_ok() {
+        "main".to_string()
+    } else {
+        "master".to_string()
+    };
+
+    if safe_target_branch.starts_with("nancy/") 
+        && !safe_target_branch.starts_with("nancy/tasks/")
+        && !safe_target_branch.starts_with("nancy/features/") 
+    {
+        tracing::warn!("Task {} attempted to checkout mapped control branch {}. Falling back dynamically structurally.", task_ref, safe_target_branch);
+        safe_target_branch = default_fallback;
+    }
+
     let status = std::process::Command::new("git")
         .arg("worktree")
         .arg("add")
         .arg("-f")
         .arg(&target_path)
-        .arg(task_payload.branch.strip_prefix("refs/heads/").unwrap_or(&task_payload.branch))
+        .arg(&safe_target_branch)
         .current_dir(workdir)
         .status()?;
 

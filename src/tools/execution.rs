@@ -105,6 +105,11 @@ impl LlmTool for RunCommand {
                     cmd_base
                 );
             }
+            "git" => {
+                anyhow::bail!(
+                    "Execution denied. The agent harness is responsible for orchestrating git commands"
+                );
+            }
             _ => {
                 if cmd.starts_with("echo") && (cmd.contains(" > ") || cmd.contains(" >> ")) {
                     anyhow::bail!(
@@ -167,6 +172,7 @@ mod tests {
             "sed 's/x/y/'",
             "mv x y",
             "echo >> file",
+            "git status",
         ];
         for cmd in deny_cases {
             let arg = serde_json::json!({

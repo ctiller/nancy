@@ -174,7 +174,7 @@ pub async fn run<P: AsRef<Path>>(dir: P) -> Result<()> {
         let target_path = nancy_worktrees.join(format!("task-{}", safe_task_ref));
 
         if !target_path.exists() {
-            let branch_name = format!("refs/heads/nancy/{}/task-{}", worker.did, safe_task_ref);
+            let branch_name = format!("refs/heads/nancy/tasks/{}", safe_task_ref);
 
             // Create branch or fallback
             let shell_cmd = format!(

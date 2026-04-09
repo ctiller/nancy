@@ -209,7 +209,10 @@ pub fn make_tool(input: TokenStream) -> TokenStream {
 
             let closure = #closure;
 
-            let async_wrap = |#( #arg_names: #arg_types ),*| async move { #closure_call };
+            let async_wrap = move |#( #arg_names: #arg_types ),*| {
+                let future = closure(#( #arg_names ),*);
+                async move { future.await }
+            };
 
             Box::new(ClosureTool {
                 name: #name.to_string(),
