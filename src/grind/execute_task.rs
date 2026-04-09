@@ -90,7 +90,9 @@ async fn handle_review_task(
     writer: &Writer<'_>,
 ) -> Result<String> {
     let target_repo = Repository::open(target_path)?;
-    let head_minus_one = target_repo.revparse_single("HEAD~1")?.id().to_string();
+    let head_minus_one = target_repo.revparse_single("HEAD~1")
+        .map(|obj| obj.id().to_string())
+        .unwrap_or_else(|_| "4b825dc642cb6eb9a060e54bf8d69288fbee4904".to_string());
     let mut session = crate::pre_review::session::ReviewSession::new(target_path, &head_minus_one);
 
     let mut coordinator_client = crate::llm::thinking_llm("review_coordinator")

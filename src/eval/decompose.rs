@@ -14,7 +14,7 @@ pub fn parse_eval_definition(path: &std::path::Path) -> Result<EvalDefinition> {
 pub async fn eval_decompose(path: &str, output_path: &std::path::Path) -> Result<()> {
     let def = parse_eval_definition(std::path::Path::new(path))?;
 
-    let runner = crate::eval::EvalRunner::setup(&def).await?;
+    let mut runner = crate::eval::EvalRunner::setup(&def).await?;
     runner.push_decompose_task(def.task_description.clone()).await?;
     runner
         .wait_for_completion(|view| !view.task_completions.is_empty())
@@ -33,7 +33,7 @@ pub async fn eval_decompose(path: &str, output_path: &std::path::Path) -> Result
         }
     }
 
-    let result = crate::eval::EvalResult { final_plan: None, recommended_tasks, traces };
+    let result = crate::eval::EvalResult { final_plan: None, recommended_tasks, traces: runner.extract_traces() };
 
     let result_yaml = serde_yaml::to_string(&result)?;
     fs::write(output_path, result_yaml)?;

@@ -29,7 +29,11 @@ impl ReviewSession {
 
     fn generate_diff(&self, end_commit_hash: &str) -> Result<String> {
         let repo = Repository::open(&self.worktree_path)?;
-        let t_begin = repo.find_commit(Oid::from_str(&self.begin_commit_hash)?)?.tree()?;
+        let begin_oid = Oid::from_str(&self.begin_commit_hash)?;
+        let t_begin = match repo.find_commit(begin_oid) {
+            Ok(commit) => commit.tree()?,
+            Err(_) => repo.find_tree(begin_oid)?,
+        };
         let t_end = repo.revparse_single(end_commit_hash)?.peel_to_commit()?.tree()?;
         
         let diff = repo.diff_tree_to_tree(Some(&t_begin), Some(&t_end), None)?;

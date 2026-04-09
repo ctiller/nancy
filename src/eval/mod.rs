@@ -139,25 +139,11 @@ impl EvalRunner {
         } else {
             None
         };
-        let grinder_handle = std::thread::spawn(move || {
-            let rt = tokio::runtime::Runtime::new().unwrap();
-            let res = rt.block_on(crate::commands::grind::grind(
-                bg_dir,
-                Some(explicit_coord),
-                explicit_grinder,
-            ));
-            if let Err(e) = res {
-                tracing::error!("Grinder node catastrophically failed and terminated: {:?}", e);
-                // Forceably attempt to unlock any pending bounds natively!
-                crate::commands::grind::SHUTDOWN.store(true, std::sync::atomic::Ordering::SeqCst);
-            }
-        });
-
         Ok(Self {
             temp_dir,
             repo,
             id_obj,
-            grinder_handle: Some(grinder_handle),
+            grinder_handle: None,
         })
     }
 
@@ -189,11 +175,33 @@ impl EvalRunner {
         Ok(())
     }
 
-    pub async fn wait_for_completion<F>(&self, condition: F) -> anyhow::Result<()>
+    pub async fn wait_for_completion<F>(&mut self, condition: F) -> anyhow::Result<()>
     where
         F: FnMut(&crate::coordinator::appview::AppView) -> bool,
     {
         let mut coordinator = crate::commands::coordinator::Coordinator::new(self.temp_dir.as_path())?;
+
+        let bg_dir = self.temp_dir.clone();
+        let explicit_coord = self.id_obj.get_did_owner().did.clone();
+        let explicit_grinder = if let crate::schema::identity_config::Identity::Coordinator { workers, .. } = &self.id_obj {
+            workers.first().map(|w| crate::schema::identity_config::Identity::Grinder(w.clone()))
+        } else {
+            None
+        };
+
+        self.grinder_handle = Some(std::thread::spawn(move || {
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            let res = rt.block_on(crate::commands::grind::grind(
+                bg_dir,
+                Some(explicit_coord),
+                explicit_grinder,
+            ));
+            if let Err(e) = res {
+                tracing::error!("Grinder node catastrophically failed and terminated: {:?}", e);
+                crate::commands::grind::SHUTDOWN.store(true, std::sync::atomic::Ordering::SeqCst);
+            }
+        }));
+
         coordinator.run_until(condition).await?;
         crate::commands::grind::SHUTDOWN.store(true, std::sync::atomic::Ordering::SeqCst);
         Ok(())

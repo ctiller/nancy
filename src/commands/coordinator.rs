@@ -25,6 +25,7 @@ pub static SHUTDOWN: AtomicBool = AtomicBool::new(false);
 pub struct Coordinator {
     repo: Repository,
     identity: Identity,
+    listener: Option<std::os::unix::net::UnixListener>,
 }
 
 impl Coordinator {
@@ -44,7 +45,12 @@ impl Coordinator {
             bail!("'nancy coordinator' must run within an Identity::Coordinator context.");
         }
 
-        Ok(Self { repo, identity })
+        let socket_path = workdir.join(".nancy").join("coordinator.sock");
+        let _ = std::fs::remove_file(&socket_path);
+        let listener = std::os::unix::net::UnixListener::bind(&socket_path)?;
+        listener.set_nonblocking(true)?;
+
+        Ok(Self { repo, identity, listener: Some(listener) })
     }
 
     pub async fn run_until<F>(&mut self, mut condition: F) -> Result<()>
@@ -75,7 +81,6 @@ impl Coordinator {
 
         let workdir = self.repo.workdir().unwrap().to_path_buf();
         let socket_path = workdir.join(".nancy").join("coordinator.sock");
-        let _ = std::fs::remove_file(&socket_path);
 
         let app = Router::new()
             .route("/ready-for-poll", axum::routing::post(ready_for_poll_handler))
@@ -83,7 +88,7 @@ impl Coordinator {
             .route("/updates-ready", axum::routing::post(updates_ready_handler))
             .with_state(ipc_state);
 
-        let listener = tokio::net::UnixListener::bind(&socket_path)?;
+        let listener = tokio::net::UnixListener::from_std(self.listener.take().expect("UnixListener was missing from Coordinator struct mapping!"))?;
         let axum_server_task = tokio::spawn(async move {
             let shutdown_signal = async {
                 loop {

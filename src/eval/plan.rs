@@ -14,13 +14,13 @@ pub fn parse_eval_definition(path: &std::path::Path) -> Result<EvalDefinition> {
 pub async fn eval_plan(path: &str, output_path: &std::path::Path) -> Result<()> {
     let def = parse_eval_definition(std::path::Path::new(path))?;
 
-    let runner = crate::eval::EvalRunner::setup(&def).await?;
+    let mut runner = crate::eval::EvalRunner::setup(&def).await?;
     runner.push_task(def.task_description.clone()).await?;
     runner
         .wait_for_completion(|view| !view.task_completions.is_empty())
         .await?;
 
-    let traces = runner.extract_traces();
+    // let traces = runner.extract_traces();
     let req_hash = runner.get_request_hash()?;
     let branch_name = format!("refs/heads/nancy/plans/{}", req_hash);
     let final_plan = if let Ok(r) = runner.repo.find_reference(&branch_name) {
@@ -33,7 +33,7 @@ pub async fn eval_plan(path: &str, output_path: &std::path::Path) -> Result<()> 
         } else { None }
     } else { None };
 
-    let result = crate::eval::EvalResult { final_plan, recommended_tasks: None, traces };
+    let result = crate::eval::EvalResult { final_plan, recommended_tasks: None, traces: runner.extract_traces() };
 
     let result_yaml = serde_yaml::to_string(&result)?;
     fs::write(output_path, result_yaml)?;
