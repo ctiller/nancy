@@ -65,9 +65,11 @@ pub fn md_defined(_attr: TokenStream, item: TokenStream) -> TokenStream {
 
         impl #struct_ident {
             #[doc(hidden)]
-            pub const __MD_DEFAULT: Self = Self {
-                #(#default_fields),*
-            };
+            pub fn __md_default() -> Self {
+                 Self {
+                    #(#default_fields),*
+                 }
+            }
         }
     })
 }
@@ -158,6 +160,8 @@ pub fn include_md(input: TokenStream) -> TokenStream {
             }
         };
 
+        let mut role_inserts = Vec::new();
+
         if let serde_yaml::Value::Mapping(map) = yaml_val {
             for (key, value) in map {
                 if let serde_yaml::Value::String(k) = key {
@@ -166,7 +170,26 @@ pub fn include_md(input: TokenStream) -> TokenStream {
                         serde_yaml::Value::String(s) => {
                             if k == "category" {
                                 let variant_ident = format_ident!("{}", s);
-                                fields.push(quote! { #key_ident: PersonaCategory::#variant_ident });
+                                fields.push(quote! { #key_ident: crate::personas::PersonaCategory::#variant_ident });
+                            } else if k == "plan_review" || k == "code_review" || k == "plan_ideation" {
+                                let role_variant = match k.as_str() {
+                                    "plan_review" => "PlanReview",
+                                    "code_review" => "CodeReview",
+                                    "plan_ideation" => "PlanIdeation",
+                                    _ => unreachable!(),
+                                };
+                                let role_variant_ident = format_ident!("{}", role_variant);
+                                
+                                let state_variant = match s.as_str() {
+                                    "mandatory" => "Mandatory",
+                                    "never" => "Never",
+                                    _ => "Optional",
+                                };
+                                let state_variant_ident = format_ident!("{}", state_variant);
+                                
+                                role_inserts.push(quote! {
+                                    (crate::personas::PersonaRole::#role_variant_ident, crate::personas::RequirementState::#state_variant_ident)
+                                });
                             } else {
                                 fields.push(quote! { #key_ident: #s });
                             }
@@ -193,6 +216,14 @@ pub fn include_md(input: TokenStream) -> TokenStream {
                 }
             }
         }
+        
+        if !role_inserts.is_empty() {
+            fields.push(quote! {
+                roles: std::collections::HashMap::from([
+                    #(#role_inserts),*
+                ])
+            });
+        }
     }
 
     // Add body field
@@ -207,7 +238,7 @@ pub fn include_md(input: TokenStream) -> TokenStream {
     let expanded = quote! {
         #struct_name {
             #( #fields, )*
-            ..#struct_name::__MD_DEFAULT
+            ..#struct_name::__md_default()
         }
     };
 

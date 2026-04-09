@@ -13,6 +13,7 @@ pub struct Persona {
     pub description: string,
     pub category: PersonaCategory,
     pub temperature: Option<f32>,
+    pub roles: std::collections::HashMap<PersonaRole, RequirementState>,
     #[body]
     pub persona: string,
 }
@@ -27,6 +28,23 @@ pub enum PersonaCategory {
     Technical,
     Paradigm,
     Orchestration,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PersonaRole {
+    PlanIdeation,
+    PlanReview,
+    CodeReview,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RequirementState {
+    #[default]
+    Optional,
+    Mandatory,
+    Never,
 }
 
 /// Lazily returns the complete array of all internally compiled LLM review personas.

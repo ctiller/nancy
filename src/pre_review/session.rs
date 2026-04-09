@@ -22,17 +22,42 @@ impl ReviewSession {
         }
     }
 
-    pub fn enforce_quorum(&mut self, requested_experts: &[String]) -> Vec<String> {
+    pub fn enforce_role_bounds(&self, requested_experts: &[String], role: crate::personas::PersonaRole) -> Vec<String> {
         let all_personas = get_all_personas();
         let mut panel: HashSet<String> = HashSet::new();
+
+        for p in &all_personas {
+            if let Some(state) = p.roles.get(&role) {
+                if *state == crate::personas::RequirementState::Mandatory {
+                    panel.insert(p.name.to_string());
+                }
+            }
+        }
+
+        for req in requested_experts {
+            if let Some(p) = all_personas.iter().find(|p| &p.name == req) {
+                let state = p.roles.get(&role).copied().unwrap_or(crate::personas::RequirementState::Optional);
+                if state != crate::personas::RequirementState::Never {
+                    panel.insert(p.name.to_string());
+                } else {
+                    tracing::info!("Dropped {} due to Never requirement for role {:?}", req, role);
+                }
+            }
+        }
+        panel.into_iter().collect()
+    }
+
+    pub fn enforce_quorum(&mut self, requested_experts: &[String], role: crate::personas::PersonaRole) -> Vec<String> {
+        let role_bounded = self.enforce_role_bounds(requested_experts, role);
+        let all_personas = get_all_personas();
+        let mut panel: HashSet<String> = role_bounded.into_iter().collect();
+
         let mut current_tech = 0;
         let mut current_paradigm = 0;
         let mut current_orch = 0;
 
-        // Tally requests
-        for req in requested_experts {
-            if let Some(p) = all_personas.iter().find(|p| &p.name == req) {
-                panel.insert(p.name.to_string());
+        for p_name in &panel {
+            if let Some(p) = all_personas.iter().find(|p| &p.name == p_name) {
                 match p.category {
                     PersonaCategory::Technical => current_tech += 1,
                     PersonaCategory::Paradigm => current_paradigm += 1,
@@ -58,12 +83,16 @@ impl ReviewSession {
 
         tracing::warn!("Coordinator stagnated on an invalid quorum. Backend forcefully establishing K=2 requirements.");
 
-        // We need to backfill
         let mut add_missing = |cat: PersonaCategory, current: &mut usize| {
             while *current < 2 {
-                let p = all_personas.iter().find(|p| p.category == cat && !panel.contains(p.name)).expect("Missing Personas");
-                panel.insert(p.name.to_string());
-                *current += 1;
+                if let Some(p) = all_personas.iter().find(|p| {
+                    p.category == cat && !panel.contains(p.name) && p.roles.get(&role).copied().unwrap_or(crate::personas::RequirementState::Optional) != crate::personas::RequirementState::Never
+                }) {
+                    panel.insert(p.name.to_string());
+                    *current += 1;
+                } else {
+                    break;
+                }
             }
         };
         
@@ -133,8 +162,8 @@ mod tests {
         initial_experts.extend(all.iter().filter(|p| p.category == crate::personas::PersonaCategory::Paradigm).take(2).map(|p| p.name.to_string()));
         initial_experts.extend(all.iter().filter(|p| p.category == crate::personas::PersonaCategory::Orchestration).take(2).map(|p| p.name.to_string()));
         
-        let final_panel = session.enforce_quorum(&initial_experts);
-        assert_eq!(final_panel.len(), 6);
+        let final_panel = session.enforce_quorum(&initial_experts, crate::personas::PersonaRole::PlanReview);
+        assert!(final_panel.len() >= 6);
     }
 
     #[test]
@@ -142,10 +171,10 @@ mod tests {
         let mut session = ReviewSession::new(std::path::PathBuf::from("/tmp/nancy"));
         
         let initial_experts = vec!["The Pedant".to_string()]; // 1 Paradigm
-        let final_panel = session.enforce_quorum(&initial_experts);
-        assert_eq!(final_panel.len(), 1); // Grace Period iteration
+        let final_panel = session.enforce_quorum(&initial_experts, crate::personas::PersonaRole::PlanReview);
+        assert_eq!(final_panel.len(), 2); // Grace Period iteration (Pedant + Default Mandatory Team Player)
 
-        let final_panel = session.enforce_quorum(&initial_experts);
+        let final_panel = session.enforce_quorum(&initial_experts, crate::personas::PersonaRole::PlanReview);
         
         assert_eq!(final_panel.len(), 6);
         assert!(final_panel.contains(&"The Pedant".to_string())); // Pedant must be retained
@@ -170,8 +199,8 @@ mod tests {
         let mut session = ReviewSession::new(std::path::PathBuf::from("/tmp/nancy"));
         let experts = vec!["The Pedant".to_string()];
         
-        let _ = session.enforce_quorum(&experts);
-        let active_panel = session.enforce_quorum(&experts);
+        let _ = session.enforce_quorum(&experts, crate::personas::PersonaRole::PlanReview);
+        let active_panel = session.enforce_quorum(&experts, crate::personas::PersonaRole::PlanReview);
         let res = session.ask_reviewers::<crate::pre_review::schema::ReviewOutput>(&active_panel, "Prompt test").await;
         
         let outputs = res.expect("ask_reviewers failed internally");
@@ -202,5 +231,16 @@ mod tests {
         assert!(res.is_ok());
         let outputs = res.unwrap();
         assert_eq!(outputs.len(), 1);
+    }
+
+    #[test]
+    fn test_enforce_role_bounds_drops_never() {
+        let mut session = ReviewSession::new(std::path::PathBuf::from("/tmp/nancy"));
+        let requested = vec!["The Team Player".to_string(), "The Pedant".to_string(), "Fake Persona".to_string()];
+        
+        let bounded = session.enforce_role_bounds(&requested, crate::personas::PersonaRole::PlanIdeation);
+        
+        assert!(!bounded.contains(&"The Team Player".to_string()));
+        assert!(bounded.contains(&"The Pedant".to_string()));
     }
 }

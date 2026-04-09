@@ -121,9 +121,9 @@ async fn handle_plan_task(
     let mut session = crate::pre_review::session::ReviewSession::new(target_path.to_path_buf());
 
     let mut compiled_ideations = String::new();
-    let safe_experts = team_selection.experts.clone();
+    let ideation_experts = session.enforce_role_bounds(&team_selection.experts, crate::personas::PersonaRole::PlanIdeation);
 
-    for expert in &safe_experts {
+    for expert in &ideation_experts {
         if let Some(p) = all_personas.iter().find(|x| &x.name == expert) {
             let prompt = crate::grind::prompts::IdeationPromptTemplate {
                 task_description: &task_payload.description,
@@ -190,7 +190,7 @@ async fn handle_plan_task(
             rounds_remaining: 15 - iteration,
         }.render()?;
 
-        let formal_panel = session.enforce_quorum(&safe_experts);
+        let formal_panel = session.enforce_quorum(&team_selection.experts, crate::personas::PersonaRole::PlanReview);
         let review_outputs = session.ask_reviewers::<crate::pre_review::schema::ReviewOutput>(&formal_panel, &review_prompt).await?;
         
         let valid_outputs: Vec<_> = review_outputs.into_iter().filter_map(|x| x.ok()).collect();
@@ -315,7 +315,7 @@ async fn handle_review_task(
     let review_context = format!("Git Diff:\n{}", diff_text);
     let task_prompt = crate::pre_review::runner::reviewer_task_prompt(1, 15, &task_payload.description, &review_context, "{}");
 
-    let formal_panel = session.enforce_quorum(&team_selection.experts);
+    let formal_panel = session.enforce_quorum(&team_selection.experts, crate::personas::PersonaRole::CodeReview);
     let outputs = session
         .ask_reviewers::<crate::pre_review::schema::ReviewOutput>(
             &formal_panel,
@@ -528,9 +528,13 @@ mod tests {
         let worktrees_dir = repo.workdir().unwrap().join("worktrees").join("task_ref_success");
         let _plan_file = worktrees_dir.join("plan.md");
         let mut builder = crate::llm::mock::builder::MockChatBuilder::new()
-            .respond(r#"{"experts": ["The Pedant"]}"#)
-            .respond("Expert ideation...")
-            .respond(r#"{"tdd": {"title": "T", "summary": "S", "background_context": "", "goals": ["G"], "non_goals": [], "proposed_design": ["D"], "risks_and_tradeoffs": [], "alternatives_considered": []}, "tasks": [{"id": "t1", "description": "foo", "preconditions": "foo", "postconditions": "foo", "validation_strategy": "foo", "action": "implement", "branch": "foo", "depends_on": []}]}"#);
+            .respond(r#"{"experts": ["The Pedant"]}"#);
+            
+        for _ in 0..9 {
+            builder = builder.respond("Expert ideation...");
+        }
+        
+        builder = builder.respond(r#"{"tdd": {"title": "T", "summary": "S", "background_context": "", "goals": ["G"], "non_goals": [], "proposed_design": ["D"], "risks_and_tradeoffs": [], "alternatives_considered": []}, "tasks": [{"id": "t1", "description": "foo", "preconditions": "foo", "postconditions": "foo", "validation_strategy": "foo", "action": "implement", "branch": "foo", "depends_on": []}]}"#);
             
         for _ in 0..6 {
             builder = builder.respond(r#"{"vote": "approve", "agree_notes": "Good", "disagree_notes": ""}"#);
@@ -589,7 +593,8 @@ mod tests {
 
         crate::llm::mock::builder::MockChatBuilder::new()
             .respond(r#"{"experts": ["The Pedant"]}"#) // TeamSelection
-            .respond(r#"{"vote": "approve", "agree_notes": "", "disagree_notes": ""}"#) // The Pedant Output
+            .respond(r#"{"vote": "approve", "agree_notes": "", "disagree_notes": ""}"#) // Review Output 1
+            .respond(r#"{"vote": "approve", "agree_notes": "", "disagree_notes": ""}"#) // Review Output 2 (Team Player)
             .respond(r#"{"experts": ["The Pedant"], "vote": "approve", "agree_notes": "", "disagree_notes": "", "overridden_vetoes": [], "consensus": "approve", "new_vetoes": [], "cleared_vetoes": ["v_123"], "recommended_tasks": [], "general_notes": ""}"#) // Synthesis
             .commit();
 
@@ -709,9 +714,14 @@ mod tests {
         let nancy_dir = td.path().join(".nancy");
         std::fs::create_dir_all(&nancy_dir)?;
 
-        crate::llm::mock::builder::MockChatBuilder::new()
-            .respond(r#"{"experts": ["The Pedant"]}"#)
-            .respond("Expert ideation...")
+        let mut builder = crate::llm::mock::builder::MockChatBuilder::new()
+            .respond(r#"{"experts": ["The Pedant"]}"#);
+        
+        for _ in 0..9 {
+            builder = builder.respond("Expert ideation...");
+        }
+        
+        builder
             .respond("I tried to plan but forgot my tools!")
             .respond("Oops I forgot again!")
             .respond("Still forgot!")
@@ -790,8 +800,13 @@ mod tests {
         let worktrees_dir = repo.workdir().unwrap().join("worktrees").join("task_ref_complex");
         let _plan_file = worktrees_dir.join("plan.md");
         let mut builder = crate::llm::mock::builder::MockChatBuilder::new()
-            .respond(r#"{"experts": ["The Pedant", "Junk Persona"]}"#)
-            .respond("Expert ideation...")
+            .respond(r#"{"experts": ["The Pedant", "Junk Persona"]}"#);
+            
+        for _ in 0..9 {
+            builder = builder.respond("Expert ideation...");
+        }
+        
+        builder = builder
             // Iteration 1: Return parse error array payload
             .respond(r#"["unparsable]"#)
             // Iteration 2: Return structural self-cycle to trigger DAG bounds
@@ -799,8 +814,10 @@ mod tests {
             // Iteration 3: Structurally valid mapping including a BlockedBy target naturally triggering events
             .respond(r#"{"tdd": {"title": "T", "summary": "S", "background_context": "", "goals": ["G"], "non_goals": [], "proposed_design": ["D"], "risks_and_tradeoffs": [], "alternatives_considered": []}, "tasks": [{"id": "t1", "description": "", "preconditions": "", "postconditions": "", "validation_strategy": "", "action": "implement", "branch": "", "depends_on": []}, {"id": "t2", "description": "", "preconditions": "", "postconditions": "", "validation_strategy": "", "action": "implement", "branch": "", "depends_on": ["t1"]}]}"#);
 
-        // Iteration 3 formal review mapping triggering rejection to evaluate coverage iteratively (Grace Round = 1 reviewer)
-        builder = builder.respond(r#"{"vote": "changes_required", "agree_notes": "", "disagree_notes": "Needs rework"}"#);
+        // Iteration 3 formal review mapping triggering rejection to evaluate coverage iteratively (Grace Round = 2 reviewers due to Mandatory Team Player)
+        builder = builder
+            .respond(r#"{"vote": "changes_required", "agree_notes": "", "disagree_notes": "Needs rework"}"#)
+            .respond(r#"{"vote": "changes_required", "agree_notes": "", "disagree_notes": "Needs rework"}"#);
         
         // Iteration 4: Moderator resynthesizes plan 
         builder = builder.respond(r#"{"tdd": {"title": "T", "summary": "S", "background_context": "", "goals": ["G"], "non_goals": [], "proposed_design": ["D"], "risks_and_tradeoffs": [], "alternatives_considered": []}, "tasks": [{"id": "t1", "description": "", "preconditions": "", "postconditions": "", "validation_strategy": "", "action": "implement", "branch": "", "depends_on": []}, {"id": "t2", "description": "", "preconditions": "", "postconditions": "", "validation_strategy": "", "action": "implement", "branch": "", "depends_on": ["t1"]}]}"#);
