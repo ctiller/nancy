@@ -33,7 +33,7 @@ pub async fn eval_plan(path: &str, output_path: &std::path::Path) -> Result<()> 
         } else { None }
     } else { None };
 
-    let result = crate::eval::EvalResult { final_plan, traces };
+    let result = crate::eval::EvalResult { final_plan, recommended_tasks: None, traces };
 
     let result_yaml = serde_yaml::to_string(&result)?;
     fs::write(output_path, result_yaml)?;

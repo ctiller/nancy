@@ -83,9 +83,17 @@ impl Coordinator {
             .route("/updates-ready", axum::routing::post(updates_ready_handler))
             .with_state(ipc_state);
 
-        let listener = UnixListener::bind(&socket_path).context("Failed to bind UDS")?;
+        let listener = tokio::net::UnixListener::bind(&socket_path)?;
         let axum_server_task = tokio::spawn(async move {
-            axum::serve(listener, app).await.ok();
+            let shutdown_signal = async {
+                loop {
+                    if crate::commands::grind::SHUTDOWN.load(std::sync::atomic::Ordering::SeqCst) {
+                        break;
+                    }
+                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                }
+            };
+            axum::serve(listener, app).with_graceful_shutdown(shutdown_signal).await.ok();
         });
 
         let mut target_sync_grinder: Option<String> = None;
@@ -96,6 +104,7 @@ impl Coordinator {
 
             // Test loop condition against synced view
             if condition(&appview) {
+                let _ = shared_tx_ready.send(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs());
                 break;
             }
 
@@ -161,7 +170,15 @@ async fn ready_for_poll_handler(
         return axum::Json(crate::schema::ipc::ReadyForPollResponse { new_state_id: current_state });
     }
     
-    let _ = rx.changed().await;
+    loop {
+        if crate::commands::grind::SHUTDOWN.load(std::sync::atomic::Ordering::SeqCst) {
+            break;
+        }
+        if let Ok(_) = tokio::time::timeout(std::time::Duration::from_millis(100), rx.changed()).await {
+            break;
+        }
+    }
+
     let new_state = *rx.borrow();
     tracing::debug!("[Coordinator API] /ready-for-poll unblocked natively via local rx.changed! Result: {}", new_state);
     axum::Json(crate::schema::ipc::ReadyForPollResponse { new_state_id: new_state })
@@ -1015,8 +1032,9 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn test_ipc_handlers() -> anyhow::Result<()> {
+    #[sealed_test]
+    fn test_ipc_handlers() -> anyhow::Result<()> {
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
         let (tx_ready, _rx_ready) = tokio::sync::watch::channel::<u64>(0);
         let shared_tx_ready = std::sync::Arc::new(tx_ready);
         let (tx_updates, mut _rx_updates) = tokio::sync::mpsc::unbounded_channel();
@@ -1106,6 +1124,7 @@ mod tests {
 
         super::SHUTDOWN.store(false, std::sync::atomic::Ordering::SeqCst);
         Ok(())
+        })
     }
 
     #[sealed_test]

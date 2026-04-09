@@ -2,6 +2,7 @@ use anyhow::Context;
 use serde::{Deserialize, Serialize};
 
 pub mod plan;
+pub mod decompose;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct EvalDefinition {
@@ -68,6 +69,7 @@ pub struct CommitDef {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct EvalResult {
     pub final_plan: Option<String>,
+    pub recommended_tasks: Option<Vec<crate::schema::task::TaskRequestPayload>>,
     pub traces: Vec<crate::schema::registry::EventPayload>,
 }
 
@@ -162,6 +164,28 @@ impl EvalRunner {
     pub async fn push_task(&self, description: Option<String>) -> anyhow::Result<()> {
         let desc = description.unwrap_or_else(|| "Evaluated generic task organically".to_string());
         crate::commands::add_task::add_task(self.temp_dir.as_path(), Some(desc), None).await?;
+        Ok(())
+    }
+
+    pub async fn push_decompose_task(&self, description: Option<String>) -> anyhow::Result<()> {
+        let desc = description.unwrap_or_else(|| "Evaluate plan task decomposition".to_string());
+        
+        // Push an explicit ReviewPlan task directly to intercept decomposition flow statically
+        let writer = crate::events::writer::Writer::new(&self.repo, self.id_obj.clone())?;
+        
+        let branch_target = self.repo.head()?.name().unwrap_or("master").to_string();
+        
+        let task_event = crate::schema::registry::EventPayload::Task(crate::schema::task::TaskPayload {
+            description: desc,
+            preconditions: "Plan mapping complete natively".to_string(),
+            postconditions: "System natively orchestrates bound review limits safely".to_string(),
+            validation_strategy: "Panel Review".to_string(),
+            action: crate::schema::task::TaskAction::ReviewPlan,
+            branch: branch_target, 
+            review_session_file: None,
+        });
+        writer.log_event(task_event)?;
+        writer.commit_batch()?;
         Ok(())
     }
 
@@ -318,7 +342,7 @@ mod tests {
         assert_ne!(req_id, task_id);
 
         let runner = EvalRunner {
-            temp_dir: tempfile::tempdir()?,
+            temp_dir: tempfile::tempdir()?.into_path(),
             repo: git2::Repository::open(target_repo.workdir().unwrap())?,
             id_obj: coord_identity,
             grinder_handle: None,

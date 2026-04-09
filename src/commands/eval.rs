@@ -18,6 +18,22 @@ pub async fn run(action: Option<String>, file: Option<String>) -> Result<()> {
                 anyhow::bail!("Missing path to yaml eval definition!");
             }
         }
+        Some("decompose") => {
+            if let Some(path) = file {
+                let f_path = std::path::Path::new(&path);
+                let current_dir = std::env::current_dir()?;
+                let mut out_path = f_path
+                    .parent()
+                    .unwrap_or(std::path::Path::new(""))
+                    .join("eval_out.yaml");
+                if !out_path.is_absolute() {
+                    out_path = current_dir.join(out_path);
+                }
+                crate::eval::decompose::eval_decompose(&path, &out_path).await?;
+            } else {
+                anyhow::bail!("Missing path to yaml eval definition!");
+            }
+        }
         _ => anyhow::bail!("Unsupported eval action."),
     }
     Ok(())
@@ -52,5 +68,10 @@ mod tests {
     async fn test_eval_plan_routing_coverage() {
         // Just verify the path parsing cleanly delegates to eval_plan natively!
         let _ = run(Some("plan".to_string()), Some("dummy_fake_file.yaml".to_string())).await;
+    }
+
+    #[tokio::test]
+    async fn test_eval_decompose_plan_routing_coverage() {
+        let _ = run(Some("decompose".to_string()), Some("dummy_fake_file.yaml".to_string())).await;
     }
 }
