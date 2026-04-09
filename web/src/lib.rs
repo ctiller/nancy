@@ -20,9 +20,14 @@ pub fn App() -> impl IntoView {
             </head>
             <body>
                 <Router>
-                    <main>
+                    <Navbar />
+                    <main class="main-content">
                         <Routes fallback=NotFound>
-                            <Route path=path!("") view=HomePage/>
+                            <Route path=path!("") view=CommandView/>
+                            <Route path=path!("tasks") view=TasksView/>
+                            <Route path=path!("agents") view=AgentsView/>
+                            <Route path=path!("repo") view=RepoView/>
+                            <Route path=path!("logs") view=SettingsLogsView/>
                         </Routes>
                     </main>
                 </Router>
@@ -32,10 +37,92 @@ pub fn App() -> impl IntoView {
 }
 
 #[component]
-fn HomePage() -> impl IntoView {
+fn Navbar() -> impl IntoView {
     view! {
-        <h1>"Welcome to Nancy Web UI (SSR)"</h1>
-        <p>"Hello World from the Coordinator!"</p>
+        <nav class="glass-nav">
+            <div class="nav-brand">
+                <img src="/nancy-avatar.png" alt="Nancy Logo" class="brand-logo" />
+                <span>"NANCY"</span>
+            </div>
+            
+            <div class="nav-links">
+                <a href="/" class="nav-item">"Command"</a>
+                <a href="/tasks" class="nav-item">"Tasks"</a>
+                <a href="/agents" class="nav-item">"Agents"</a>
+                <a href="/repo" class="nav-item">"Repo"</a>
+                <a href="/logs" class="nav-item">"Settings & Logs"</a>
+            </div>
+            
+            <div class="status-indicator">
+                <div class="status-dot"></div>
+                <span>"Coordinator Active"</span>
+            </div>
+        </nav>
+    }
+}
+
+#[component]
+fn CommandView() -> impl IntoView {
+    view! {
+        <div class="grid-2">
+            <div class="glass-panel" style="padding: 20px;">
+                <h3>"Pending Inquiries"</h3>
+                <p class="text-muted">"No active agent questions at this time."</p>
+                <button style="position: absolute; bottom: 24px; left: 24px;" class="glass-panel">"+ New Task"</button>
+            </div>
+            <div class="glass-panel" style="padding: 20px;">
+                <h3>"Workspace Editor"</h3>
+                <p>"Select an inquiry or start a new task."</p>
+            </div>
+        </div>
+    }
+}
+
+#[component]
+fn TasksView() -> impl IntoView {
+    view! {
+        <div class="glass-panel" style="height: 100%; padding: 20px;">
+            <h2>"Task Topology Graph"</h2>
+            <p>"DAG visualization rendering here..."</p>
+        </div>
+    }
+}
+
+#[component]
+fn AgentsView() -> impl IntoView {
+    view! {
+        <div class="glass-panel" style="padding: 20px;">
+            <h2>"Active Grinders"</h2>
+            <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px;">
+                <div class="glass-panel" style="padding: 16px;">"Grinder: Alpha"</div>
+                <div class="glass-panel" style="padding: 16px;">"Grinder: Beta"</div>
+            </div>
+        </div>
+    }
+}
+
+#[component]
+fn RepoView() -> impl IntoView {
+    view! {
+        <div class="grid-2">
+            <div class="glass-panel" style="padding: 20px;">
+                <h3>"Repository Explorer"</h3>
+                <p>"/master"</p>
+            </div>
+            <div class="glass-panel" style="padding: 20px;">
+                <h3>"Code Inspector"</h3>
+            </div>
+        </div>
+    }
+}
+
+#[component]
+fn SettingsLogsView() -> impl IntoView {
+    view! {
+        <div class="glass-panel" style="padding: 20px;">
+            <h2>"System Metrics & Configuration"</h2>
+            <p>"Live execution logs and environment key settings."</p>
+        </div>
     }
 }
 
