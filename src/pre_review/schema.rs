@@ -12,6 +12,28 @@ pub enum ReviewVote {
     NeedsClarification,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum TaskReviewVerdict {
+    Atomic,
+    Multistep,
+    RequiresSplit,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct TaskReview {
+    pub task_id: String,
+    pub verdict: TaskReviewVerdict,
+    pub comments: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct TddFeedback {
+    pub design_feedback: Option<String>,
+    pub risks_feedback: Option<String>,
+    pub general_structure_feedback: Option<String>,
+}
+
 /// The structured output expected directly from a Reviewer LLM step.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct ReviewOutput {
@@ -21,6 +43,12 @@ pub struct ReviewOutput {
     pub agree_notes: String,
     /// Detailed notes on what the reviewer disagrees with, including proof for vetos.
     pub disagree_notes: String,
+    /// Structured feedback explicitly assessing individual segments of the TDD.
+    #[serde(default)]
+    pub tdd_feedback: Option<TddFeedback>,
+    /// Task-level feedback assessing atomicity and scope bounds.
+    #[serde(default)]
+    pub task_feedback: Vec<TaskReview>,
     /// Event IDs of prior active vetoes this persona wishes to explicitly dismiss.
     #[serde(default)]
     pub overridden_vetoes: Vec<String>,

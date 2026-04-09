@@ -394,6 +394,8 @@ async fn test_coordinator_generates_rework_implementation_upon_dissent() -> Resu
         agree_notes: "".into(),
         disagree_notes: "Failed structural".into(),
         overridden_vetoes: vec![],
+        task_feedback: vec![],
+        tdd_feedback: None,
     };
     let assign_id = writer.log_event(EventPayload::CoordinatorAssignment(
         nancy::schema::task::CoordinatorAssignmentPayload {

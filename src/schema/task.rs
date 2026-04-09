@@ -1,4 +1,17 @@
 use serde::{Deserialize, Serialize};
+use schemars::JsonSchema;
+
+#[derive(Debug, Serialize, Deserialize, Clone, JsonSchema)]
+pub struct TddDocument {
+    pub title: String,
+    pub summary: String,
+    pub background_context: String,
+    pub goals: Vec<String>,
+    pub non_goals: Vec<String>,
+    pub proposed_design: Vec<String>,
+    pub risks_and_tradeoffs: Vec<String>,
+    pub alternatives_considered: Vec<String>,
+}
 
 #[derive(Debug, Serialize, Deserialize, Clone, schemars::JsonSchema)]
 pub struct TaskRequestPayload {
@@ -55,7 +68,6 @@ pub struct GhostVetoOverridePayload {
     pub override_reason: String,
 }
 
-use schemars::JsonSchema;
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, JsonSchema)]
 #[serde(rename_all = "snake_case")]

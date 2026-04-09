@@ -67,7 +67,7 @@ pub struct CommitDef {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct EvalResult {
-    pub final_plan: Option<String>,
+    pub final_plan: Option<crate::schema::task::TddDocument>,
     pub recommended_tasks: Option<Vec<crate::schema::task::TaskPayload>>,
     pub traces: Vec<crate::schema::registry::EventPayload>,
 }

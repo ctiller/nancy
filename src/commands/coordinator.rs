@@ -660,6 +660,7 @@ mod tests {
 
         let review_output = crate::pre_review::schema::ReviewOutput {
             vote: crate::pre_review::schema::ReviewVote::ChangesRequired, agree_notes: String::new(), disagree_notes: String::new(), overridden_vetoes: vec![],
+            task_feedback: vec![], tdd_feedback: None,
         };
         writer.log_event(EventPayload::AssignmentComplete(AssignmentCompletePayload {
             assignment_ref: assignment_id, report: serde_json::to_string(&review_output)?,
@@ -735,6 +736,7 @@ mod tests {
 
         let review_output = crate::pre_review::schema::ReviewOutput {
             vote: crate::pre_review::schema::ReviewVote::Approve, agree_notes: "".to_string(), disagree_notes: "".to_string(), overridden_vetoes: vec![],
+            task_feedback: vec![], tdd_feedback: None,
         };
         writer.log_event(EventPayload::AssignmentComplete(AssignmentCompletePayload {
             assignment_ref: assignment_id, report: serde_json::to_string(&review_output)?
@@ -799,6 +801,8 @@ mod tests {
             agree_notes: "".to_string(),
             disagree_notes: "".to_string(),
             overridden_vetoes: vec![],
+            task_feedback: vec![],
+            tdd_feedback: None,
         };
         appview.completed_reports.insert(review_id.clone(), serde_json::to_string(&report)?);
 

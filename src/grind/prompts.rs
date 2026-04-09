@@ -2,23 +2,17 @@ use askama::Template;
 
 
 
-pub const TDD_GUIDELINES: &str = r#"# Key Characteristics of an Effective TDD:
-- Clear Problem Statement: Begins with a brief summary of the problem, its significance, and the target audience.
-- Architectural Overview: Includes high-level diagrams detailing core system components, data flow, and external dependencies.
-- Detailed Proposed Solution: Deep dives into the technical implementation, featuring pseudocode, API request/response samples, and flowcharts.
-- Alternatives Considered: Discusses alternative approaches and justifies why they were rejected, including trade-offs.
-- Defined Scope (Goals/Non-goals): Clearly states what the solution will and will not cover to avoid scope creep.
-- Non-Functional Requirements: Details scalability, security, performance, and reliability aspects.
-- Actionable Plan: Outlines the development, testing, and deployment/migration strategy.
+pub const TDD_GUIDELINES: &str = r#"# Key Characteristics of an Effective JSON-driven TDD:
+- Title: The clear, concise name of the architecture document.
+- Summary: High-level overview of the problem and structured solution.
+- Background Context: Context surrounding the need for this feature or system.
+- Goals: Array of explicit strings detailing what the solution WILL cover.
+- Non-Goals: Array of explicit strings detailing what is out of scope to avoid scope creep.
+- Proposed Design: Array of explicit strings detailing pseudocode, API flows, components.
+- Risks and Trade-offs: Array of strings detailing potential pitfalls.
+- Alternatives Considered: Array of strings discussing rejected options.
 
-# Required Sections in your Markdown output:
-- Title & Metadata: Author, status, and reviewers.
-- Summary: High-level overview of the problem and solution.
-- Background/Context: History behind the need for this feature/system.
-- Goals/Non-Goals: What is in scope and what is not.
-- Proposed Design: Detailed solution components.
-- Risks & Trade-offs: Potential pitfalls.
-- Alternatives Considered: Rejected options."#;
+You must embed these strictly into the `tdd` JSON object exactly as formatted in the schema."#;
 
 pub fn implementer_system_prompt(workspace: &std::path::Path) -> String {
     format!(r#"You are the Nancy Implementer. Your job is to execute the given Task Description strictly inside this isolated Git worktree absolute mount path: {}
@@ -75,7 +69,7 @@ Preconditions: {{ preconditions }}
 {{ iter_context }}{% else %}Feedback from previous iterations:
 {{ iter_context }}{% endif %}
 
-Synthesize this into a cohesive plan, and return a JSON object with `plan_markdown` containing the structured markdown, and `tasks` containing the DAG implementation mapping. Use valid actions. Each task output requires a unique `id` and `depends_on` array expressing explicit topological DAG blocks. Empty arrays indicate no dependencies."#,
+Synthesize this into a cohesive plan, and return a JSON object with `tdd` containing the structured TddDocument object, and `tasks` containing the DAG implementation mapping. Use valid actions. Each task output requires a unique `id` and `depends_on` array expressing explicit topological DAG blocks. Empty arrays indicate no dependencies."#,
     ext = "txt"
 )]
 pub struct SynthesisPromptTemplate<'a> {
@@ -101,7 +95,7 @@ Please review this structural plan. Output ReviewOutput."#,
 )]
 pub struct FormalReviewPromptTemplate<'a> {
     pub task_description: &'a str,
-    pub plan_markdown: &'a str,
+    pub plan_markdown: &'a str, // Holds the TDD JSON string
     pub tasks_json: &'a str,
     pub rounds_remaining: u32,
 }

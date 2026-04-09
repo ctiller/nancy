@@ -48,7 +48,9 @@ pub fn reviewer_task_prompt(
         \n\
         Review the work. If you agree with a Ghost Veto in the Dissent Log, you may adopt it as your own. \
         If you disagree with it, state that it should be cleared. \n\
-        You must output your final verdict using the `submit_review` tool schema.",
+        You MUST provide granular feedback explicitly assessing the TddDocument payload and evaluating each and every defined task. \n\
+        For each task, assert whether the scope is `Atomic`, `Multistep`, or `RequiresSplit` in your `task_feedback` array. \n\
+        You must output your final verdict securely targeting the `ReviewOutput` json schema dynamically.",
         round_warning_if_applicable = round_warning,
         task_description = task_description,
         review_context = review_context,

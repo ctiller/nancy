@@ -28,8 +28,16 @@ struct TaskDefinition {
 
 #[derive(serde::Deserialize, schemars::JsonSchema)]
 struct SynthesisOutput {
-    pub plan_markdown: String,
+    pub tdd: crate::schema::task::TddDocument,
     pub tasks: Vec<TaskDefinition>,
+}
+
+fn validate_tdd(tdd: &crate::schema::task::TddDocument) -> Result<()> {
+    if tdd.title.trim().is_empty() { bail!("TddDocument title is empty"); }
+    if tdd.summary.trim().is_empty() { bail!("TddDocument summary is empty"); }
+    if tdd.goals.is_empty() { bail!("TddDocument must contain at least one explicit goal"); }
+    if tdd.proposed_design.is_empty() { bail!("TddDocument must contain at least one proposed design section"); }
+    Ok(())
 }
 
 
@@ -161,7 +169,12 @@ async fn handle_plan_task(
                 continue;
             }
         };
-        
+        if let Err(e) = validate_tdd(&output.tdd) {
+            tracing::warn!("TDD Validation Failed: {}. Looping.", e);
+            feedback_context.push_str(&format!("TDD Schema structural error: {}. Fix immediately.\n", e));
+            continue;
+        }
+
         if let Err(e) = validate_dag(&output.tasks) {
             tracing::warn!("DAG Validation Failed: {}. Looping.", e);
             feedback_context.push_str(&format!("DAG mapping topological error: {}. Fix immediately.\n", e));
@@ -169,9 +182,10 @@ async fn handle_plan_task(
         }
 
         let tasks_json = serde_json::to_string_pretty(&output.tasks)?;
+        let tdd_json = serde_json::to_string_pretty(&output.tdd)?;
         let review_prompt = crate::grind::prompts::FormalReviewPromptTemplate {
             task_description: &task_payload.description,
-            plan_markdown: &output.plan_markdown,
+            plan_markdown: &tdd_json, // Keeping the template variable name the same for now
             tasks_json: &tasks_json,
             rounds_remaining: 15 - iteration,
         }.render()?;
@@ -202,9 +216,10 @@ async fn handle_plan_task(
         let agent_plans_dir = target_path.parent().unwrap().parent().unwrap().join(".nancy").join("agents").join("plans");
         std::fs::create_dir_all(&agent_plans_dir)?;
         let request_id_basename = target_path.file_name().unwrap_or_default().to_str().unwrap_or("generic_plan").replace("refs_heads_nancy_plans_", "");
-        let persistent_plan_path = agent_plans_dir.join(format!("{}.md", request_id_basename));
+        let persistent_plan_path = agent_plans_dir.join(format!("{}.json", request_id_basename));
         
-        std::fs::write(&persistent_plan_path, output.plan_markdown)?;
+        let tdd_pretty = serde_json::to_string_pretty(&output.tdd)?;
+        std::fs::write(&persistent_plan_path, tdd_pretty)?;
 
         let mut task_id_mappings = std::collections::HashMap::new();
         
@@ -515,7 +530,7 @@ mod tests {
         let mut builder = crate::llm::mock::builder::MockChatBuilder::new()
             .respond(r#"{"experts": ["The Pedant"]}"#)
             .respond("Expert ideation...")
-            .respond(r#"{"plan_markdown": "Mock layout safely bounded", "tasks": [{"id": "t1", "description": "foo", "preconditions": "foo", "postconditions": "foo", "validation_strategy": "foo", "action": "implement", "branch": "foo", "depends_on": []}]}"#);
+            .respond(r#"{"tdd": {"title": "T", "summary": "S", "background_context": "", "goals": ["G"], "non_goals": [], "proposed_design": ["D"], "risks_and_tradeoffs": [], "alternatives_considered": []}, "tasks": [{"id": "t1", "description": "foo", "preconditions": "foo", "postconditions": "foo", "validation_strategy": "foo", "action": "implement", "branch": "foo", "depends_on": []}]}"#);
             
         for _ in 0..6 {
             builder = builder.respond(r#"{"vote": "approve", "agree_notes": "Good", "disagree_notes": ""}"#);
@@ -780,15 +795,15 @@ mod tests {
             // Iteration 1: Return parse error array payload
             .respond(r#"["unparsable]"#)
             // Iteration 2: Return structural self-cycle to trigger DAG bounds
-            .respond(r#"{"plan_markdown": "test", "tasks": [{"id": "t1", "description": "", "preconditions": "", "postconditions": "", "validation_strategy": "", "action": "implement", "branch": "", "depends_on": ["t1"]}]}"#)
+            .respond(r#"{"tdd": {"title": "T", "summary": "S", "background_context": "", "goals": ["G"], "non_goals": [], "proposed_design": ["D"], "risks_and_tradeoffs": [], "alternatives_considered": []}, "tasks": [{"id": "t1", "description": "", "preconditions": "", "postconditions": "", "validation_strategy": "", "action": "implement", "branch": "", "depends_on": ["t1"]}]}"#)
             // Iteration 3: Structurally valid mapping including a BlockedBy target naturally triggering events
-            .respond(r#"{"plan_markdown": "Mock", "tasks": [{"id": "t1", "description": "", "preconditions": "", "postconditions": "", "validation_strategy": "", "action": "implement", "branch": "", "depends_on": []}, {"id": "t2", "description": "", "preconditions": "", "postconditions": "", "validation_strategy": "", "action": "implement", "branch": "", "depends_on": ["t1"]}]}"#);
+            .respond(r#"{"tdd": {"title": "T", "summary": "S", "background_context": "", "goals": ["G"], "non_goals": [], "proposed_design": ["D"], "risks_and_tradeoffs": [], "alternatives_considered": []}, "tasks": [{"id": "t1", "description": "", "preconditions": "", "postconditions": "", "validation_strategy": "", "action": "implement", "branch": "", "depends_on": []}, {"id": "t2", "description": "", "preconditions": "", "postconditions": "", "validation_strategy": "", "action": "implement", "branch": "", "depends_on": ["t1"]}]}"#);
 
         // Iteration 3 formal review mapping triggering rejection to evaluate coverage iteratively (Grace Round = 1 reviewer)
         builder = builder.respond(r#"{"vote": "changes_required", "agree_notes": "", "disagree_notes": "Needs rework"}"#);
         
         // Iteration 4: Moderator resynthesizes plan 
-        builder = builder.respond(r#"{"plan_markdown": "Mock 2", "tasks": [{"id": "t1", "description": "", "preconditions": "", "postconditions": "", "validation_strategy": "", "action": "implement", "branch": "", "depends_on": []}, {"id": "t2", "description": "", "preconditions": "", "postconditions": "", "validation_strategy": "", "action": "implement", "branch": "", "depends_on": ["t1"]}]}"#);
+        builder = builder.respond(r#"{"tdd": {"title": "T", "summary": "S", "background_context": "", "goals": ["G"], "non_goals": [], "proposed_design": ["D"], "risks_and_tradeoffs": [], "alternatives_considered": []}, "tasks": [{"id": "t1", "description": "", "preconditions": "", "postconditions": "", "validation_strategy": "", "action": "implement", "branch": "", "depends_on": []}, {"id": "t2", "description": "", "preconditions": "", "postconditions": "", "validation_strategy": "", "action": "implement", "branch": "", "depends_on": ["t1"]}]}"#);
 
         // Iteration 4: Formal review accepts
         for _ in 0..6 {

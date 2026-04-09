@@ -22,7 +22,7 @@ pub async fn eval_plan(path: &str, output_path: &std::path::Path) -> Result<()> 
 
     let appview = runner.get_appview()?;
     let mut tasks = Vec::new();
-    let mut final_plan_str = None;
+    let mut final_plan_doc = None;
 
     for task_ev in appview.tasks.values() {
         if let crate::schema::registry::EventPayload::Task(payload) = task_ev {
@@ -31,10 +31,12 @@ pub async fn eval_plan(path: &str, output_path: &std::path::Path) -> Result<()> 
             } else {
                 tasks.push(payload.clone());
             }
-            if final_plan_str.is_none() {
+            if final_plan_doc.is_none() {
                 if let Some(plan_path_str) = &payload.plan {
                     if let Ok(content) = std::fs::read_to_string(plan_path_str) {
-                        final_plan_str = Some(content);
+                        if let Ok(doc) = serde_json::from_str::<crate::schema::task::TddDocument>(&content) {
+                            final_plan_doc = Some(doc);
+                        }
                     }
                 }
             }
@@ -42,7 +44,7 @@ pub async fn eval_plan(path: &str, output_path: &std::path::Path) -> Result<()> 
     }
 
     let recommended_tasks = if tasks.is_empty() { None } else { Some(tasks) };
-    let final_plan = final_plan_str;
+    let final_plan = final_plan_doc;
 
     let result = crate::eval::EvalResult { final_plan, recommended_tasks, traces: runner.extract_traces() };
 
