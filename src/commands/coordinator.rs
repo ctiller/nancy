@@ -30,6 +30,10 @@ pub struct Coordinator {
 
 impl Coordinator {
     pub fn new<P: AsRef<Path>>(dir: P) -> Result<Self> {
+        if std::env::args().any(|arg| arg == "coordinator") {
+            crate::llm::ban_llm();
+        }
+
         let repo = Repository::discover(dir.as_ref()).context("Not a git repository")?;
         let workdir = repo.workdir().context("Bare repository")?.to_path_buf();
 

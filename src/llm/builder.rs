@@ -77,6 +77,10 @@ impl LlmBuilder {
     }
 
     pub fn build(self) -> anyhow::Result<LlmClient> {
+        if crate::llm::is_llm_banned() {
+            panic!("LLM Execution is explicitly banned in this process context natively bounding the system isolation!");
+        }
+
         let api_key = std::env::var("GEMINI_API_KEY")
             .context("GEMINI_API_KEY environment variable is not set")?;
 

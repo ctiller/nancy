@@ -113,6 +113,7 @@ pub struct EvalRunner {
 
 impl EvalRunner {
     pub async fn setup(def: &EvalDefinition) -> anyhow::Result<Self> {
+        crate::llm::unban_llm();
         let (temp_dir_obj, repo) = def.provision_repo()?;
         let temp_dir = temp_dir_obj.into_path();
         let repo_path = temp_dir.as_path();
@@ -298,7 +299,7 @@ mod tests {
         };
 
         // Create the setup environment mapping successfully naturally
-        let runner = EvalRunner::setup(&def).await?;
+        let mut runner = EvalRunner::setup(&def).await?;
         
         let condition_met = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let condition_met_clone = condition_met.clone();
