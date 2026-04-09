@@ -18,7 +18,7 @@ enum Commands {
     /// Run the main agentic runloop
     Grind,
     /// Run the coordinator dispatch queue loop
-    Coordinator,
+    Coordinator(CoordinatorArgs),
     /// Provision orchestration environments locally
     Run,
     /// Evaluate a task request tailored to a yaml definition
@@ -34,6 +34,12 @@ enum Commands {
 pub struct InitArgs {
     #[arg(long, default_value_t = 6)]
     pub grinders: usize,
+}
+
+#[derive(clap::Args, Debug)]
+pub struct CoordinatorArgs {
+    #[arg(long, default_value_t = 0)]
+    pub port: u16,
 }
 
 #[derive(clap::Args, Debug)]
@@ -62,8 +68,8 @@ pub(crate) async fn execute_command(args: &Args, cwd: PathBuf) -> Result<()> {
         Commands::Grind => {
             nancy::commands::grind::grind(cwd, None, None).await?;
         }
-        Commands::Coordinator => {
-            nancy::commands::coordinator::run(cwd).await?;
+        Commands::Coordinator(coord_args) => {
+            nancy::commands::coordinator::run(cwd, coord_args.port).await?;
         }
         Commands::Run => {
             nancy::commands::run::run(cwd).await?;
@@ -89,8 +95,17 @@ async fn main() -> Result<()> {
         .with_timer(tracing_subscriber::fmt::time::LocalTime::rfc_3339())
         .init();
 
+    let cwd = std::env::current_dir()?;
+
+    // If we're being executed by `cargo leptos` (which sets LEPTOS_SITE_ROOT) and 
+    // no explicit subcommands were provided, automatically boot into the web server loop.
+    if std::env::args().len() <= 1 && std::env::var("LEPTOS_SITE_ROOT").is_ok() {
+        tracing::info!("Detected Leptos execution context. Auto-booting coordinator...");
+        return nancy::commands::coordinator::run(cwd, 3000).await;
+    }
+
     let args = Args::parse();
-    execute_command(&args, std::env::current_dir()?).await
+    execute_command(&args, cwd).await
 }
 
 #[cfg(test)]
@@ -110,6 +125,12 @@ mod tests {
         assert!(Args::try_parse_from(["nancy", "add-task"]).is_err()); // Correctly bails without file/task payload constraints
         assert!(Args::try_parse_from(["nancy", "grind"]).is_ok());
         assert!(Args::try_parse_from(["nancy", "coordinator"]).is_ok());
+        let coord_args = Args::try_parse_from(["nancy", "coordinator", "--port", "8080"]).unwrap();
+        if let Commands::Coordinator(args) = coord_args.command {
+            assert_eq!(args.port, 8080);
+        } else {
+            panic!("Expected Coordinator command");
+        }
         assert!(Args::try_parse_from(["nancy", "run"]).is_ok());
         assert!(Args::try_parse_from(["nancy", "add-task", "--task", "test"]).is_ok());
         assert!(Args::try_parse_from(["nancy", "add-task", "--file", "test.txt"]).is_ok());

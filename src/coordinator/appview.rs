@@ -1,5 +1,8 @@
 use crate::schema::registry::EventPayload;
+use crate::schema::identity_config::Identity;
+use crate::events::reader::Reader;
 use std::collections::{HashMap, HashSet};
+use git2::Repository;
 
 pub struct AppView {
     pub tasks: HashMap<String, EventPayload>,
@@ -24,6 +27,42 @@ impl AppView {
             assignments: HashMap::new(),
             assignment_targets: HashMap::new(),
         }
+    }
+
+    pub fn hydrate(repo: &Repository, identity: &Identity, restricted_grinder_did: Option<&str>) -> Self {
+        let mut appview = Self::new();
+        let did = identity.get_did_owner().did.clone();
+
+        // Poll our own ledger to hydrate AppView structurally
+        let reader = Reader::new(repo, did);
+        if let Ok(iter) = reader.iter_events() {
+            for ev_res in iter {
+                if let Ok(env) = ev_res {
+                    appview.apply_event(&env.payload, &env.id);
+                }
+            }
+        }
+
+        // Sync with grinders to receive their AssignmentCompletes
+        if let Identity::Coordinator { workers, .. } = identity {
+            for worker in workers {
+                if let Some(r_did) = restricted_grinder_did {
+                    if worker.did != r_did {
+                        continue;
+                    }
+                }
+                let local_reader = Reader::new(repo, worker.did.clone());
+                if let Ok(iter) = local_reader.iter_events() {
+                    for ev_res in iter {
+                        if let Ok(env) = ev_res {
+                            appview.apply_event(&env.payload, &env.id);
+                        }
+                    }
+                }
+            }
+        }
+
+        appview
     }
 
     pub fn apply_event(&mut self, payload: &EventPayload, event_id: &str) {

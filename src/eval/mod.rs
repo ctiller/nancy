@@ -114,6 +114,7 @@ impl EvalRunner {
     pub async fn setup(def: &EvalDefinition) -> anyhow::Result<Self> {
         crate::llm::unban_llm();
         let (temp_dir_obj, repo) = def.provision_repo()?;
+        #[allow(deprecated)]
         let temp_dir = temp_dir_obj.into_path();
         let repo_path = temp_dir.as_path();
         
@@ -182,7 +183,7 @@ impl EvalRunner {
             }
         }));
 
-        coordinator.run_until(condition).await?;
+        coordinator.run_until(0, condition).await?;
         crate::commands::grind::SHUTDOWN.store(true, std::sync::atomic::Ordering::SeqCst);
         Ok(())
     }
@@ -192,7 +193,7 @@ impl EvalRunner {
     }
 
     pub fn get_appview(&self) -> anyhow::Result<crate::coordinator::appview::AppView> {
-        Ok(crate::commands::coordinator::hydrate_coordinator_state(&self.repo, &self.id_obj, None))
+        Ok(crate::coordinator::appview::AppView::hydrate(&self.repo, &self.id_obj, None))
     }
 
     pub fn get_request_hash(&self) -> anyhow::Result<String> {
@@ -326,6 +327,7 @@ mod tests {
         assert_ne!(req_id, task_id);
 
         let runner = EvalRunner {
+            #[allow(deprecated)]
             temp_dir: tempfile::tempdir()?.into_path(),
             repo: git2::Repository::open(target_repo.workdir().unwrap())?,
             id_obj: coord_identity,

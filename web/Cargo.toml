@@ -1,0 +1,21 @@
+[package]
+name = "web"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+leptos = { version = "0.8", features = ["hydrate"] }
+leptos_meta = { version = "0.8" }
+leptos_router = { version = "0.8" }
+
+# these features are standard for cargo-leptos mapping
+console_error_panic_hook = "0.1"
+axum = { version = "0.8", optional = true }
+leptos_axum = { version = "0.8", optional = true }
+
+[features]
+hydrate = ["leptos/hydrate"]
+ssr = ["leptos/ssr", "leptos_meta/ssr", "leptos_router/ssr", "dep:axum", "dep:leptos_axum"]

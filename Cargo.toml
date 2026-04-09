@@ -1,5 +1,5 @@
 [workspace]
-members = ["llm-macros", "scratch_test"]
+members = ["llm-macros", "scratch_test", "web"]
 
 [package]
 name = "nancy"
@@ -38,7 +38,13 @@ tempfile = "3.27.0"
 tokio = { version = "1.51.0", features = ["full", "test-util"] }
 tokio-stream = "0.1.18"
 tower = "0.5.3"
+tower-http = { version = "0.6", features = ["fs", "cors"] }
 uuid = { version = "1.23.0", features = ["v4"] }
+rust-embed = "8.5"
+mime_guess = "2.0"
+web = { path = "web", features = ["ssr"] }
+leptos = { version = "0.8", features = ["ssr"] }
+leptos_axum = "0.8"
 
 reqwest = { version = "0.13.2", default-features = false, features = ["rustls", "json"] }
 tracing = "0.1.44"
@@ -47,3 +53,10 @@ time = { version = "0.3", features = ["local-offset", "formatting", "macros"] }
 
 [dev-dependencies]
 proptest = "1.4.0"
+
+[[workspace.metadata.leptos]]
+name = "nancy"
+# The name used by wasm-bindgen/cargo-leptos for the JS/WASM bundle. Defaults to the crate name
+output-name = "nancy"
+bin-package = "nancy"
+lib-package = "web"

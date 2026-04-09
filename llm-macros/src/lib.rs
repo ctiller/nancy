@@ -161,7 +161,7 @@ pub fn make_tool(input: TokenStream) -> TokenStream {
 
     let closure_is_async = closure.asyncness.is_some();
 
-    let closure_call = if closure_is_async {
+    let _closure_call = if closure_is_async {
         quote! { closure(#( input_args.#arg_names ),*).await }
     } else {
         quote! { closure(#( input_args.#arg_names ),*) }
