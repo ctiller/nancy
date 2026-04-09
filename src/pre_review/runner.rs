@@ -9,10 +9,14 @@ pub fn reviewer_system_prompt(persona: &Persona) -> String {
         1. **Tools:** You have full access to terminal and filesystem tools. You must use them to verify your assumptions before issuing a Veto or Changes_Required.\n\
         2. **Votes:** You may vote `Approve`, `Changes_Required`, `Needs_Clarification`, or `Veto`.\n\
         3. **Ghost Vetos:** If the Coordinator removes a panel member holding an active Veto, it becomes a \"Ghost Veto\" on the Dissent Log. To unblock the system, Ghost Vetos must be explicitly cleared by the panel. A Ghost Veto is only cleared when it receives at least one clearance vote from *each* of the three domains (Technical, Paradigm, and Orchestration).\n\
-        4. **Agency:** You have full agency to investigate the codebase, run tests, and provide rigorous feedback natively. Do not rubber-stamp approvals.",
+        4. **Agency:** You have full agency to investigate the codebase, run tests, and provide rigorous feedback natively. Do not rubber-stamp approvals.\n\
+        \n\
+        When conducting reviews or ideation, frame your analysis against the following expectations:\n\
+        {tdd_guidelines}",
         persona_name = persona.name,
         persona_description = persona.description,
         persona_category = persona.category,
+        tdd_guidelines = crate::grind::prompts::TDD_GUIDELINES,
     )
 }
 

@@ -2,7 +2,6 @@ use anyhow::Context;
 use serde::{Deserialize, Serialize};
 
 pub mod plan;
-pub mod decompose;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct EvalDefinition {
@@ -154,27 +153,7 @@ impl EvalRunner {
         Ok(())
     }
 
-    pub async fn push_decompose_task(&self, description: Option<String>) -> anyhow::Result<()> {
-        let desc = description.unwrap_or_else(|| "Evaluate plan task decomposition".to_string());
-        
-        // Push an explicit ReviewPlan task directly to intercept decomposition flow statically
-        let writer = crate::events::writer::Writer::new(&self.repo, self.id_obj.clone())?;
-        
-        let branch_target = self.repo.head()?.name().unwrap_or("master").to_string();
-        
-        let task_event = crate::schema::registry::EventPayload::Task(crate::schema::task::TaskPayload {
-            description: desc,
-            preconditions: "Plan mapping complete natively".to_string(),
-            postconditions: "System natively orchestrates bound review limits safely".to_string(),
-            validation_strategy: "Panel Review".to_string(),
-            action: crate::schema::task::TaskAction::ReviewPlan,
-            branch: branch_target, 
-            review_session_file: None,
-        });
-        writer.log_event(task_event)?;
-        writer.commit_batch()?;
-        Ok(())
-    }
+
 
     pub async fn wait_for_completion<F>(&mut self, condition: F) -> anyhow::Result<()>
     where
@@ -343,7 +322,7 @@ mod tests {
             postconditions: "".to_string(),
             validation_strategy: "".to_string(),
             branch: "TBD".to_string(),
-            review_session_file: None,
+            plan: None,
         });
         let task_id = writer.log_event(task).unwrap();
         writer.commit_batch().unwrap();

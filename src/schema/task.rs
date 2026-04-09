@@ -6,12 +6,11 @@ pub struct TaskRequestPayload {
     pub description: String,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum TaskAction {
     Plan,
     Implement,
-    ReviewPlan,
     ReviewImplementation,
 }
 
@@ -23,7 +22,7 @@ pub struct TaskPayload {
     pub validation_strategy: String,
     pub action: TaskAction,
     pub branch: String,
-    pub review_session_file: Option<String>,
+    pub plan: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

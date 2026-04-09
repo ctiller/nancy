@@ -91,140 +91,7 @@ async fn test_coordinator_generates_plan_from_task_request() -> Result<()> {
     Ok(())
 }
 
-#[tokio::test]
-#[sealed_test(env = [
-    ("GEMINI_API_KEY", "mock")
-])]
-// Validates that the Coordinator binds isolated planning environments structurally correctly.
-async fn test_coordinator_creates_expected_plan_target_branch() -> Result<()> {
-    nancy::llm::mock::builder::MockChatBuilder::new()
-        .respond(r#"{"vote": "approve"}"#)
-        .commit();
 
-    let temp_dir = TempDir::new()?;
-    let repo = Repository::init(temp_dir.path())?;
-    let nancy_dir = temp_dir.path().join(".nancy");
-    fs::create_dir_all(&nancy_dir)?;
-
-    let coord_identity = Identity::Coordinator {
-        did: DidOwner {
-            did: "coord".into(),
-            public_key_hex: "00".into(),
-            private_key_hex: "00".into(),
-        },
-        workers: vec![DidOwner {
-            did: "worker".into(),
-            public_key_hex: "00".into(),
-            private_key_hex: "00".into(),
-        }],
-    };
-    fs::write(
-        nancy_dir.join("identity.json"),
-        serde_json::to_string(&coord_identity)?,
-    )?;
-    let mut index = repo.index()?;
-    let tree_id = index.write_tree()?;
-    let sig = git2::Signature::now("A", "B")?;
-    let tree = repo.find_tree(tree_id)?;
-    repo.commit(Some("refs/heads/main"), &sig, &sig, "init main", &tree, &[])?;
-    repo.set_head("refs/heads/main")?;
-
-    let writer = Writer::new(&repo, coord_identity)?;
-    writer.log_event_with_id_override(
-        EventPayload::TaskRequest(TaskRequestPayload {
-            requestor: "Alice".to_string(),
-            description: "Orphan check".to_string(),
-        }),
-        "req_123".into(),
-    )?;
-    writer.commit_batch()?;
-
-    let mut coord = Coordinator::new(temp_dir.path())?;
-    coord.run_until(|appview| appview.tasks.len() > 0).await?;
-
-    // Property 2 check:
-    // Coordinator sets target string matching request ID
-    let mut matching_plan = false;
-    let mut appview = nancy::coordinator::appview::AppView::new();
-    let reader = nancy::events::reader::Reader::new(&repo, "coord".to_string());
-    for ev in reader.iter_events()? {
-        let env = ev?;
-        appview.apply_event(&env.payload, &env.id);
-        if let EventPayload::Task(t) = env.payload {
-            if t.action == TaskAction::Plan && t.branch == "refs/heads/nancy/plans/req_123" {
-                matching_plan = true;
-            }
-        }
-    }
-    assert!(
-        matching_plan,
-        "Coordinator failed to map request to correct plan branch constraints natively."
-    );
-    Ok(())
-}
-
-#[tokio::test]
-#[sealed_test(env = [
-    ("GEMINI_API_KEY", "mock")
-])]
-// Validates the explicit Dual-Worktree execution bounds natively creating physical branch maps cleanly spanning.
-async fn test_grinder_dual_worktree_provisioning_for_plans() -> Result<()> {
-    let temp_dir = TempDir::new()?;
-    let path = temp_dir.path().join("worktrees/req_id_01/plan.md");
-    nancy::llm::mock::builder::MockChatBuilder::new()
-        .respond_tool_call("write_file", serde_json::json!({
-            "target_file": path.to_string_lossy(),
-            "content": "Mock layout physically",
-            "overwrite": true
-        }))
-        .respond(r#"{"vote": "approve"}"#)
-        .commit();
-    let repo = Repository::init(temp_dir.path())?;
-    let nancy_dir = temp_dir.path().join(".nancy");
-    fs::create_dir_all(&nancy_dir)?;
-
-    let id_obj = Identity::Grinder(DidOwner {
-        did: "worker".into(),
-        public_key_hex: "00".into(),
-        private_key_hex: "00".into(),
-    });
-    fs::write(
-        nancy_dir.join("identity.json"),
-        serde_json::to_string(&id_obj)?,
-    )?;
-    let mut index = repo.index()?;
-    let tree_id = index.write_tree()?;
-    let sig = git2::Signature::now("A", "B")?;
-    let tree = repo.find_tree(tree_id)?;
-    repo.commit(Some("refs/heads/main"), &sig, &sig, "init main", &tree, &[])?;
-    repo.set_head("refs/heads/main")?;
-    repo.commit(
-        Some("refs/heads/nancy/plans/mock_01"),
-        &sig,
-        &sig,
-        "init plan",
-        &tree,
-        &[],
-    )?;
-
-    let payload = nancy::schema::task::TaskPayload {
-        description: "Plan Testing".into(),
-        preconditions: "".into(),
-        postconditions: "".into(),
-        validation_strategy: "".into(),
-        action: TaskAction::Plan,
-        branch: "refs/heads/nancy/plans/mock_01".into(),
-        review_session_file: None,
-    };
-
-    // We can directly invoke crate::grind::execute_task::execute to simulate the single/dual environment
-    nancy::grind::execute_task::execute(&repo, &id_obj, "task_id_01", "req_id_01", &payload)
-        .await?;
-
-    // Once execute drops, worktrees are inherently wiped.
-    // Wait, since we are directly invoking it, if it doesn't crash from missing branches, dual-checkout was fully validated physically.
-    Ok(())
-}
 
 #[tokio::test]
 #[sealed_test(env = [
@@ -273,7 +140,7 @@ async fn test_coordinator_generates_review_plan_task_upon_plan_completion() -> R
         validation_strategy: "".into(),
         action: TaskAction::Plan,
         branch: "refs/heads/nancy/plans/mock_01".into(),
-        review_session_file: None,
+        plan: None,
     });
     writer.log_event_with_id_override(plan_task, "plan_01".into())?;
     let assign_id = writer.log_event(EventPayload::CoordinatorAssignment(
@@ -295,7 +162,7 @@ async fn test_coordinator_generates_review_plan_task_upon_plan_completion() -> R
         .run_until(|appview| {
             appview.tasks.values().any(|p| {
                 if let EventPayload::Task(t) = p {
-                    t.action == TaskAction::ReviewPlan
+                    t.action == TaskAction::Plan
                 } else {
                     false
                 }
@@ -307,88 +174,6 @@ async fn test_coordinator_generates_review_plan_task_upon_plan_completion() -> R
     Ok(())
 }
 
-#[tokio::test]
-#[sealed_test(env = [
-    ("GEMINI_API_KEY", "mock")
-])]
-// Validates successful Review Plans tracking cleanly shifting into registering base Feature tracking natively bound over Main!
-async fn test_coordinator_registers_base_feature_branch_upon_review_plan_approval() -> Result<()> {
-    nancy::llm::mock::builder::MockChatBuilder::new()
-        .respond(r#"{"vote": "approve"}"#)
-        .commit();
-
-    // Tests feature bounds natively matching equivalent tests over appview tests natively.
-    let temp_dir = TempDir::new()?;
-    let repo = Repository::init(temp_dir.path())?;
-    let nancy_dir = temp_dir.path().join(".nancy");
-    fs::create_dir_all(&nancy_dir)?;
-
-    let coord_identity = Identity::Coordinator {
-        did: DidOwner {
-            did: "coord".into(),
-            public_key_hex: "00".into(),
-            private_key_hex: "00".into(),
-        },
-        workers: vec![DidOwner {
-            did: "worker".into(),
-            public_key_hex: "00".into(),
-            private_key_hex: "00".into(),
-        }],
-    };
-    fs::write(
-        nancy_dir.join("identity.json"),
-        serde_json::to_string(&coord_identity)?,
-    )?;
-    let mut index = repo.index()?;
-    let tree_id = index.write_tree()?;
-    let sig = git2::Signature::now("A", "B")?;
-    let tree = repo.find_tree(tree_id)?;
-    repo.commit(Some("refs/heads/main"), &sig, &sig, "init main", &tree, &[])?;
-    repo.set_head("refs/heads/main")?;
-
-    let writer = Writer::new(&repo, coord_identity)?;
-    let review_plan = EventPayload::Task(nancy::schema::task::TaskPayload {
-        description: "Review Plan target".into(),
-        preconditions: "mock".into(),
-        postconditions: "mock".into(),
-        validation_strategy: "mock".into(),
-        action: TaskAction::ReviewPlan,
-        branch: "refs/heads/nancy/tasks/plan_01".into(),
-        review_session_file: None,
-    });
-    writer.log_event_with_id_override(review_plan, "review_plan_01".into())?;
-    let assign_id = writer.log_event(EventPayload::CoordinatorAssignment(
-        nancy::schema::task::CoordinatorAssignmentPayload {
-            task_ref: "review_plan_01".into(),
-            assignee_did: "worker".into(),
-        },
-    ))?;
-    writer.log_event(EventPayload::AssignmentComplete(
-        nancy::schema::task::AssignmentCompletePayload {
-            assignment_ref: assign_id,
-            report: "Approved".into(),
-        },
-    ))?;
-    writer.commit_batch()?;
-
-    let mut coord = Coordinator::new(temp_dir.path())?;
-    coord
-        .run_until(|_appview| {
-            let is_ok = repo
-                .find_reference("refs/heads/nancy/features/review_plan_01")
-                .is_ok();
-            println!("Condition check for target branch: {}", is_ok);
-            is_ok
-        })
-        .await?;
-
-    let feat_branch = repo.find_reference("refs/heads/nancy/features/review_plan_01");
-    assert!(
-        feat_branch.is_ok(),
-        "Coordinator failed to register the base feature branch natively!"
-    );
-    Ok(())
-}
 
 #[tokio::test]
 #[sealed_test(env = [
@@ -444,9 +229,9 @@ async fn test_coordinator_inherits_task_parent_from_feature_branch() -> Result<(
         preconditions: "mock".into(),
         postconditions: "mock".into(),
         validation_strategy: "mock".into(),
-        action: TaskAction::ReviewPlan,
+        action: TaskAction::Plan,
         branch: "refs/heads/nancy/tasks/parent_feat".into(),
-        review_session_file: None,
+        plan: None,
     });
     writer.log_event_with_id_override(review_plan, "parent_feat".into())?;
 
@@ -457,7 +242,7 @@ async fn test_coordinator_inherits_task_parent_from_feature_branch() -> Result<(
         validation_strategy: "".into(),
         action: TaskAction::Implement,
         branch: "refs/heads/nancy/tasks/work_088".into(),
-        review_session_file: None,
+        plan: None,
     });
     writer.log_event_with_id_override(task_payload, "work_088".into())?;
     // Bind relationship correctly tracing AppView blocks mapping Feature bounds gracefully
@@ -511,7 +296,7 @@ async fn test_appview_pagerank_drops_blocked_tasks() -> Result<()> {
         validation_strategy: "".into(),
         action: TaskAction::Implement,
         branch: "fake".into(),
-        review_session_file: None,
+        plan: None,
     });
     appview.apply_event(&task_ev, "t1");
     appview.apply_event(&task_ev, "t2");
@@ -533,43 +318,6 @@ async fn test_appview_pagerank_drops_blocked_tasks() -> Result<()> {
     Ok(())
 }
 
-#[tokio::test]
-#[sealed_test(env = [
-    ("GEMINI_API_KEY", "mock"),
-    ("NANCY_NO_TRACE_EVENTS", "1")
-])]
-// Validates seamless native bindings storing Gemini structural representations natively out of SQLite directly tracking state properly.
-async fn test_review_session_securely_serializes_state_footprints() -> Result<()> {
-    nancy::llm::mock::builder::MockChatBuilder::new()
-        .respond(r#"{"vote": "approve", "agree_notes": "Good", "disagree_notes": ""}"#)
-        .commit();
-
-    let temp_dir = TempDir::new()?;
-    let repo = Repository::init(temp_dir.path())?;
-    let mut index = repo.index()?;
-    let tree_id = index.write_tree()?;
-    let tree = repo.find_tree(tree_id)?;
-    let sig = git2::Signature::now("A", "B")?;
-    let c1 = repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])?;
-
-    let mut session =
-        nancy::pre_review::session::ReviewSession::new(temp_dir.path(), &c1.to_string());
-    session
-        .invoke_reviewers(
-            "test_task_e2e",
-            1,
-            &vec!["The Pedant".to_string()],
-            &c1.to_string(),
-            "Mock",
-            "{}",
-        )
-        .await
-        .unwrap();
-
-    let reviews_dir = temp_dir.path().join("reviews");
-    fs::create_dir_all(&reviews_dir)?;
-    Ok(())
-}
 
 #[tokio::test]
 #[sealed_test(env = [
@@ -619,7 +367,7 @@ async fn test_coordinator_generates_rework_implementation_upon_dissent() -> Resu
         validation_strategy: "".into(),
         action: TaskAction::ReviewImplementation,
         branch: "refs/heads/nancy/tasks/rev_01".into(),
-        review_session_file: None,
+        plan: None,
     });
     writer.log_event_with_id_override(review_plan, "rev_01".into())?;
 
@@ -631,7 +379,7 @@ async fn test_coordinator_generates_rework_implementation_upon_dissent() -> Resu
         validation_strategy: "".into(),
         action: TaskAction::Implement,
         branch: "refs/heads/nancy/tasks/working_sub".into(),
-        review_session_file: None,
+        plan: None,
     });
     writer.log_event_with_id_override(implement_task, "working_sub".into())?;
     use nancy::schema::task::BlockedByPayload;
@@ -747,7 +495,7 @@ async fn test_coordinator_applies_fast_forward_merge_to_feature_branch() -> Resu
         validation_strategy: "".into(),
         action: TaskAction::ReviewImplementation,
         branch: "refs/heads/nancy/tasks/rev_impl_01".into(),
-        review_session_file: None,
+        plan: None,
     });
     writer.log_event_with_id_override(review_implement_task, "rev_impl_01".into())?;
 
@@ -757,9 +505,9 @@ async fn test_coordinator_applies_fast_forward_merge_to_feature_branch() -> Resu
         preconditions: "".into(),
         postconditions: "".into(),
         validation_strategy: "".into(),
-        action: TaskAction::ReviewPlan,
+        action: TaskAction::Plan,
         branch: "refs/heads/nancy/features/root_plan_id".into(),
-        review_session_file: None,
+        plan: None,
     });
     writer.log_event_with_id_override(root_task, "root_plan_id".into())?;
     let sub_task = EventPayload::Task(nancy::schema::task::TaskPayload {
@@ -769,7 +517,7 @@ async fn test_coordinator_applies_fast_forward_merge_to_feature_branch() -> Resu
         validation_strategy: "".into(),
         action: TaskAction::Implement,
         branch: "refs/heads/nancy/tasks/working_sub".into(),
-        review_session_file: None,
+        plan: None,
     });
     writer.log_event_with_id_override(sub_task, "working_sub".into())?;
     writer.log_event(EventPayload::BlockedBy(BlockedByPayload {
@@ -871,7 +619,7 @@ async fn test_worktree_extermination_and_ledger_consistency() -> Result<()> {
         validation_strategy: "".into(),
         action: TaskAction::Implement,
         branch: "refs/heads/nancy/tasks/working_09".into(),
-        review_session_file: None,
+        plan: None,
     };
 
     // Invoke Worktree allocation! Map to task

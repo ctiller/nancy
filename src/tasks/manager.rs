@@ -110,7 +110,7 @@ mod tests {
             validation_strategy: "none".to_string(),
             action: crate::schema::task::TaskAction::Implement,
             branch: "refs/heads/nancy/tasks/test".to_string(),
-            review_session_file: None,
+            plan: None,
         }))?;
 
         writer.commit_batch()?;

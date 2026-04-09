@@ -216,38 +216,7 @@ async fn updates_ready_handler(
 
 
 
-fn handle_review_plan(repo: &Repository, task_id: &String) {
-    let feature_branch = format!("refs/heads/nancy/features/{}", task_id);
-    if repo.find_reference(&feature_branch).is_err() {
-        if let Ok(head) = repo.head() {
-            if let Ok(commit) = head.peel_to_commit() {
-                let _ = repo.branch(&format!("nancy/features/{}", task_id), &commit, false);
-            }
-        }
-    }
-}
 
-fn handle_plan(writer: &Writer, task_id: &String) -> bool {
-    use crate::schema::task::{BlockedByPayload, TaskAction, TaskPayload};
-    let review_plan = EventPayload::Task(TaskPayload {
-        description: format!("Review generated plan for {}", task_id),
-        preconditions: "Plan mapping complete natively".to_string(),
-        postconditions:
-            "System natively orchestrates bound review limits safely"
-                .to_string(),
-        validation_strategy: "Panel Review".to_string(),
-        action: TaskAction::ReviewPlan,
-        branch: format!("refs/heads/nancy/plans/{}", task_id),
-        review_session_file: None,
-    });
-    if let Ok(review_task_id) = writer.log_event(review_plan) {
-        let _ = writer.log_event(EventPayload::BlockedBy(BlockedByPayload {
-            source: review_task_id, target: task_id.clone()
-        }));
-        return true;
-    }
-    false
-}
 
 fn handle_review_rejection(
     appview: &AppView,
@@ -278,7 +247,7 @@ fn handle_review_rejection(
         validation_strategy: "Unit Tests + Native DAG Flow".to_string(),
         action: TaskAction::Implement,
         branch: format!("refs/heads/nancy/tasks/{}", implement_id),
-        review_session_file: None,
+        plan: None,
     });
     if let Ok(rework_id) = writer.log_event(rework_task) {
         let _ = writer.log_event(EventPayload::BlockedBy(BlockedByPayload {
@@ -331,7 +300,7 @@ fn handle_review_approval(
             validation_strategy: "Re-review patch equivalence".to_string(),
             action: TaskAction::Implement,
             branch: task_branch.clone(),
-            review_session_file: None,
+            plan: None,
         });
         if let Ok(new_task_id) = writer.log_event(conflict_task) {
             let review_node = EventPayload::Task(TaskPayload {
@@ -341,7 +310,7 @@ fn handle_review_approval(
                 validation_strategy: "Panel Review".to_string(),
                 action: TaskAction::ReviewImplementation,
                 branch: format!("refs/heads/nancy/tasks/{}", new_task_id),
-                review_session_file: None,
+                plan: None,
             });
             if let Ok(review_task_id) = writer.log_event(review_node) {
                 let _ = writer.log_event(EventPayload::BlockedBy(BlockedByPayload {
@@ -437,28 +406,20 @@ fn handle_task_requests(
             _ => continue,
         };
 
+        let target_branch = repo.head()
+            .map(|h| h.name().unwrap_or("refs/heads/main").to_string())
+            .unwrap_or_else(|_| "refs/heads/main".to_string());
+            
         use crate::schema::task::{BlockedByPayload, TaskAction, TaskPayload};
-        let orphaned_branch = format!("refs/heads/nancy/plans/{}", request_id);
-        
-        if repo.find_reference(&orphaned_branch).is_err() {
-            let sig = git2::Signature::now("Nancy Coordinator", "nancy@localhost").unwrap();
-            if let Ok(tb) = repo.treebuilder(None) {
-                if let Ok(tree_id) = tb.write() {
-                    if let Ok(tree_obj) = repo.find_tree(tree_id) {
-                        let _ = repo.commit(Some(&orphaned_branch), &sig, &sig, "Init plan branch", &tree_obj, &[]);
-                    }
-                }
-            }
-        }
-        
+            
         let plan_task = EventPayload::Task(TaskPayload {
             description: r.description.clone(),
             preconditions: "User Request".to_string(),
             postconditions: "Generated Implementation DAG".to_string(),
             validation_strategy: "Panel Review".to_string(),
             action: TaskAction::Plan,
-            branch: orphaned_branch,
-            review_session_file: None,
+            branch: target_branch,
+            plan: None,
         });
         
         let task_ev_id = writer.log_event(plan_task)?;
@@ -551,12 +512,8 @@ fn process_task_completion(
     if let Some(EventPayload::Task(t)) = appview.tasks.get(task_id) {
         use crate::schema::task::TaskAction;
         match t.action {
-            TaskAction::Plan => {
-                logged_any |= handle_plan(writer, task_id);
-            }
-            TaskAction::ReviewPlan => {
-                handle_review_plan(repo, task_id);
-            }
+            TaskAction::Plan => {}
+            TaskAction::Implement => {}
             TaskAction::ReviewImplementation => {
                 logged_any |= handle_review_rejection(appview, writer, task_id)
                     || handle_review_approval(repo, appview, writer, task_id);
@@ -674,13 +631,13 @@ mod tests {
         let implement_id = writer.log_event(EventPayload::Task(TaskPayload {
             action: TaskAction::Implement, description: "".to_string(), preconditions: "".to_string(),
             postconditions: "".to_string(), validation_strategy: "".to_string(),
-            branch: "TBD".to_string(), review_session_file: None
+            branch: "TBD".to_string(), plan: None
         }))?;
 
         let review_id = writer.log_event(EventPayload::Task(TaskPayload {
             action: TaskAction::ReviewImplementation, description: "".to_string(), preconditions: "".to_string(),
             postconditions: "".to_string(), validation_strategy: "".to_string(),
-            branch: "TBD".to_string(), review_session_file: None
+            branch: "TBD".to_string(), plan: None
         }))?;
         writer.log_event(EventPayload::BlockedBy(BlockedByPayload { source: implement_id.clone(), target: review_id.clone() }))?;
 
@@ -739,14 +696,14 @@ mod tests {
         let implement_id = writer.log_event(EventPayload::Task(TaskPayload {
             action: TaskAction::Implement, description: "".to_string(), preconditions: "".to_string(),
             postconditions: "".to_string(), validation_strategy: "".to_string(),
-            branch: "TBD".to_string(), review_session_file: None
+            branch: "TBD".to_string(), plan: None
         }))?;
         repo.branch(&format!("nancy/tasks/{}", implement_id), &commit1_obj, false)?;
 
         let review_plan_id = writer.log_event(EventPayload::Task(TaskPayload {
-            action: TaskAction::ReviewPlan, description: "".to_string(), preconditions: "".to_string(),
+            action: TaskAction::Plan, description: "".to_string(), preconditions: "".to_string(),
             postconditions: "".to_string(), validation_strategy: "".to_string(),
-            branch: "TBD".to_string(), review_session_file: None
+            branch: "TBD".to_string(), plan: None
         }))?;
         repo.branch(&format!("nancy/features/{}", review_plan_id), &commit1_obj, false)?;
         repo.reference(&format!("refs/heads/nancy/features/{}", review_plan_id), commit2, true, "Advance")?;
@@ -755,7 +712,7 @@ mod tests {
         let review_id = writer.log_event(EventPayload::Task(TaskPayload {
             action: TaskAction::ReviewImplementation, description: "".to_string(), preconditions: "".to_string(),
             postconditions: "".to_string(), validation_strategy: "".to_string(),
-            branch: "TBD".to_string(), review_session_file: None
+            branch: "TBD".to_string(), plan: None
         }))?;
         writer.log_event(EventPayload::BlockedBy(BlockedByPayload { source: implement_id.clone(), target: review_id.clone() }))?;
 
@@ -807,7 +764,7 @@ mod tests {
         let implement_payload = EventPayload::Task(TaskPayload {
             action: TaskAction::Implement, description: "".to_string(), preconditions: "".to_string(),
             postconditions: "".to_string(), validation_strategy: "".to_string(),
-            branch: "TBD".to_string(), review_session_file: None
+            branch: "TBD".to_string(), plan: None
         });
         let implement_id = writer.log_event(implement_payload.clone())?;
         appview.apply_event(&implement_payload, &implement_id);
@@ -815,7 +772,7 @@ mod tests {
         let review_payload = EventPayload::Task(TaskPayload {
             action: TaskAction::ReviewImplementation, description: "".to_string(), preconditions: "".to_string(),
             postconditions: "".to_string(), validation_strategy: "".to_string(),
-            branch: "TBD".to_string(), review_session_file: None
+            branch: "TBD".to_string(), plan: None
         });
         let review_id = writer.log_event(review_payload.clone())?;
         appview.apply_event(&review_payload, &review_id);
@@ -877,16 +834,16 @@ mod tests {
         let implement_payload = EventPayload::Task(TaskPayload {
             action: TaskAction::Implement, description: "".to_string(), preconditions: "".to_string(),
             postconditions: "".to_string(), validation_strategy: "".to_string(),
-            branch: "TBD".to_string(), review_session_file: None
+            branch: "TBD".to_string(), plan: None
         });
         let implement_id = writer.log_event(implement_payload.clone())?;
         repo.branch(&format!("nancy/tasks/{}", implement_id), &commit1_obj, false)?;
         appview.apply_event(&implement_payload, &implement_id);
 
         let review_plan_payload = EventPayload::Task(TaskPayload {
-            action: TaskAction::ReviewPlan, description: "".to_string(), preconditions: "".to_string(),
+            action: TaskAction::Plan, description: "".to_string(), preconditions: "".to_string(),
             postconditions: "".to_string(), validation_strategy: "".to_string(),
-            branch: "TBD".to_string(), review_session_file: None
+            branch: "TBD".to_string(), plan: None
         });
         let review_plan_id = writer.log_event(review_plan_payload.clone())?;
         repo.branch(&format!("nancy/features/{}", review_plan_id), &commit1_obj, false)?;
@@ -899,7 +856,7 @@ mod tests {
         let review_payload = EventPayload::Task(TaskPayload {
             action: TaskAction::ReviewImplementation, description: "".to_string(), preconditions: "".to_string(),
             postconditions: "".to_string(), validation_strategy: "".to_string(),
-            branch: "TBD".to_string(), review_session_file: None
+            branch: "TBD".to_string(), plan: None
         });
         let review_id = writer.log_event(review_payload.clone())?;
         appview.apply_event(&review_payload, &review_id);
@@ -962,35 +919,7 @@ mod tests {
         Ok(())
     }
 
-    #[sealed_test]
-    fn test_handle_plan_direct() -> Result<()> {
-        let mut _tr = crate::debug::test_repo::TestRepo::new()?;
-        let temp_dir = &_tr.td;
-        let repo = &_tr.repo;
-        let nancy_dir = temp_dir.path().join(".nancy");
-        std::fs::create_dir_all(&nancy_dir)?;
 
-        let coord_identity = Identity::Coordinator {
-            did: crate::schema::identity_config::DidOwner { did: "mock1".to_string(), public_key_hex: "00".to_string(), private_key_hex: "00".to_string() },
-            workers: vec![],
-        };
-        fs::write(nancy_dir.join("identity.json"), serde_json::to_string(&coord_identity)?)?;
-        let writer = Writer::new(&repo, coord_identity)?;
-        
-        let handled = handle_plan(&writer, &"task_123".to_string());
-        assert!(handled, "Handle plan should natively produce ReviewPlan tasks structurally!");
-        writer.commit_batch()?;
-
-        let mut review_found = false;
-        let reader = Reader::new(&repo, "mock1".to_string());
-        for ev in reader.iter_events()? {
-            if let EventPayload::Task(t) = ev?.payload {
-                if t.action == TaskAction::ReviewPlan && t.branch.contains("task_123") { review_found = true; }
-            }
-        }
-        assert!(review_found, "ReviewPlan event not naturally linked and produced directly!");
-        Ok(())
-    }
 
     #[sealed_test]
     fn test_handle_work_assignments_direct() -> Result<()> {
@@ -1012,7 +941,7 @@ mod tests {
         let implement_payload = EventPayload::Task(TaskPayload {
             action: TaskAction::Implement, description: "".to_string(), preconditions: "".to_string(),
             postconditions: "".to_string(), validation_strategy: "".to_string(),
-            branch: "TBD".to_string(), review_session_file: None
+            branch: "TBD".to_string(), plan: None
         });
         appview.apply_event(&implement_payload, "impl1");
         
@@ -1136,41 +1065,4 @@ mod tests {
         })
     }
 
-    #[sealed_test]
-    fn test_handle_task_requests_creates_plan_branch() -> Result<()> {
-        let mut _tr = crate::debug::test_repo::TestRepo::new()?;
-        let temp_dir = &_tr.td;
-        let repo = &_tr.repo;
-        let nancy_dir = temp_dir.path().join(".nancy");
-        std::fs::create_dir_all(&nancy_dir)?;
-
-        let coord_identity = Identity::Coordinator {
-            did: DidOwner { did: "mock1".to_string(), public_key_hex: "00".to_string(), private_key_hex: "00".to_string() },
-            workers: vec![],
-        };
-        fs::write(nancy_dir.join("identity.json"), serde_json::to_string(&coord_identity)?)?;
-        
-        let writer = Writer::new(&repo, coord_identity)?;
-        let mut appview = AppView::new();
-        
-        // Mock a TaskRequest in the ledger AppView structure.
-        let request_id = "mock_request_id_123".to_string();
-        appview.requests.insert(request_id.clone(), EventPayload::TaskRequest(crate::schema::task::TaskRequestPayload {
-            description: "Implement a feature".to_string(),
-            requestor: "test_user".to_string(),
-        }));
-        
-        // Emulate loop execution parsing events!
-        let mut processed_request_ids = std::collections::HashSet::new();
-        let logged_any = super::handle_task_requests(repo, &appview, &writer, &mut processed_request_ids).unwrap();
-        
-        assert!(logged_any, "Expected to log a task plan dynamically natively.");
-        
-        // Validate native orphaned branch generation!
-        let orphaned_branch = format!("refs/heads/nancy/plans/{}", request_id);
-        let branch_result = repo.find_reference(&orphaned_branch);
-        assert!(branch_result.is_ok(), "The orphaned branch {} MUST be initialized for Grinder worktree bounds natively!", orphaned_branch);
-        
-        Ok(())
-    }
 }

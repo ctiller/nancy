@@ -158,7 +158,7 @@ impl AppView {
                 continue;
             }
             if let Some(EventPayload::Task(t)) = self.tasks.get(&current) {
-                if matches!(t.action, crate::schema::task::TaskAction::ReviewPlan) {
+                if matches!(t.action, crate::schema::task::TaskAction::Plan) {
                     return Some(format!("refs/heads/nancy/features/{}", current));
                 }
             }
@@ -210,7 +210,7 @@ mod tests {
             validation_strategy: "noop".into(),
             action: TaskAction::Plan,
             branch: "refs/heads/nancy/plans/test".into(),
-            review_session_file: None,
+            plan: None,
         });
         appview.apply_event(&task_event, "task-id");
 
@@ -229,9 +229,9 @@ mod tests {
             preconditions: "".into(),
             postconditions: "".into(),
             validation_strategy: "".into(),
-            action: TaskAction::ReviewPlan,
+            action: TaskAction::Plan,
             branch: "refs/heads/nancy/tasks/review-id".into(),
-            review_session_file: None,
+            plan: None,
         });
 
         // This task depends on ReviewPlan
@@ -242,7 +242,7 @@ mod tests {
             validation_strategy: "".into(),
             action: TaskAction::Implement,
             branch: "refs/heads/nancy/tasks/impl-id".into(),
-            review_session_file: None,
+            plan: None,
         });
 
         appview.apply_event(&review_plan, "review-id");
@@ -274,7 +274,7 @@ mod tests {
             validation_strategy: "".into(),
             action: TaskAction::Implement,
             branch: "refs/heads/nancy/tasks/impl-id".into(),
-            review_session_file: None,
+            plan: None,
         });
 
         let review_impl = EventPayload::Task(TaskPayload {
@@ -284,7 +284,7 @@ mod tests {
             validation_strategy: "".into(),
             action: TaskAction::ReviewImplementation,
             branch: "refs/heads/nancy/tasks/review-impl-id".into(),
-            review_session_file: None,
+            plan: None,
         });
 
         appview.apply_event(&implement_task, "impl-id");
@@ -317,7 +317,7 @@ mod tests {
                 validation_strategy: default_fields().2,
                 action: crate::schema::task::TaskAction::Implement,
                 branch: "refs/heads/nancy/tasks/t1".into(),
-                review_session_file: None,
+                plan: None,
             }),
             "t1",
         );
@@ -329,7 +329,7 @@ mod tests {
                 validation_strategy: default_fields().2,
                 action: crate::schema::task::TaskAction::Implement,
                 branch: "refs/heads/nancy/tasks/t2".into(),
-                review_session_file: None,
+                plan: None,
             }),
             "t2",
         );
@@ -341,7 +341,7 @@ mod tests {
                 validation_strategy: default_fields().2,
                 action: crate::schema::task::TaskAction::Implement,
                 branch: "refs/heads/nancy/tasks/t3".into(),
-                review_session_file: None,
+                plan: None,
             }),
             "t3",
         );

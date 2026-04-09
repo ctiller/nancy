@@ -1,43 +1,24 @@
 use askama::Template;
 
-#[derive(Template)]
-#[template(
-    source = r#"You are the Nancy Task Planner. Your environment is a local Git worktree for an isolated codebase.
-You have native access to bash commands if you need them to inspect the repository, but your primary job is to output a markdown-formatted Plan.
 
-When generating your plan, you must adhere strictly to these Technical Design Document (TDD) best practices:
 
-# Key Characteristics of an Effective TDD:
+pub const TDD_GUIDELINES: &str = r#"# Key Characteristics of an Effective TDD:
 - Clear Problem Statement: Begins with a brief summary of the problem, its significance, and the target audience.
 - Architectural Overview: Includes high-level diagrams detailing core system components, data flow, and external dependencies.
 - Detailed Proposed Solution: Deep dives into the technical implementation, featuring pseudocode, API request/response samples, and flowcharts.
 - Alternatives Considered: Discusses alternative approaches and justifies why they were rejected, including trade-offs.
 - Defined Scope (Goals/Non-goals): Clearly states what the solution will and will not cover to avoid scope creep.
 - Non-Functional Requirements: Details scalability, security, performance, and reliability aspects.
-- Data Models & Structure: Outlines database schemas, object models, or data structures.
 - Actionable Plan: Outlines the development, testing, and deployment/migration strategy.
 
-# Best Practices for Writing TDDs:
-- Keep it Simple: Use short sentences, clear language, and bulleted lists to make the document easily scannable.
-- Visual Aids: Utilize diagrams (e.g., markdown-compatible mermaid flowcharts, architecture diagrams) to visualize complex systems.
-- Define Assumptions: Explicitly list any assumptions made regarding the technology, team, or user behavior.
-
-# Required Sections in your output:
+# Required Sections in your Markdown output:
 - Title & Metadata: Author, status, and reviewers.
 - Summary: High-level overview of the problem and solution.
 - Background/Context: History behind the need for this feature/system.
 - Goals/Non-Goals: What is in scope and what is not.
 - Proposed Design: Detailed solution components.
 - Risks & Trade-offs: Potential pitfalls.
-- Alternatives Considered: Rejected options.
-- Security & Privacy: Potential risks and mitigation.
-
-CRITICAL: You MUST use your filesystem tools to fully write your generated plan cleanly to the physical file explicitly located at: {{ plan_file_path }}"#,
-    ext = "txt"
-)]
-pub struct PlannerSystemPromptTemplate<'a> {
-    pub plan_file_path: &'a str,
-}
+- Alternatives Considered: Rejected options."#;
 
 pub fn implementer_system_prompt() -> &'static str {
     r#"You are the Nancy Implementer. Your job is to execute the given Task Description natively inside this isolated Git worktree.
@@ -63,21 +44,60 @@ Your job is to read the output of all individual Expert Reviewers and synthesize
 
 #[derive(Template)]
 #[template(
-    source = r#"Task Description: {{ description }}
-Preconditions: {{ preconditions }}"#,
+    source = r#"You are the Nancy Moderator. Select a team of expert personas to ideate on the task. You must select valid experts from the available list below.
+
+Available Personas:
+{% for p in personas %}- **{{ p.name }}** ({% match p.category %}{% when crate::personas::PersonaCategory::Technical %}Technical{% when crate::personas::PersonaCategory::Paradigm %}Paradigm{% when crate::personas::PersonaCategory::Orchestration %}Orchestration{% endmatch %}): {{ p.description }}
+{% endfor %}"#,
     ext = "txt"
 )]
-pub struct PlannerPromptTemplate<'a> {
-    pub description: &'a str,
-    pub preconditions: &'a str,
+pub struct ModeratorPromptTemplate<'a> {
+    pub personas: &'a [crate::personas::Persona],
 }
 
 #[derive(Template)]
 #[template(
-    source = r#"You generated a response but FAILED to actually create and write to the file {{ plan_file_path }}. 
-Please formulate your data into markdown and physically execute your write tool onto that exact path now."#,
+    source = r#"Ideate solutions for the following task description:
+{{ task_description }}"#,
     ext = "txt"
 )]
-pub struct PlannerFallbackPromptTemplate<'a> {
-    pub plan_file_path: &'a str,
+pub struct IdeationPromptTemplate<'a> {
+    pub task_description: &'a str,
+}
+
+#[derive(Template)]
+#[template(
+    source = r#"Task: {{ task_description }}
+Preconditions: {{ preconditions }}
+
+{% if iteration == 1 %}Experts Ideations:
+{{ iter_context }}{% else %}Feedback from previous iterations:
+{{ iter_context }}{% endif %}
+
+Synthesize this into a cohesive plan, and return a JSON object natively with `plan_markdown` containing the structured markdown, and `tasks` containing the DAG implementation mapping. Use valid actions. Each task output requires a unique `id` and `depends_on` array expressing explicit topological DAG blocks. Empty arrays indicate no dependencies."#,
+    ext = "txt"
+)]
+pub struct SynthesisPromptTemplate<'a> {
+    pub task_description: &'a str,
+    pub preconditions: &'a str,
+    pub iter_context: &'a str,
+    pub iteration: u32,
+}
+
+#[derive(Template)]
+#[template(
+    source = r#"Task: {{ task_description }}
+Plan Synthesized by Moderator:
+{{ plan_markdown }}
+
+Tasks:
+{{ tasks_json }}
+
+Please review this structural plan natively. Output ReviewOutput natively."#,
+    ext = "txt"
+)]
+pub struct FormalReviewPromptTemplate<'a> {
+    pub task_description: &'a str,
+    pub plan_markdown: &'a str,
+    pub tasks_json: &'a str,
 }

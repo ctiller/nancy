@@ -11,11 +11,11 @@ There was a design discussion regarding whether the `Coordinator` should constru
 ## Decision
 The `Coordinator` is strictly forbidden from executing LLM requests natively. 
 All LLM activity—ranging from Planning, Decomposition, Code Review, and Implementation—must be firmly contained within the `Grinder` nodes. 
-The Coordinator’s role is purely to map abstract tasks dynamically to the event ledger and delegate them as formal Task actions (e.g., `Plan`, `ReviewPlan`, `DecomposePlan`, `Implement`, `ReviewImplementation`). 
+The Coordinator’s role is purely to map abstract tasks dynamically to the event ledger and delegate them as formal Task actions (e.g., `Plan`, `Implement`, `ReviewImplementation`). 
 
 LLMs should only be executed within Grinder instances running in isolated environments (such as a Docker instance) to insulate the orchestration layer from non-deterministic failures, networking latency, and arbitrary tool execution risks.
 
 ## Consequences
 - **Strict Boundary**: Any implementation adding LLM client dependencies (`src/llm::*`) directly into the `src/commands/coordinator.rs` or `src/coordinator/` module explicitly violates core architecture and must be rejected.
-- **Dedicated Task Actions**: Process steps requiring LLM interaction (such as Decomposing a plan) must be dispatched as autonomous discrete tasks (i.e. `TaskAction::DecomposePlan` instead of being handled implicitly).
+- **Dedicated Task Actions**: Process steps requiring LLM interaction must be dispatched as autonomous discrete tasks (i.e. `TaskAction::Plan` instead of being handled implicitly).
 - **Execution Consistency**: Grinder nodes remain the unified entry point for LLM interactions. This ensures standard security guardrails, filesystem staging (e.g. detached worktrees), tool invocation binding, and system determinism uniformly applies to all LLM requests.
