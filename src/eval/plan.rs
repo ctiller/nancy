@@ -20,20 +20,31 @@ pub async fn eval_plan(path: &str, output_path: &std::path::Path) -> Result<()> 
         .wait_for_completion(|view| !view.task_completions.is_empty())
         .await?;
 
-    // let traces = runner.extract_traces();
-    let req_hash = runner.get_request_hash()?;
-    let branch_name = format!("refs/heads/nancy/plans/{}", req_hash);
-    let final_plan = if let Ok(r) = runner.repo.find_reference(&branch_name) {
-        if let Ok(tree) = r.peel_to_tree() {
-            if let Some(entry) = tree.get_name("plan.md") {
-                if let Ok(blob) = runner.repo.find_blob(entry.id()) {
-                    Some(String::from_utf8_lossy(blob.content()).to_string())
-                } else { None }
-            } else { None }
-        } else { None }
-    } else { None };
+    let appview = runner.get_appview()?;
+    let mut tasks = Vec::new();
+    let mut final_plan_str = None;
 
-    let result = crate::eval::EvalResult { final_plan, recommended_tasks: None, traces: runner.extract_traces() };
+    for task_ev in appview.tasks.values() {
+        if let crate::schema::registry::EventPayload::Task(payload) = task_ev {
+            if matches!(payload.action, crate::schema::task::TaskAction::Plan) {
+                let _ = payload; // we skip the abstract Plan node itself
+            } else {
+                tasks.push(payload.clone());
+            }
+            if final_plan_str.is_none() {
+                if let Some(plan_path_str) = &payload.plan {
+                    if let Ok(content) = std::fs::read_to_string(plan_path_str) {
+                        final_plan_str = Some(content);
+                    }
+                }
+            }
+        }
+    }
+
+    let recommended_tasks = if tasks.is_empty() { None } else { Some(tasks) };
+    let final_plan = final_plan_str;
+
+    let result = crate::eval::EvalResult { final_plan, recommended_tasks, traces: runner.extract_traces() };
 
     let result_yaml = serde_yaml::to_string(&result)?;
     fs::write(output_path, result_yaml)?;

@@ -29,19 +29,19 @@ pub fn reviewer_system_prompt(persona: &Persona, workspace: &std::path::Path) ->
 
 pub fn reviewer_task_prompt(
     round: u32,
+    max_rounds: u32,
     task_description: &str,
     review_context: &str,
     dissent_log_json: &str,
 ) -> String {
-    let round_warning = if round == 6 {
-        "PENULTIMATE ROUND."
-    } else if round == 7 {
-        "ULTIMATE ROUND. Final decision required."
-    } else {
-        ""
-    };
+    let rounds_remaining = max_rounds.saturating_sub(round);
+     let round_warning = if rounds_remaining == 0 {
+         "This is the final round of discussion.".to_string()
+     } else {
+         format!("A maximum of {} rounds of discussion remain.", rounds_remaining)
+     };
 
-    format!(
+     format!(
         "{round_warning_if_applicable}\n\
         **Task:** {task_description}\n\
         **Evaluation Context:** \n{review_context}\n\
@@ -57,8 +57,8 @@ pub fn reviewer_task_prompt(
     )
 }
 
-pub fn coordinator_system_prompt(workspace: &std::path::Path) -> String {
-    format!("You are the Review Coordinator. Your job is to drive the panel to an `Approve` consensus within 7 rounds.\n\
+pub fn coordinator_system_prompt(workspace: &std::path::Path, max_rounds: u32) -> String {
+    format!("You are the Review Coordinator. Your job is to drive the panel to an `Approve` consensus within {} rounds.\n\
     \n\
     ## Execution Environment Bounds\n\
     Your strict dynamically mounted root workspace is absolutely restricted to: {}\n\
@@ -68,7 +68,7 @@ pub fn coordinator_system_prompt(workspace: &std::path::Path) -> String {
     1. **Address Feedback:** You receive all reviewer feedback and must prioritize integrating requested changes by editing the codebase before generating the next round's diff.\n\
     2. **Quorum:** You must dynamically select reviewers to form a panel. The system strictly enforces a Quorum: you must maintain at least K=2 active members from *each* domain (`Technical`, `Paradigm`, and `Orchestration`). If you fail to meet quorum, the backend will forcefully randomize and inject personas to satisfy it.\n\
     3. **Dissent Log & Ghost Vetos:** If you swap out an uncooperative panel member, any `Veto` they held is inherited as a `Ghost Veto` on the Dissent Log. A Ghost Veto is a hard block. It can only be cleared if the active panel explicitly votes to clear it. Specifically, it requires at least ONE clearance vote from *each* of the three domains to be exorcised.\n\
-    4. **Execution:** Use your tools to fulfill your role. Maintain high engineering standards and do not try to \"game\" the panel by indiscriminately firing strict reviewers, as the resulting Ghost Vetos will mathematically deadlock your execution.", workspace.display())
+    4. **Execution:** Use your tools to fulfill your role. Maintain high engineering standards and do not try to \"game\" the panel by indiscriminately firing strict reviewers, as the resulting Ghost Vetos will mathematically deadlock your execution.", max_rounds, workspace.display())
 }
 
 #[cfg(test)]
@@ -108,24 +108,24 @@ mod tests {
 
     #[test]
     fn test_coordinator_system_prompt_static() {
-        let prompt = coordinator_system_prompt(std::path::Path::new("/tmp/test"));
+        let prompt = coordinator_system_prompt(std::path::Path::new("/tmp/test"), 15);
         assert!(prompt.contains("Quorum:"));
-        assert!(prompt.contains("7 rounds"));
+        assert!(prompt.contains("15 rounds"));
     }
 
     #[test]
     fn test_reviewer_task_prompt_verifies_warning_thresholds() {
         // Standard round
-        let normal = reviewer_task_prompt(1, "task", "ctx", "{}");
-        assert!(!normal.contains("PENULTIMATE ROUND"));
-        assert!(!normal.contains("ULTIMATE ROUND"));
+        let normal = reviewer_task_prompt(1, 15, "task", "ctx", "{}");
+        assert!(normal.contains("A maximum of 14 rounds of discussion remain."));
+        assert!(!normal.contains("This is the final round of discussion."));
 
         // Penultimate round
-        let penult = reviewer_task_prompt(6, "task", "ctx", "{}");
-        assert!(penult.contains("PENULTIMATE ROUND"));
+        let penult = reviewer_task_prompt(14, 15, "task", "ctx", "{}");
+        assert!(penult.contains("A maximum of 1 rounds of discussion remain."));
 
         // Ultimate round
-        let ult = reviewer_task_prompt(7, "task", "ctx", "{}");
-        assert!(ult.contains("ULTIMATE ROUND"));
+        let ult = reviewer_task_prompt(15, 15, "task", "ctx", "{}");
+        assert!(ult.contains("This is the final round of discussion."));
     }
 }

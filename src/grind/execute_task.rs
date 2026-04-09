@@ -138,7 +138,7 @@ async fn handle_plan_task(
 
     loop {
         iteration += 1;
-        if iteration > 5 {
+        if iteration > 15 {
             anyhow::bail!("Exceeded max synthesis loops!");
         }
 
@@ -173,6 +173,7 @@ async fn handle_plan_task(
             task_description: &task_payload.description,
             plan_markdown: &output.plan_markdown,
             tasks_json: &tasks_json,
+            rounds_remaining: 15 - iteration,
         }.render()?;
 
         let formal_panel = session.enforce_quorum(&safe_experts);
@@ -297,7 +298,7 @@ async fn handle_review_task(
     })?;
 
     let review_context = format!("Git Diff:\n{}", diff_text);
-    let task_prompt = crate::pre_review::runner::reviewer_task_prompt(1, &task_payload.description, &review_context, "{}");
+    let task_prompt = crate::pre_review::runner::reviewer_task_prompt(1, 15, &task_payload.description, &review_context, "{}");
 
     let formal_panel = session.enforce_quorum(&team_selection.experts);
     let outputs = session
@@ -698,6 +699,18 @@ mod tests {
             .respond("Expert ideation...")
             .respond("I tried to plan but forgot my tools!")
             .respond("Oops I forgot again!")
+            .respond("Still forgot!")
+            .respond("Still forgot!")
+            .respond("Still forgot!")
+            .respond("Still forgot!")
+            .respond("Still forgot!")
+            .respond("Still forgot!")
+            .respond("Still forgot!")
+            .respond("Still forgot!")
+            .respond("Still forgot!")
+            .respond("Still forgot!")
+            .respond("Still forgot!")
+            .respond("Still forgot!")
             .respond("Still forgot!")
             .respond("Still forgot!")
             .respond("Still forgot!")

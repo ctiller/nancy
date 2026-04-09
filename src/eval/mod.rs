@@ -68,7 +68,7 @@ pub struct CommitDef {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct EvalResult {
     pub final_plan: Option<String>,
-    pub recommended_tasks: Option<Vec<crate::schema::task::TaskRequestPayload>>,
+    pub recommended_tasks: Option<Vec<crate::schema::task::TaskPayload>>,
     pub traces: Vec<crate::schema::registry::EventPayload>,
 }
 
@@ -191,16 +191,12 @@ impl EvalRunner {
         extract_traces(&self.repo, &self.id_obj)
     }
 
-    pub fn get_request_hash(&self) -> anyhow::Result<String> {
-        let coord_did = self.id_obj.get_did_owner().did.clone();
-        let mut appview = crate::coordinator::appview::AppView::new();
-        let reader = crate::events::reader::Reader::new(&self.repo, coord_did);
-        for ev_res in reader.iter_events()? {
-            if let Ok(env) = ev_res {
-                appview.apply_event(&env.payload, &env.id);
-            }
-        }
+    pub fn get_appview(&self) -> anyhow::Result<crate::coordinator::appview::AppView> {
+        Ok(crate::commands::coordinator::hydrate_coordinator_state(&self.repo, &self.id_obj, None))
+    }
 
+    pub fn get_request_hash(&self) -> anyhow::Result<String> {
+        let appview = self.get_appview()?;
         let hash = appview
             .requests
             .keys()

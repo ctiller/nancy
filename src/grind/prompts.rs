@@ -94,6 +94,8 @@ Plan Synthesized by Moderator:
 Tasks:
 {{ tasks_json }}
 
+{% if rounds_remaining == 0 %}This is the final round of discussion.{% else %}A maximum of {{ rounds_remaining }} rounds of discussion remain.{% endif %}
+
 Please review this structural plan. Output ReviewOutput."#,
     ext = "txt"
 )]
@@ -101,4 +103,5 @@ pub struct FormalReviewPromptTemplate<'a> {
     pub task_description: &'a str,
     pub plan_markdown: &'a str,
     pub tasks_json: &'a str,
+    pub rounds_remaining: u32,
 }
