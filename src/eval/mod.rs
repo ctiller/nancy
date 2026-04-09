@@ -126,9 +126,9 @@ impl EvalRunner {
             serde_json::from_str(&identity_content)?;
         let coord = id_obj.get_did_owner().did.clone();
 
-        let bg_dir = repo_path.to_path_buf();
-        let explicit_coord = coord.clone();
-        let explicit_grinder = if let crate::schema::identity_config::Identity::Coordinator {
+        let _bg_dir = repo_path.to_path_buf();
+        let _explicit_coord = coord.clone();
+        let _explicit_grinder = if let crate::schema::identity_config::Identity::Coordinator {
             workers,
             ..
         } = &id_obj

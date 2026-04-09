@@ -260,7 +260,7 @@ async fn handle_implement_task(
 async fn handle_review_task(
     target_path: &std::path::Path,
     _repo: &Repository,
-    task_ref: &str,
+    _task_ref: &str,
     task_payload: &TaskPayload,
     writer: &Writer<'_>,
 ) -> Result<String> {
@@ -334,7 +334,7 @@ async fn handle_review_task(
 
 pub async fn execute<'a>(
     repo: &'a Repository,
-    id_obj: &Identity,
+    _id_obj: &Identity,
     assignment_id: &str,
     task_ref: &str,
     task_payload: &TaskPayload,
@@ -511,7 +511,7 @@ mod tests {
         };
 
         let worktrees_dir = repo.workdir().unwrap().join("worktrees").join("task_ref_success");
-        let plan_file = worktrees_dir.join("plan.md");
+        let _plan_file = worktrees_dir.join("plan.md");
         let mut builder = crate::llm::mock::builder::MockChatBuilder::new()
             .respond(r#"{"experts": ["The Pedant"]}"#)
             .respond("Expert ideation...")
@@ -773,7 +773,7 @@ mod tests {
         std::fs::create_dir_all(&nancy_dir)?;
 
         let worktrees_dir = repo.workdir().unwrap().join("worktrees").join("task_ref_complex");
-        let plan_file = worktrees_dir.join("plan.md");
+        let _plan_file = worktrees_dir.join("plan.md");
         let mut builder = crate::llm::mock::builder::MockChatBuilder::new()
             .respond(r#"{"experts": ["The Pedant", "Junk Persona"]}"#)
             .respond("Expert ideation...")

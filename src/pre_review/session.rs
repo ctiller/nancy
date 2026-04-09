@@ -1,14 +1,11 @@
 use std::collections::{HashMap, HashSet};
-use std::path::{Path, PathBuf};
 use anyhow::Result;
 use futures_util::future::join_all;
-use git2::{Repository, Oid};
 
 use crate::llm::client::LlmClient;
 use crate::llm::thinking_llm;
 use crate::personas::{get_all_personas, PersonaCategory};
-use crate::pre_review::schema::ReviewOutput;
-use crate::pre_review::runner::{reviewer_system_prompt, reviewer_task_prompt};
+use crate::pre_review::runner::reviewer_system_prompt;
 
 pub struct ReviewSession {
     pub reviewers: HashMap<String, LlmClient>,

@@ -231,14 +231,14 @@ impl LlmClient {
                 } else {
                     tracing::info!("==== [LLM Client] Sending request to Gemini API. Waiting... ====");
                     let timeout_res = tokio::time::timeout(
-                        std::time::Duration::from_secs(45),
+                        std::time::Duration::from_secs(120),
                         Gemini::ask(gemini, &mut self.session)
                     ).await;
                     
                     tracing::info!("==== [LLM Client] Received response successfully! ====");
                     match timeout_res {
                         Ok(res) => res,
-                        Err(_) => return Err(anyhow::anyhow!("Gemini API network request timed out (45s deadline exceeded) organically stopping indefinitely suspended tasks.")),
+                        Err(_) => return Err(anyhow::anyhow!("Gemini API network request timed out (120s deadline exceeded) organically stopping indefinitely suspended tasks.")),
                     }
                 };
 

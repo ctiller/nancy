@@ -1,6 +1,5 @@
 use anyhow::{Context, Result, bail};
 use ignore::WalkBuilder;
-use llm_macros::llm_tool;
 use regex::Regex;
 use schemars::JsonSchema;
 use serde::Deserialize;

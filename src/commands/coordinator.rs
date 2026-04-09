@@ -12,7 +12,6 @@ use crate::schema::registry::EventPayload;
 
 use axum::{extract::State, routing::get, Router};
 use std::sync::Arc;
-use tokio::net::UnixListener;
 
 #[derive(Clone)]
 pub struct IpcState {
@@ -84,7 +83,7 @@ impl Coordinator {
         };
 
         let workdir = self.repo.workdir().unwrap().to_path_buf();
-        let socket_path = workdir.join(".nancy").join("coordinator.sock");
+        let _socket_path = workdir.join(".nancy").join("coordinator.sock");
 
         let app = Router::new()
             .route("/ready-for-poll", axum::routing::post(ready_for_poll_handler))

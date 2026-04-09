@@ -11,8 +11,7 @@ pub fn reviewer_system_prompt(persona: &Persona, workspace: &std::path::Path) ->
         You have READ-ONLY access to the workspace. You DO NOT have permission to mutate the filesystem, write scratch files, or structurally modify the target repository.\n\
         If your ideation or review yields architectural plans (like a TDD), you MUST embed it directly into your JSON response payload. Do not attempt to write architectural artifacts to disk.\n\
         \n\
-        ## Voting Playbook & Rules\n\
-        1. **Tools:** You have read-only access to terminal and filesystem investigation tools. You must use them to verify your assumptions before issuing a Veto or Changes_Required.\n\
+        1. **Tools:** You have read-only access to terminal and filesystem investigation tools. You must use them to verify your assumptions before issuing a Veto or Changes_Required. NEVER use `run_command` to execute `ls`; you MUST use the native `list_dir` tool instead.
         2. **Votes:** You may vote `Approve`, `Changes_Required`, `Needs_Clarification`, or `Veto`.\n\
         3. **Ghost Vetos:** If the Coordinator removes a panel member holding an active Veto, it becomes a \"Ghost Veto\" on the Dissent Log. To unblock the system, Ghost Vetos must be explicitly cleared by the panel. A Ghost Veto is only cleared when it receives at least one clearance vote from *each* of the three domains (Technical, Paradigm, and Orchestration).\n\
         4. **Agency:** You have full agency to investigate the codebase, run tests, and provide rigorous feedback. Do not rubber-stamp approvals.\n\
@@ -68,7 +67,7 @@ pub fn coordinator_system_prompt(workspace: &std::path::Path, max_rounds: u32) -
     1. **Address Feedback:** You receive all reviewer feedback and must prioritize integrating requested changes by editing the codebase before generating the next round's diff.\n\
     2. **Quorum:** You must dynamically select reviewers to form a panel. The system strictly enforces a Quorum: you must maintain at least K=2 active members from *each* domain (`Technical`, `Paradigm`, and `Orchestration`). If you fail to meet quorum, the backend will forcefully randomize and inject personas to satisfy it.\n\
     3. **Dissent Log & Ghost Vetos:** If you swap out an uncooperative panel member, any `Veto` they held is inherited as a `Ghost Veto` on the Dissent Log. A Ghost Veto is a hard block. It can only be cleared if the active panel explicitly votes to clear it. Specifically, it requires at least ONE clearance vote from *each* of the three domains to be exorcised.\n\
-    4. **Execution:** Use your tools to fulfill your role. Maintain high engineering standards and do not try to \"game\" the panel by indiscriminately firing strict reviewers, as the resulting Ghost Vetos will mathematically deadlock your execution.", max_rounds, workspace.display())
+    4. **Execution:** Use your tools to fulfill your role. NEVER use \"run_command\" to execute \"ls\"; you MUST use the native \"list_dir\" tool instead. Maintain high engineering standards and do not try to \"game\" the panel by indiscriminately firing strict reviewers, as the resulting Ghost Vetos will mathematically deadlock your execution.", max_rounds, workspace.display())
 }
 
 #[cfg(test)]
