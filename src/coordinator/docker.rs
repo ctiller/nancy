@@ -159,8 +159,8 @@ impl DockerOrchestrator {
 
             tracing::info!("Deploying native Hot Grinder {}...", worker.did);
 
-            let nancy_worktrees = self.workdir.join("worktrees");
-            fs::create_dir_all(&nancy_worktrees).await.unwrap();
+            let nancy_worktrees = self.workdir.join(".nancy").join("worktrees");
+            fs::create_dir_all(&nancy_worktrees).await.unwrap_or_default();
             let target_path = nancy_worktrees.join(format!("worker-{}", worker.did));
 
             if !target_path.exists() {
@@ -180,7 +180,7 @@ impl DockerOrchestrator {
                 }
 
                 let shell_cmd = format!(
-                    "git worktree add {} {}",
+                    "git worktree prune && git worktree add -f {} {}",
                     target_path.display(), branch_name
                 );
 
@@ -201,6 +201,8 @@ impl DockerOrchestrator {
             // Provision socket directory boundaries perfectly natively avoiding Docker Daemon ROOT ownership mapping escalations natively
             let worker_socket_dir = self.workdir.join(".nancy").join("sockets").join(&worker.did);
             fs::create_dir_all(&worker_socket_dir).await.unwrap_or_default();
+            let _ = fs::remove_file(worker_socket_dir.join("grinder.sock")).await;
+            
             let coordinator_socket_dir = self.workdir.join(".nancy").join("sockets").join("coordinator");
             fs::create_dir_all(&coordinator_socket_dir).await.unwrap_or_default();
 

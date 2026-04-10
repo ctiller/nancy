@@ -89,23 +89,23 @@ async fn proxy_grinder_state(
                 let status = resp.status();
                 if let Ok(data) = resp.bytes().await {
                     if status != 200 {
-                        tracing::error!("Proxy error: grinder backend returned {} with body {:?}", status, data);
+                        tracing::debug!("Proxy error: grinder backend returned {} with body {:?}", status, data);
                         return (status, data).into_response();
                     }
                     return ([(CONTENT_TYPE, "application/json")], data).into_response();
                 } else {
-                    tracing::error!("Proxy error: failed to read bytes from grinder backend");
+                    tracing::debug!("Proxy error: failed to read bytes from grinder backend");
                 }
             }
             Err(e) => {
-                tracing::error!("Proxy error: client.get failed: {}", e);
+                tracing::debug!("Proxy error: client.get failed: {}", e);
             }
         }
     } else {
-        tracing::error!("Proxy error: failed to build reqwest client with unix socket");
+        tracing::debug!("Proxy error: failed to build reqwest client with unix socket");
     }
 
-    (StatusCode::INTERNAL_SERVER_ERROR, "Failed to pull from grinder").into_response()
+    (StatusCode::BAD_GATEWAY, "Failed to pull from grinder").into_response()
 }
 
 pub fn spawn_web_server(tcp_listener: tokio::net::TcpListener) -> tokio::task::JoinHandle<()> {
