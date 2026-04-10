@@ -295,6 +295,7 @@ mod tests {
                 public_key_hex: "00".to_string(),
                 private_key_hex: "00".to_string(),
             }],
+            dreamer: crate::schema::identity_config::DidOwner::generate(),
         };
         fs::write(
             nancy_dir.join("identity.json"),
@@ -341,6 +342,7 @@ mod tests {
         let coord_identity = Identity::Coordinator {
             did: DidOwner { did: "mock1".to_string(), public_key_hex: "00".to_string(), private_key_hex: "00".to_string() },
             workers: vec![],
+            dreamer: crate::schema::identity_config::DidOwner::generate(),
         };
         fs::write(nancy_dir.join("identity.json"), serde_json::to_string(&coord_identity)?)?;
         let writer = Writer::new(&repo, coord_identity)?;
@@ -395,6 +397,7 @@ mod tests {
         let coord_identity = Identity::Coordinator {
             did: DidOwner { did: "mock1".to_string(), public_key_hex: "00".to_string(), private_key_hex: "00".to_string() },
             workers: vec![],
+            dreamer: crate::schema::identity_config::DidOwner::generate(),
         };
         fs::write(nancy_dir.join("identity.json"), serde_json::to_string(&coord_identity)?)?;
 
@@ -465,6 +468,7 @@ mod tests {
         let coord_identity = Identity::Coordinator {
             did: DidOwner { did: "mock1".to_string(), public_key_hex: "00".to_string(), private_key_hex: "00".to_string() },
             workers: vec![],
+            dreamer: crate::schema::identity_config::DidOwner::generate(),
         };
         fs::write(nancy_dir.join("identity.json"), serde_json::to_string(&coord_identity)?)?;
         let writer = Writer::new(&repo, coord_identity)?;
@@ -515,6 +519,7 @@ mod tests {
         let coord_identity = Identity::Coordinator {
             did: DidOwner { did: "mock1".to_string(), public_key_hex: "00".to_string(), private_key_hex: "00".to_string() },
             workers: vec![],
+            dreamer: crate::schema::identity_config::DidOwner::generate(),
         };
         fs::write(nancy_dir.join("identity.json"), serde_json::to_string(&coord_identity)?)?;
         
@@ -584,6 +589,7 @@ mod tests {
         let coord_identity = Identity::Coordinator {
             did: DidOwner { did: "mock1".to_string(), public_key_hex: "00".to_string(), private_key_hex: "00".to_string() },
             workers: vec![],
+            dreamer: crate::schema::identity_config::DidOwner::generate(),
         };
         fs::write(nancy_dir.join("identity.json"), serde_json::to_string(&coord_identity)?)?;
         let writer = Writer::new(&repo, coord_identity)?;
@@ -621,6 +627,7 @@ mod tests {
         let coord_identity = Identity::Coordinator {
             did: DidOwner { did: "mock1".to_string(), public_key_hex: "00".to_string(), private_key_hex: "00".to_string() },
             workers: vec![worker.clone()],
+            dreamer: crate::schema::identity_config::DidOwner::generate(),
         };
         fs::write(nancy_dir.join("identity.json"), serde_json::to_string(&coord_identity)?)?;
         let writer = Writer::new(&repo, coord_identity)?;

@@ -92,6 +92,7 @@ mod tests {
                 private_key_hex: hex::encode(key.private_key_bytes()),
             },
             workers: vec![],
+            dreamer: crate::schema::identity_config::DidOwner::generate(),
         };
 
         let writer = Writer::new(&repo, identity)?;

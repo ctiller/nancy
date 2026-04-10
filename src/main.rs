@@ -28,6 +28,8 @@ enum Commands {
     },
     /// Cleanup nancy resources and branches
     Cleanup,
+    /// Run the dreamer background administrative agent loop
+    Dreamer,
 }
 
 #[derive(clap::Args, Debug)]
@@ -76,6 +78,9 @@ pub(crate) async fn execute_command(args: &Args, cwd: PathBuf) -> Result<()> {
         }
         Commands::Cleanup => {
             nancy::commands::cleanup::cleanup(cwd).await?;
+        }
+        Commands::Dreamer => {
+            nancy::commands::dreamer::dreamer(cwd, None, None).await?;
         }
     }
 
@@ -134,6 +139,7 @@ mod tests {
         assert!(Args::try_parse_from(["nancy", "add-task", "--task", "test"]).is_ok());
         assert!(Args::try_parse_from(["nancy", "add-task", "--file", "test.txt"]).is_ok());
         assert!(Args::try_parse_from(["nancy", "cleanup"]).is_ok());
+        assert!(Args::try_parse_from(["nancy", "dreamer"]).is_ok());
     }
 
     #[tokio::test]

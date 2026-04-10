@@ -57,6 +57,10 @@ pub async fn init<P: AsRef<Path>>(dir: P, grinders: usize) -> Result<()> {
     let did_owner = crate::schema::identity_config::DidOwner::generate();
     let did = did_owner.did.clone();
 
+    let dreamer_owner = crate::schema::identity_config::DidOwner::generate();
+    let dreamer_did = dreamer_owner.did.clone();
+    println!("Provisioned standalone dreamer DID: {}", dreamer_did);
+
     let mut workers = Vec::new();
     let mut worker_payloads = Vec::new();
 
@@ -82,6 +86,7 @@ pub async fn init<P: AsRef<Path>>(dir: P, grinders: usize) -> Result<()> {
     let id_obj = crate::schema::identity_config::Identity::Coordinator {
         did: did_owner.clone(),
         workers,
+        dreamer: dreamer_owner.clone(),
     };
 
     if let Err(e) = id_obj.save(dir).await {
@@ -99,6 +104,13 @@ pub async fn init<P: AsRef<Path>>(dir: P, grinders: usize) -> Result<()> {
     });
 
     writer.log_event(payload)?;
+
+    let dreamer_payload = EventPayload::Identity(IdentityPayload {
+        did: dreamer_did.clone(),
+        public_key_hex: dreamer_owner.public_key_hex.clone(),
+        timestamp,
+    });
+    writer.log_event(dreamer_payload)?;
 
     for worker_payload in worker_payloads {
         writer.log_event(worker_payload)?;
@@ -171,8 +183,8 @@ mod tests {
         let event_lines: Vec<&str> = log_content.trim().split('\n').collect();
         assert_eq!(
             event_lines.len(),
-            3,
-            "There should be exactly three event log entries (1 coordinator, 2 grinders)"
+            4,
+            "There should be exactly four event log entries (1 coordinator, 1 dreamer, 2 grinders)"
         );
 
         let event_json: Value = serde_json::from_str(event_lines[0])?;

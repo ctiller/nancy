@@ -185,7 +185,7 @@ impl EvalRunner {
 
 impl Drop for EvalRunner {
     fn drop(&mut self) {
-        crate::commands::grind::SHUTDOWN.store(true, std::sync::atomic::Ordering::SeqCst);
+        crate::agent::SHUTDOWN.store(true, std::sync::atomic::Ordering::SeqCst);
     }
 }
 
@@ -231,6 +231,7 @@ mod tests {
         let id_obj = Identity::Coordinator {
             did: DidOwner { did: "coord".into(), public_key_hex: "00".into(), private_key_hex: "00".into() },
             workers: vec![],
+            dreamer: crate::schema::identity_config::DidOwner::generate(),
         };
 
         // When no extra workers exist, extraction skips fast naturally securely.
@@ -274,6 +275,7 @@ mod tests {
         let coord_identity = Identity::Coordinator {
             did: DidOwner { did: "mock_test_1".to_string(), public_key_hex: "00".to_string(), private_key_hex: "00".to_string() },
             workers: vec![],
+            dreamer: crate::schema::identity_config::DidOwner::generate(),
         };
 
         let writer = crate::events::writer::Writer::new(target_repo, coord_identity.clone())?;

@@ -162,7 +162,7 @@ fn AgentCard(status: GrinderStatus, reload_trigger: Trigger) -> impl IntoView {
                             if is_online.get() { "0 0 8px var(--accent-cyan)" } else { "none" },
                             if is_online.get() { "pulse 2s infinite" } else { "none" }
                         )></div>
-                    <h3 style="margin: 0; font-family: monospace;">"Grinder::"
+                    <h3 style="margin: 0; font-family: monospace; text-transform: capitalize;">{status.agent_type.clone()}"::"
                         <span style=move || format!("color: {};", if is_online.get() { "var(--accent-cyan)" } else { "var(--text-muted)" })>{did.clone()}</span>
                     </h3>
                     <a href="/tasks" style="margin-left: 12px; font-size: 0.75rem; padding: 2px 6px; border-radius: 4px; border: 1px solid var(--accent-purple); color: var(--accent-purple); text-decoration: none;">"view map"</a>

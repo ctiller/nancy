@@ -148,7 +148,8 @@ mod tests {
                 shared_identity: Arc::new(tokio::sync::RwLock::new(
                     crate::schema::identity_config::Identity::Coordinator { 
                         did: crate::schema::identity_config::DidOwner::generate(), 
-                        workers: vec![] 
+                        workers: vec![],
+                        dreamer: crate::schema::identity_config::DidOwner::generate(),
                     }
                 )),
             };

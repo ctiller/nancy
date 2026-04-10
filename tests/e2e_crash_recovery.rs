@@ -44,7 +44,7 @@ async fn test_e2e_crash_recovery() {
         let text = res.text().await.unwrap();
         let parsed: web::schema::GrindersResponse = serde_json::from_str(&text).unwrap();
         
-        if let Some(target) = parsed.grinders.into_iter().find(|s| s.is_online) {
+        if let Some(target) = parsed.grinders.into_iter().find(|s| s.is_online && s.agent_type == "grinder") {
             target_grinder_did = target.did;
         } else {
             tokio::time::sleep(Duration::from_millis(100)).await;

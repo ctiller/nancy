@@ -70,7 +70,13 @@ async fn proxy_grinder_state(
     axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
 ) -> impl IntoResponse {
     let root = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-    let socket_path = root.join(".nancy").join("sockets").join(&did).join("grinder.sock");
+    let socket_path_grinder = root.join(".nancy").join("sockets").join(&did).join("grinder.sock");
+    let socket_path_dreamer = root.join(".nancy").join("sockets").join(&did).join("dreamer.sock");
+    let socket_path = if socket_path_grinder.exists() {
+        socket_path_grinder
+    } else {
+        socket_path_dreamer
+    };
 
     if !socket_path.exists() {
         tracing::debug!("Proxy error: UDS socket not found at {:?}", socket_path);
@@ -139,14 +145,19 @@ async fn get_api_grinders(
         }
     }).await.unwrap_or(None);
     
-    if let crate::schema::identity_config::Identity::Coordinator { workers, .. } = &identity {
-        for worker in workers {
+    if let crate::schema::identity_config::Identity::Coordinator { workers, dreamer, .. } = &identity {
+        let mut agents = vec![];
+        for w in workers { agents.push((w, "grinder")); }
+        agents.push((dreamer, "dreamer"));
+        
+        for (worker, agent_type) in agents {
             let (next_restart_at_unix, failures, log_ref) = appview.as_ref().and_then(|av| {
                 av.agent_crashes.get(&worker.did).map(|c| (c.next_restart_at_unix, c.failures, Some(c.log_ref.clone())))
             }).unwrap_or((None, None, None));
             
             statuses.push(web::schema::GrinderStatus {
                 did: worker.did.clone(),
+                agent_type: agent_type.to_string(),
                 is_online: false,
                 next_restart_at_unix,
                 failures,
@@ -161,21 +172,27 @@ async fn get_api_grinders(
             let meta = entry.metadata().await;
             if meta.map(|m| m.is_dir()).unwrap_or(false) {
                 let did = entry.file_name().to_string_lossy().to_string();
-                if did != "coordinator" && tokio::fs::metadata(entry.path().join("grinder.sock")).await.is_ok() {
-                    if let Some(existing) = statuses.iter_mut().find(|s| s.did == did) {
-                        existing.is_online = true;
-                    } else {
-                        let (next_restart_at_unix, failures, log_ref) = appview.as_ref().and_then(|av| {
-                            av.agent_crashes.get(&did).map(|c| (c.next_restart_at_unix, c.failures, Some(c.log_ref.clone())))
-                        }).unwrap_or((None, None, None));
-                        
-                        statuses.push(web::schema::GrinderStatus {
-                            did: did.to_string(),
-                            is_online: true,
-                            next_restart_at_unix,
-                            failures,
-                            log_ref,
-                        });
+                if did != "coordinator" {
+                    let is_grinder = tokio::fs::metadata(entry.path().join("grinder.sock")).await.is_ok();
+                    let is_dreamer = tokio::fs::metadata(entry.path().join("dreamer.sock")).await.is_ok();
+                    if is_grinder || is_dreamer {
+                        if let Some(existing) = statuses.iter_mut().find(|s| s.did == did) {
+                            existing.is_online = true;
+                            existing.agent_type = if is_dreamer { "dreamer".to_string() } else { "grinder".to_string() };
+                        } else {
+                            let (next_restart_at_unix, failures, log_ref) = appview.as_ref().and_then(|av| {
+                                av.agent_crashes.get(&did).map(|c| (c.next_restart_at_unix, c.failures, Some(c.log_ref.clone())))
+                            }).unwrap_or((None, None, None));
+                            
+                            statuses.push(web::schema::GrinderStatus {
+                                did: did.to_string(),
+                                agent_type: if is_dreamer { "dreamer".to_string() } else { "grinder".to_string() },
+                                is_online: true,
+                                next_restart_at_unix,
+                                failures,
+                                log_ref,
+                            });
+                        }
                     }
                 }
             }

@@ -30,6 +30,7 @@ pub async fn build_container_config(
     host_workdir: &Path,
     worker_did: &str,
     env_vars: Vec<String>,
+    agent_type: &str,
 ) -> Config {
     let canonical_path = target_path
         .canonicalize()
@@ -52,7 +53,7 @@ pub async fn build_container_config(
     ];
 
     let mut env_vars = env_vars;
-    env_vars.push(format!("NANCY_GRINDER_SOCKET_PATH=/tmp/nancy_sockets/{}/grinder.sock", worker_did));
+    env_vars.push(format!("NANCY_{}_SOCKET_PATH=/tmp/nancy_sockets/{}/{}.sock", agent_type.to_uppercase(), worker_did, agent_type));
     env_vars.push("NANCY_COORDINATOR_SOCKET_PATH=/tmp/nancy_sockets/coordinator/coordinator.sock".to_string());
     env_vars.push("SSL_CERT_DIR=/etc/ssl/certs".to_string());
     env_vars.push("SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt".to_string());
@@ -78,8 +79,10 @@ pub async fn build_container_config(
     let uid = String::from_utf8(tokio::process::Command::new("id").arg("-u").output().await.unwrap().stdout).unwrap().trim().to_string();
     let gid = String::from_utf8(tokio::process::Command::new("id").arg("-g").output().await.unwrap().stdout).unwrap().trim().to_string();
 
+    let cli_cmd = if agent_type == "grinder" { "grind" } else { "dreamer" };
     let cmd_str = format!(
-        "/nancy grind > /tmp/nancy_sockets/{worker}/container.log 2>&1; echo $? > /tmp/nancy_sockets/{worker}/exit_code",
+        "/nancy {cmd} > /tmp/nancy_sockets/{worker}/container.log 2>&1; echo $? > /tmp/nancy_sockets/{worker}/exit_code",
+        cmd = cli_cmd,
         worker = worker_did
     );
 
@@ -131,12 +134,18 @@ impl DockerOrchestrator {
     pub async fn sync_deployments(&mut self, _appview: &AppView, identity: &Identity) -> Vec<(crate::schema::task::AgentCrashReportPayload, String)> {
         let root_did = identity.get_did_owner().did.clone();
 
-        let workers = match identity {
-            Identity::Coordinator { workers, .. } => workers.clone(),
+        let (workers, dreamer) = match identity {
+            Identity::Coordinator { workers, dreamer, .. } => (workers.clone(), dreamer.clone()),
             _ => return Vec::new(), // Grinders don't launch docker containers
         };
 
-        if workers.is_empty() {
+        let mut agents_to_launch = Vec::new();
+        for w in workers {
+            agents_to_launch.push((w.clone(), "grinder"));
+        }
+        agents_to_launch.push((dreamer, "dreamer"));
+
+        if agents_to_launch.is_empty() {
             return Vec::new();
         }
 
@@ -189,7 +198,13 @@ impl DockerOrchestrator {
         let mut crash_reports = Vec::new();
         let mut to_remove = Vec::new();
         for container_name in &self.active_containers {
-            let did = container_name.replace("nancy-worker-", "");
+            let did = if container_name.starts_with("nancy-grinder-") {
+                container_name.replace("nancy-grinder-", "")
+            } else if container_name.starts_with("nancy-dreamer-") {
+                container_name.replace("nancy-dreamer-", "")
+            } else {
+                container_name.replace("nancy-worker-", "") // legacy boundary
+            };
             
             // With auto_remove: true, the docker daemon will implicitly destroy the container the 
             // instant it exits. Therefore, if inspect_container returns Err, we evaluate its volume logs natively!
@@ -251,8 +266,8 @@ impl DockerOrchestrator {
             self.active_containers.remove(&name);
         }
 
-        for worker in workers {
-            let container_name = format!("nancy-worker-{}", worker.did);
+        for (worker, agent_type) in agents_to_launch {
+            let container_name = format!("nancy-{}-{}", agent_type, worker.did);
 
             if self.active_containers.contains(&container_name) {
                 continue; // Already launched by this coordinator session
@@ -318,7 +333,11 @@ impl DockerOrchestrator {
             // Provision identity.json explicitly mapping the grinder subset into its context
             let worker_nancy_dir = target_path.join(".nancy");
             fs::create_dir_all(&worker_nancy_dir).await.unwrap_or_default();
-            let worker_identity = Identity::Grinder(worker.clone());
+            let worker_identity = if agent_type == "dreamer" {
+                Identity::Dreamer(worker.clone())
+            } else {
+                Identity::Grinder(worker.clone())
+            };
             let _ = fs::write(
                 worker_nancy_dir.join("identity.json"),
                 serde_json::to_string_pretty(&worker_identity).unwrap(),
@@ -326,7 +345,7 @@ impl DockerOrchestrator {
 
             // Run container
             let env_vars = build_worker_env_vars(&root_did);
-            let config = build_container_config(rt_image, &target_path, &self.workdir, &worker.did, env_vars).await;
+            let config = build_container_config(rt_image, &target_path, &self.workdir, &worker.did, env_vars, agent_type).await;
 
             match self.docker
                 .create_container(
