@@ -11,9 +11,10 @@ use super::EventEnvelope;
 pub struct Writer<'a> {
     repo: &'a Repository,
     identity: Identity,
-    pending_events: RefCell<Vec<String>>,
+    pending_events: std::sync::Mutex<Vec<String>>,
+    pending_incident_logs: std::sync::Mutex<std::collections::HashMap<String, String>>,
     trace_tx: tokio::sync::mpsc::UnboundedSender<EventPayload>,
-    trace_rx: RefCell<tokio::sync::mpsc::UnboundedReceiver<EventPayload>>,
+    trace_rx: std::sync::Mutex<tokio::sync::mpsc::UnboundedReceiver<EventPayload>>,
 }
 
 impl<'a> Writer<'a> {
@@ -22,9 +23,10 @@ impl<'a> Writer<'a> {
         Ok(Writer {
             repo,
             identity,
-            pending_events: RefCell::new(Vec::new()),
+            pending_events: std::sync::Mutex::new(Vec::new()),
+            pending_incident_logs: std::sync::Mutex::new(std::collections::HashMap::new()),
             trace_tx: tx,
-            trace_rx: RefCell::new(rx),
+            trace_rx: std::sync::Mutex::new(rx),
         })
     }
 
@@ -66,7 +68,7 @@ impl<'a> Writer<'a> {
         };
 
         let event_line = format!("{}\n", serde_json::to_string(&envelope)?);
-        self.pending_events.borrow_mut().push(event_line);
+        self.pending_events.lock().unwrap().push(event_line);
 
         Ok(id_str)
     }
@@ -91,19 +93,26 @@ impl<'a> Writer<'a> {
         };
 
         let event_line = format!("{}\n", serde_json::to_string(&envelope)?);
-        self.pending_events.borrow_mut().push(event_line);
+        self.pending_events.lock().unwrap().push(event_line);
 
         Ok(id_override)
     }
+    pub fn attach_incident_log(&self, filename: &str, content: &str) {
+        self.pending_incident_logs
+            .lock().unwrap()
+            .insert(filename.to_string(), content.to_string());
+    }
+
 
     pub fn commit_batch(&self) -> Result<bool> {
-        let mut rx = self.trace_rx.borrow_mut();
+        let mut rx = self.trace_rx.lock().unwrap();
         while let Ok(event) = rx.try_recv() {
             self.log_event(event)?;
         }
 
-        let mut pending = self.pending_events.borrow_mut();
-        if pending.is_empty() {
+        let mut pending = self.pending_events.lock().unwrap();
+        let mut pending_incidents = self.pending_incident_logs.lock().unwrap();
+        if pending.is_empty() && pending_incidents.is_empty() {
             return Ok(false);
         }
 
@@ -116,13 +125,31 @@ impl<'a> Writer<'a> {
         let mut log_blobs = std::collections::BTreeMap::new();
         let mut parents = Vec::new();
 
-        let events_tree = if let Ok(br) = branch_ref {
+        let branch_commit = if let Ok(br) = branch_ref {
             let commit = br.peel_to_commit()?;
             parents.push(commit.clone());
+            Some(commit)
+        } else {
+            None
+        };
+
+        let events_tree = if let Some(commit) = &branch_commit {
             let tree = commit.tree()?;
             if let Ok(entry) = tree.get_name("events").context("events miss") {
                 let events_obj = entry.to_object(self.repo)?;
                 Some(events_obj.into_tree().map_err(|_| anyhow!("not tree"))?)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        let incidents_tree = if let Some(commit) = &branch_commit {
+            let tree = commit.tree()?;
+            if let Some(entry) = tree.get_name("incidents") {
+                let incidents_obj = entry.to_object(self.repo)?;
+                Some(incidents_obj.into_tree().map_err(|_| anyhow!("not tree"))?)
             } else {
                 None
             }
@@ -202,15 +229,30 @@ impl<'a> Writer<'a> {
 
         let new_events_tree_id = events_tb.write()?;
 
+        let mut incidents_tb = if let Some(tree) = &incidents_tree {
+            self.repo.treebuilder(Some(tree))?
+        } else {
+            self.repo.treebuilder(None)?
+        };
+
+        for (name, content) in pending_incidents.iter() {
+            let blob_id = self.repo.blob(content.as_bytes())?;
+            incidents_tb.insert(name, blob_id, 0o100644)?;
+        }
+        let new_incidents_tree_id = incidents_tb.write()?;
+
         let root_tree_id = if let Some(commit) = parents.first() {
             let mut root_tb = self.repo.treebuilder(Some(&commit.tree()?))?;
             root_tb.insert("events", new_events_tree_id, 0o040000)?;
+            root_tb.insert("incidents", new_incidents_tree_id, 0o040000)?;
             root_tb.write()?
         } else {
             let mut root_tb = self.repo.treebuilder(None)?;
             root_tb.insert("events", new_events_tree_id, 0o040000)?;
+            root_tb.insert("incidents", new_incidents_tree_id, 0o040000)?;
             root_tb.write()?
         };
+
 
         let new_root_tree = self.repo.find_tree(root_tree_id)?;
         let parents_refs: Vec<&git2::Commit> = parents.iter().collect();
@@ -225,6 +267,7 @@ impl<'a> Writer<'a> {
         )?;
 
         pending.clear();
+        pending_incidents.clear();
         Ok(true)
     }
 }

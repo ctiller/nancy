@@ -18,6 +18,12 @@ pub struct SerializedFrame {
 pub struct GrinderStatus {
     pub did: String,
     pub is_online: bool,
+    #[serde(default)]
+    pub next_restart_at_unix: Option<u64>,
+    #[serde(default)]
+    pub failures: Option<u32>,
+    #[serde(default)]
+    pub log_ref: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

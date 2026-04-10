@@ -113,7 +113,7 @@ impl Coordinator {
                 break;
             }
 
-            let logged_any = process_app_view_events(
+            let mut logged_any = process_app_view_events(
                 &self.repo, 
                 &appview, 
                 &*identity_guard, 
@@ -122,7 +122,17 @@ impl Coordinator {
             )?;
 
             if let Some(ref mut d) = docker_orch {
-                d.sync_deployments(&appview, &*identity_guard).await;
+                let crashes = d.sync_deployments(&appview, &*identity_guard).await;
+                if !crashes.is_empty() {
+                    let writer = crate::events::writer::Writer::new(&self.repo, identity_guard.clone()).expect("Failed to init writer");
+                    for (report, logs) in crashes {
+                        writer.attach_incident_log(&report.log_ref, &logs);
+                        let _ = writer.log_event(crate::schema::registry::EventPayload::AgentCrashReport(report));
+                    }
+                    if writer.commit_batch().unwrap_or(false) {
+                        logged_any = true;
+                    }
+                }
             }
 
             // Drop the read guard immediately before we possibly block polling

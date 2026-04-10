@@ -5,7 +5,8 @@ use bollard::query_parameters::{
     CreateContainerOptions, CreateImageOptions, StartContainerOptions,
 };
 use futures_util::stream::StreamExt;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
+use rand::Rng;
 use tokio::fs;
 use std::path::{Path, PathBuf};
 
@@ -87,10 +88,17 @@ pub async fn build_container_config(
     }
 }
 
+pub struct ContainerState {
+    pub name: String,
+    pub failures: u32,
+    pub next_restart_allowed_at: Option<std::time::Instant>,
+}
+
 pub struct DockerOrchestrator {
     docker: Docker,
     workdir: PathBuf,
     active_containers: HashSet<String>,
+    crash_backoffs: HashMap<String, ContainerState>,
 }
 
 impl DockerOrchestrator {
@@ -100,19 +108,20 @@ impl DockerOrchestrator {
             docker,
             workdir,
             active_containers: HashSet::new(),
+            crash_backoffs: HashMap::new(),
         })
     }
 
-    pub async fn sync_deployments(&mut self, _appview: &AppView, identity: &Identity) {
+    pub async fn sync_deployments(&mut self, _appview: &AppView, identity: &Identity) -> Vec<(crate::schema::task::AgentCrashReportPayload, String)> {
         let root_did = identity.get_did_owner().did.clone();
 
         let workers = match identity {
             Identity::Coordinator { workers, .. } => workers.clone(),
-            _ => return, // Grinders don't launch docker containers
+            _ => return Vec::new(), // Grinders don't launch docker containers
         };
 
         if workers.is_empty() {
-            return;
+            return Vec::new();
         }
 
         // Make sure base image is ready
@@ -150,11 +159,88 @@ impl DockerOrchestrator {
             }
         }
 
+        let mut crash_reports = Vec::new();
+        let mut to_remove = Vec::new();
+        for container_name in &self.active_containers {
+            if let Ok(inspect) = self.docker.inspect_container(container_name, None).await {
+                if let Some(state) = inspect.state {
+                    if let Some(running) = state.running {
+                        if !running {
+                            // Container died! Interrogate logs
+                                let logs_opts = bollard::query_parameters::LogsOptions {
+                                    stdout: true,
+                                    stderr: true,
+                                    tail: "1000".to_string(),
+                                    ..Default::default()
+                                };
+                            let mut log_stream = self.docker.logs(container_name, Some(logs_opts));
+                            let mut logs = String::new();
+                            while let Some(log_res) = log_stream.next().await {
+                                if let Ok(l) = log_res {
+                                    logs.push_str(&l.to_string());
+                                }
+                            }
+                            let did = container_name.replace("nancy-worker-", "");
+                            
+                            let entry = self.crash_backoffs.entry(container_name.clone()).or_insert(ContainerState {
+                                name: container_name.clone(),
+                                failures: 0,
+                                next_restart_allowed_at: None,
+                            });
+                            entry.failures += 1;
+                            
+                            let base_delay = 5_u64;
+                            let max_delay = 300_u64;
+                            let mut delay = base_delay * (2_u64.pow((entry.failures - 1).min(6) as u32));
+                            delay = std::cmp::min(delay, max_delay);
+                            
+                            let jitter = rand::thread_rng().gen_range(0..=std::cmp::max(delay / 4, 1));
+                            let total_delay = delay + jitter;
+                            let now = std::time::Instant::now();
+                            entry.next_restart_allowed_at = Some(now + std::time::Duration::from_secs(total_delay));
+                            
+                            let timestamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+                            let log_filename = format!("nancy-worker-{}-crash-{}.log", did, timestamp);
+                            
+                            crash_reports.push((
+                                crate::schema::task::AgentCrashReportPayload {
+                                    crashing_agent_did: did.clone(),
+                                    log_ref: log_filename,
+                                    next_restart_at_unix: Some(timestamp + total_delay),
+                                    failures: Some(entry.failures),
+                                },
+                                logs
+                            ));
+                            
+                            tracing::warn!("Worker {} crashed! failures={} backoff={}s", did, entry.failures, total_delay);
+                            
+                            let _ = self.docker.remove_container(container_name, Some(bollard::query_parameters::RemoveContainerOptions { force: true, ..Default::default() })).await;
+                            to_remove.push(container_name.clone());
+                        }
+                    }
+                }
+            } else {
+                to_remove.push(container_name.clone());
+            }
+        }
+        
+        for name in to_remove {
+            self.active_containers.remove(&name);
+        }
+
         for worker in workers {
             let container_name = format!("nancy-worker-{}", worker.did);
 
             if self.active_containers.contains(&container_name) {
                 continue; // Already launched by this coordinator session
+            }
+
+            if let Some(state) = self.crash_backoffs.get(&container_name) {
+                if let Some(next_at) = state.next_restart_allowed_at {
+                    if std::time::Instant::now() < next_at {
+                        continue; // Still backing off
+                    }
+                }
             }
 
             tracing::info!("Deploying native Hot Grinder {}...", worker.did);
@@ -261,6 +347,8 @@ impl DockerOrchestrator {
                 }
             }
         }
+        
+        crash_reports
     }
 }
 

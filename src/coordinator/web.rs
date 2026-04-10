@@ -128,17 +128,26 @@ async fn get_api_grinders(
 
     let root = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     let mut statuses = vec![];
-    let identity = state.shared_identity.read().await;
+    let identity = { state.shared_identity.read().await.clone() };
     
-    if let crate::schema::identity_config::Identity::Coordinator { workers, .. } = &*identity {
+    let repo = git2::Repository::discover(&root).ok();
+    let appview = repo.map(|r| crate::coordinator::appview::AppView::hydrate(&r, &identity, None));
+    
+    if let crate::schema::identity_config::Identity::Coordinator { workers, .. } = &identity {
         for worker in workers {
+            let (next_restart_at_unix, failures, log_ref) = appview.as_ref().and_then(|av| {
+                av.agent_crashes.get(&worker.did).map(|c| (c.next_restart_at_unix, c.failures, Some(c.log_ref.clone())))
+            }).unwrap_or((None, None, None));
+            
             statuses.push(web::schema::GrinderStatus {
                 did: worker.did.clone(),
                 is_online: false,
+                next_restart_at_unix,
+                failures,
+                log_ref,
             });
         }
     }
-    drop(identity);
 
     let sockets_dir = root.join(".nancy").join("sockets");
     if let Ok(mut entries) = tokio::fs::read_dir(&sockets_dir).await {
@@ -150,9 +159,16 @@ async fn get_api_grinders(
                     if let Some(existing) = statuses.iter_mut().find(|s| s.did == did) {
                         existing.is_online = true;
                     } else {
+                        let (next_restart_at_unix, failures, log_ref) = appview.as_ref().and_then(|av| {
+                            av.agent_crashes.get(&did).map(|c| (c.next_restart_at_unix, c.failures, Some(c.log_ref.clone())))
+                        }).unwrap_or((None, None, None));
+                        
                         statuses.push(web::schema::GrinderStatus {
                             did: did.to_string(),
                             is_online: true,
+                            next_restart_at_unix,
+                            failures,
+                            log_ref,
                         });
                     }
                 }
@@ -161,6 +177,44 @@ async fn get_api_grinders(
     }
 
     axum::Json(web::schema::GrindersResponse { version, grinders: statuses })
+}
+
+async fn get_api_incident_log(
+    axum::extract::Extension(state): axum::extract::Extension<crate::coordinator::ipc::IpcState>,
+    axum::extract::Path(log_ref): axum::extract::Path<String>,
+) -> impl IntoResponse {
+    let identity = { state.shared_identity.read().await.clone() };
+    let did = identity.get_did_owner().did.clone();
+    let root = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    
+    let repo = match git2::Repository::discover(&root) {
+        Ok(r) => r,
+        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "No repo found").into_response(),
+    };
+    
+    let branch_name = format!("refs/heads/nancy/{}", did);
+    let branch_commit = repo.find_reference(&branch_name).ok().and_then(|r| r.peel_to_commit().ok());
+    
+    if let Some(commit) = branch_commit {
+        if let Ok(tree) = commit.tree() {
+            if let Some(incidents_entry) = tree.get_name("incidents") {
+                if let Ok(incidents_obj) = incidents_entry.to_object(&repo) {
+                    if let Ok(incidents_tree) = incidents_obj.into_tree() {
+                        if let Some(log_entry) = incidents_tree.get_name(&log_ref) {
+                            if let Ok(blob) = log_entry.to_object(&repo).and_then(|obj| obj.into_blob().map_err(|_| git2::Error::from_str("not blob"))) {
+                                if let Ok(s) = std::str::from_utf8(blob.content()) {
+                                    let html = ansi_to_html::convert(s).unwrap_or_else(|_| s.to_string());
+                                    return ([(CONTENT_TYPE, "text/plain")], html).into_response();
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    (StatusCode::NOT_FOUND, "Log not found").into_response()
 }
 
 async fn get_api_tasks_topology(
@@ -211,6 +265,7 @@ pub fn spawn_web_server(tcp_listener: tokio::net::TcpListener, ipc_state: crate:
         .route("/api/tasks/topology", get(get_api_tasks_topology))
         .route("/api/{*fn_name}", axum::routing::post(leptos_axum::handle_server_fns))
         .route("/api/fs/{*path}", get(fs_asset_handler))
+        .route("/api/incidents/{log_ref}", get(get_api_incident_log))
         .route("/api/grinders/{did}/state", get(proxy_grinder_state))
         .route("/api/add-grinder", axum::routing::post(crate::coordinator::ipc::add_grinder_handler))
         .route("/api/remove-grinder", axum::routing::post(crate::coordinator::ipc::remove_grinder_handler))

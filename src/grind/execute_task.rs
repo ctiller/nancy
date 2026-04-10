@@ -389,6 +389,25 @@ pub async fn execute<'a>(
         safe_target_branch = default_fallback;
     }
 
+    // Aggressively clean up any stranded/orphaned worktree from previous crashes
+    let _ = tokio::process::Command::new("git")
+        .arg("worktree")
+        .arg("remove")
+        .arg("-f")
+        .arg(&target_path)
+        .current_dir(workdir)
+        .status()
+        .await;
+
+    let _ = tokio::fs::remove_dir_all(&target_path).await;
+
+    let _ = tokio::process::Command::new("git")
+        .arg("worktree")
+        .arg("prune")
+        .current_dir(workdir)
+        .status()
+        .await;
+
     let status = tokio::process::Command::new("git")
         .arg("worktree")
         .arg("add")
@@ -406,6 +425,18 @@ pub async fn execute<'a>(
     if task_payload.action == TaskAction::Plan {
         tracing::info!("Provisioning localized dual-worktree for planning evaluation bounds...");
         let plan_exec_path = target_path.join("codebase_checkout");
+        
+        let _ = tokio::process::Command::new("git")
+            .arg("worktree")
+            .arg("remove")
+            .arg("-f")
+            .arg(&plan_exec_path)
+            .current_dir(workdir)
+            .status()
+            .await;
+            
+        let _ = tokio::fs::remove_dir_all(&plan_exec_path).await;
+        
         tokio::process::Command::new("git")
             .arg("worktree")
             .arg("add")

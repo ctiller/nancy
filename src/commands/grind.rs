@@ -117,6 +117,11 @@ pub async fn grind<P: AsRef<Path>>(
             crate::commands::grind::SHUTDOWN_NOTIFY.notify_waiters();
             axum::Json(serde_json::json!({"status": "ok"}))
         }))
+        .route("/crash", axum::routing::post(|| async {
+            tracing::error!("FATAL: Intentionally invoked /crash route via IPC! Aborting process instantly...");
+            tokio::spawn(async move { std::process::exit(1); });
+            axum::Json(serde_json::json!({"status": "crashing"}))
+        }))
         .layer(tower_http::trace::TraceLayer::new_for_http());
 
     let _server_task = tokio::spawn(async move {

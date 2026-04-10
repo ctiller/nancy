@@ -69,7 +69,7 @@ pub fn AgentsView() -> impl IntoView {
                                 leptos::either::Either::Right(view! {
                                     <For
                                         each=move || items.clone()
-                                        key=|status| status.did.clone()
+                                        key=|status| format!("{}_{}_{}", status.did, status.is_online, status.failures.unwrap_or(0))
                                         children=move |status| view! { <AgentCard status=status.clone() reload_trigger=reload_trigger /> }
                                     />
                                 })
@@ -88,10 +88,23 @@ fn AgentCard(status: GrinderStatus, reload_trigger: Trigger) -> impl IntoView {
     let (state, set_state) = signal::<Option<SerializedFrame>>(None);
     #[allow(unused_variables)]
     let (is_online, set_is_online) = signal::<bool>(status.is_online);
+    let (crash_log, set_crash_log) = signal::<Option<String>>(None);
     let did = status.did.clone();
+    let log_ref = status.log_ref.clone();
 
     #[cfg(feature = "hydrate")]
     {
+        if let Some(ref l_ref) = log_ref {
+            let l_ref_clone = l_ref.clone();
+            leptos::task::spawn_local(async move {
+                if let Ok(res) = gloo_net::http::Request::get(&format!("/api/incidents/{}", l_ref_clone)).send().await {
+                    if let Ok(text) = res.text().await {
+                        set_crash_log.set(Some(text));
+                    }
+                }
+            });
+        }
+
         let did_clone = did.clone();
         leptos::task::spawn_local(async move {
             let mut last_update: Option<u64> = None;
@@ -178,8 +191,36 @@ fn AgentCard(status: GrinderStatus, reload_trigger: Trigger) -> impl IntoView {
             </div>
             
             <div style="padding: 12px; background: rgba(0, 0, 0, 0.4); border-radius: 8px; border: 1px solid var(--panel-border); font-family: monospace; font-size: 0.9rem; overflow-x: auto;">
-                {move || if !is_online.get() {
-                    leptos::either::Either::Left(view! { <div class="text-muted">"Agent is currently offline..."</div> })
+                {
+                    let log_ref_is_some = log_ref.is_some();
+                    move || if !is_online.get() {
+                    let text = if let (Some(failures), Some(next_unix)) = (status.failures.clone(), status.next_restart_at_unix.clone()) {
+                        let now = js_sys::Date::now() / 1000.0;
+                        let mut diff = (next_unix as f64 - now).round();
+                        if diff < 0.0 { diff = 0.0; }
+                        format!("Agent crashed ({} failures). Retrying in {}s...", failures, diff)
+                    } else {
+                        "Agent is currently offline...".to_string()
+                    };
+                    leptos::either::Either::Left(view! {
+                        <div>
+                            <div class="text-muted" style="margin-bottom: 8px;">{text}</div>
+                            {move || if log_ref_is_some {
+                                leptos::either::Either::Left(match crash_log.get() {
+                                    Some(log) => leptos::either::Either::Left(view! {
+                                        <div 
+                                            style="background: rgba(255, 0, 0, 0.1); border-left: 2px solid var(--accent-red); padding: 8px 8px 24px 8px; border-radius: 0 4px 4px 0; white-space: pre; font-size: 0.8rem; overflow: auto; max-height: 400px; color: var(--text-muted); font-family: monospace;"
+                                            prop:innerHTML={log}
+                                        >
+                                        </div>
+                                    }),
+                                    None => leptos::either::Either::Right(view! { <span class="text-muted" style="font-size: 0.8rem;">"Loading diagnostic log..."</span> })
+                                })
+                            } else {
+                                leptos::either::Either::Right(view! { <span></span> })
+                            }}
+                        </div>
+                    })
                 } else {
                     leptos::either::Either::Right(match state.get() {
                         Some(frame) => leptos::either::Either::Left(view! { <FrameView frame=frame /> }),

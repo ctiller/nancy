@@ -272,3 +272,65 @@ async fn test_e2e_web_tasks_topology() {
     
     assert!(found, "Failed to observe Test Topology Request in topology response");
 }
+
+#[tokio::test]
+#[sealed_test(env = [
+    ("GEMINI_API_KEY", "mock")
+])]
+async fn test_e2e_web_incident_logs() {
+    let tmp = TempDir::new().unwrap();
+    std::env::set_current_dir(tmp.path()).unwrap();
+    let repo = git2::Repository::init(tmp.path()).unwrap();
+    nancy::commands::init::init(tmp.path(), 1).await.unwrap();
+    let identity = nancy::schema::identity_config::Identity::load(tmp.path()).await.unwrap();
+    
+    let did = match &identity {
+        nancy::schema::identity_config::Identity::Coordinator { workers, .. } => workers[0].did.clone(),
+        _ => panic!("Not a coordinator"),
+    };
+    
+    let writer = nancy::events::writer::Writer::new(&repo, identity.clone()).unwrap();
+    writer.attach_incident_log("test-crash.log", "thread '<unnamed>' panicked at 'explicit panic'");
+    writer.log_event(nancy::schema::registry::EventPayload::AgentCrashReport(
+        nancy::schema::task::AgentCrashReportPayload {
+            crashing_agent_did: did.clone(),
+            log_ref: "test-crash.log".to_string(),
+            next_restart_at_unix: Some(1234),
+            failures: Some(1),
+        }
+    )).unwrap();
+    writer.commit_batch().unwrap();
+
+    // Secure authentic nancy executable mappings natively for tests running `DockerOrchestrator` organically 
+    unsafe { std::env::set_var("NANCY_E2E_EXECUTABLE", env!("CARGO_BIN_EXE_nancy")); }
+    let mut coord = nancy::commands::coordinator::Coordinator::new(tmp.path()).await.unwrap();
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    
+    tokio::spawn(async move {
+        let _ = coord.run_until(0, Some(tx), |_| false).await;
+    });
+    
+    let port = rx.await.expect("Coordinator boot dropped callback!");
+    let client = reqwest::Client::new();
+    
+    let mut found = false;
+    let mut attempts = 0;
+    while !found && attempts < 20 {
+        let url = format!("http://127.0.0.1:{}/api/incidents/test-crash.log", port);
+        if let Ok(res) = client.get(&url).send().await {
+            if res.status() == reqwest::StatusCode::OK {
+                let text = res.text().await.unwrap();
+                assert!(text.contains("explicit panic"), "Log text didn't match. Got: {}", text);
+                found = true;
+            } else {
+                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                attempts += 1;
+            }
+        } else {
+            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+            attempts += 1;
+        }
+    }
+    
+    assert!(found, "Failed to retrieve incident log via Web API");
+}

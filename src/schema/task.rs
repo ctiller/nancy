@@ -68,6 +68,16 @@ pub struct GhostVetoOverridePayload {
     pub override_reason: String,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct AgentCrashReportPayload {
+    pub crashing_agent_did: String,
+    pub log_ref: String,
+    #[serde(default)]
+    pub next_restart_at_unix: Option<u64>,
+    #[serde(default)]
+    pub failures: Option<u32>,
+}
+
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, JsonSchema)]
 #[serde(rename_all = "snake_case")]

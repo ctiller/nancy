@@ -13,6 +13,7 @@ pub struct AppView {
     pub completed_reports: HashMap<String, String>,
     pub assignments: HashMap<String, String>, // task_ref -> assignee_did
     pub assignment_targets: HashMap<String, String>, // assignment_ref -> task_ref
+    pub agent_crashes: HashMap<String, crate::schema::task::AgentCrashReportPayload>,
 }
 
 impl AppView {
@@ -26,6 +27,7 @@ impl AppView {
             completed_reports: HashMap::new(),
             assignments: HashMap::new(),
             assignment_targets: HashMap::new(),
+            agent_crashes: HashMap::new(),
         }
     }
 
@@ -99,6 +101,9 @@ impl AppView {
                     .insert(task_ref.clone(), assignee_did.clone());
                 self.assignment_targets
                     .insert(event_id.to_string(), task_ref.clone());
+            }
+            EventPayload::AgentCrashReport(p) => {
+                self.agent_crashes.insert(p.crashing_agent_did.clone(), p.clone());
             }
             _ => {}
         }

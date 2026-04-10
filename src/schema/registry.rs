@@ -38,4 +38,6 @@ pub enum EventPayload {
     LlmToolResponse(LlmToolResponsePayload),
     #[serde(rename = "llm_response")]
     LlmResponse(LlmResponsePayload),
+    #[serde(rename = "agent_crash_report")]
+    AgentCrashReport(crate::schema::task::AgentCrashReportPayload),
 }
