@@ -97,66 +97,88 @@ impl LlmClient {
     pub(crate) async fn handle_tool_calls(&self, chat: &Chat) -> Vec<(String, serde_json::Value)> {
         let mut responses = Vec::new();
         for fc in chat.get_function_calls() {
-            let tool_name = fc.name();
+            let tool_name = fc.name().to_string();
             let args = fc.args().clone().unwrap_or(serde_json::Value::Null);
 
-            let call_id = uuid::Uuid::new_v4().to_string();
-            let timestamp = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_secs();
+            crate::introspection::set_frame_status(&format!("Executing tool: {} ⚙️", tool_name));
 
-            if let Some(tx) = &self.trace_tx {
-                let _ = tx.send(crate::schema::registry::EventPayload::LlmToolCall(
-                    crate::schema::llm::LlmToolCallPayload {
-                        subagent: self.subagent.clone(),
-                        timestamp,
-                        call_id: call_id.clone(),
-                        function_name: tool_name.to_string(),
-                        args: args.clone(),
-                    },
-                ));
-            }
+            let response_payload = crate::introspection::frame(&format!("Tool: {}", tool_name), async {
+                let call_id = uuid::Uuid::new_v4().to_string();
+                let timestamp = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs();
 
-            let response_payload =
-                if let Some(tool) = self.tools.iter().find(|t| t.name() == tool_name) {
-                    tracing::info!("==== [LLM Client] Executing tool: {} ====", tool_name);
-                    crate::introspection::log(&format!("Executing tool: {}", tool_name));
-                    let result = tokio::time::timeout(std::time::Duration::from_secs(30), tool.call(args)).await;
-                    tracing::info!("==== [LLM Client] Finished executing tool: {} ====", tool_name);
-                    match result {
-                        Ok(Ok(res)) => res,
-                        Ok(Err(err)) => serde_json::json!({ "error": err.to_string() }),
-                        Err(_) => serde_json::json!({ "error": "Tool execution timed out securely bounded!" }),
-                    }
-                } else {
-                    let valid_names: Vec<&str> = self.tools.iter().map(|t| t.name()).collect();
-                    build_unknown_tool_error(tool_name, &valid_names)
-                };
+                if let Some(tx) = &self.trace_tx {
+                    let _ = tx.send(crate::schema::registry::EventPayload::LlmToolCall(
+                        crate::schema::llm::LlmToolCallPayload {
+                            subagent: self.subagent.clone(),
+                            timestamp,
+                            call_id: call_id.clone(),
+                            function_name: tool_name.clone(),
+                            args: args.clone(),
+                        },
+                    ));
+                }
 
-            let response_timestamp = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_secs();
-                
-            if let Some(tx) = &self.trace_tx {
-                let _ = tx.send(crate::schema::registry::EventPayload::LlmToolResponse(
-                    crate::schema::llm::LlmToolResponsePayload {
-                        subagent: self.subagent.clone(),
-                        timestamp: response_timestamp,
-                        call_id: call_id.clone(),
-                        response: serde_json::to_string(&response_payload)
-                            .unwrap_or_else(|_| "{}".to_string()),
-                    },
-                ));
-            }
+                crate::introspection::data_log("args", args.clone());
 
-            responses.push((tool_name.to_string(), response_payload));
+                let response_payload =
+                    if let Some(tool) = self.tools.iter().find(|t| t.name() == tool_name) {
+                        tracing::info!("==== [LLM Client] Executing tool: {} ====", tool_name);
+                        crate::introspection::log(&format!("Executing tool: {}", tool_name));
+                        let result = tokio::time::timeout(std::time::Duration::from_secs(30), tool.call(args)).await;
+                        tracing::info!("==== [LLM Client] Finished executing tool: {} ====", tool_name);
+                        match result {
+                            Ok(Ok(res)) => res,
+                            Ok(Err(err)) => serde_json::json!({ "error": err.to_string() }),
+                            Err(_) => serde_json::json!({ "error": "Tool execution timed out securely bounded!" }),
+                        }
+                    } else {
+                        let valid_names: Vec<&str> = self.tools.iter().map(|t| t.name()).collect();
+                        build_unknown_tool_error(&tool_name, &valid_names)
+                    };
+
+                let response_timestamp = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs();
+                    
+                if let Some(tx) = &self.trace_tx {
+                    let _ = tx.send(crate::schema::registry::EventPayload::LlmToolResponse(
+                        crate::schema::llm::LlmToolResponsePayload {
+                            subagent: self.subagent.clone(),
+                            timestamp: response_timestamp,
+                            call_id: call_id.clone(),
+                            response: serde_json::to_string(&response_payload)
+                                .unwrap_or_else(|_| "{}".to_string()),
+                        },
+                    ));
+                }
+
+                crate::introspection::data_log("output", response_payload.clone());
+                response_payload
+            }).await;
+
+            responses.push((tool_name, response_payload));
+            crate::introspection::set_frame_status("Thinking... 💭 ✨");
         }
         responses
     }
 
     pub async fn ask<T: DeserializeOwned + JsonSchema + 'static>(&mut self, question: &str) -> anyhow::Result<T> {
+        let frame_name = format!("LLM Agent: {}", self.subagent);
+        let sys_prompt: String = self.system_prompt.join("\n\n");
+        let question_clone = question.to_string();
+        crate::introspection::frame(&frame_name, async {
+            crate::introspection::data_log("system_prompt", serde_json::json!(sys_prompt));
+            crate::introspection::data_log("user_prompt", serde_json::json!(question_clone));
+            crate::introspection::set_frame_status("Thinking... 💭 ✨");
+            self.ask_internal::<T>(&question_clone).await
+        }).await
+    }
+
+    async fn ask_internal<T: DeserializeOwned + JsonSchema + 'static>(&mut self, question: &str) -> anyhow::Result<T> {
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
@@ -284,6 +306,7 @@ impl LlmClient {
                         },
                     ));
                 }
+                crate::introspection::set_frame_status("Done ✓");
                 return parse_response(&text);
             }
         }

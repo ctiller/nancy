@@ -13,6 +13,8 @@ pub enum SerializedElement {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SerializedFrame {
     pub name: String,
+    #[serde(default)]
+    pub status: Option<String>,
     pub elements: Vec<SerializedElement>,
 }
 
@@ -39,6 +41,7 @@ impl StateElement {
 #[derive(Clone)]
 pub struct FrameNode {
     pub name: String,
+    pub status: Arc<Mutex<Option<String>>>,
     pub elements: Arc<Mutex<Vec<StateElement>>>,
 }
 
@@ -46,14 +49,17 @@ impl FrameNode {
     pub fn new(name: &str) -> Self {
         Self {
             name: name.to_string(),
+            status: Arc::new(Mutex::new(None)),
             elements: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
     pub fn snapshot(&self) -> SerializedFrame {
         let elements = self.elements.lock().unwrap();
+        let status = self.status.lock().unwrap().clone();
         SerializedFrame {
             name: self.name.clone(),
+            status,
             elements: elements.iter().map(|e| e.snapshot()).collect(),
         }
     }
@@ -86,6 +92,13 @@ pub fn data_log(key: &str, value: serde_json::Value) {
             .lock()
             .unwrap()
             .push(StateElement::Data(key.to_string(), value));
+        let _ = ctx.updater.send_modify(|v| *v += 1);
+    });
+}
+
+pub fn set_frame_status(status: &str) {
+    let _ = INTROSPECTION_CTX.try_with(|ctx| {
+        *ctx.current_frame.status.lock().unwrap() = Some(status.to_string());
         let _ = ctx.updater.send_modify(|v| *v += 1);
     });
 }

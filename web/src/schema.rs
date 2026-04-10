@@ -11,6 +11,8 @@ pub enum SerializedElement {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SerializedFrame {
     pub name: String,
+    #[serde(default)]
+    pub status: Option<String>,
     pub elements: Vec<SerializedElement>,
 }
 

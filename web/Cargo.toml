@@ -30,6 +30,7 @@ serde_json = "1.0.149"
 gloo-timers = { version = "0.4.0", features = ["futures"] }
 tokio = { version = "1.51.1", features = ["fs", "process"], optional = true }
 js-sys = "0.3.95"
+pulldown-cmark = "0.13.3"
 [features]
 hydrate = ["leptos/hydrate", "dep:wasm-bindgen", "dep:gloo-net"]
 ssr = [

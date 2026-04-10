@@ -232,30 +232,124 @@ fn AgentCard(status: GrinderStatus, reload_trigger: Trigger) -> impl IntoView {
     }
 }
 
+fn render_markdown(text: &str) -> String {
+    use pulldown_cmark::{Parser, html};
+    let parser = Parser::new(text);
+    let mut html_output = String::new();
+    html::push_html(&mut html_output, parser);
+    html_output
+}
+
+fn highlight_json(value: &serde_json::Value) -> String {
+    let raw = serde_json::to_string_pretty(value).unwrap_or_default();
+    
+    let mut html = String::new();
+    let chars: Vec<char> = raw.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        let ch = chars[i];
+        if ch == '"' {
+             let mut start = i;
+             i += 1;
+             while i < chars.len() {
+                 if chars[i] == '"' && chars[i-1] != '\\' {
+                     i += 1;
+                     break;
+                 }
+                 i += 1;
+             }
+             let content = &raw[start..i];
+             
+             let mut is_key = false;
+             let mut j = i;
+             while j < chars.len() && chars[j].is_whitespace() { j += 1; }
+             if j < chars.len() && chars[j] == ':' {
+                 is_key = true;
+             }
+             
+             let escaped = content.replace("<", "&lt;").replace(">", "&gt;");
+             if is_key {
+                 html.push_str(&format!("<span class=\"ts-property\">{}</span>", escaped));
+             } else {
+                 html.push_str(&format!("<span class=\"ts-string\">{}</span>", escaped));
+             }
+        } else if ch.is_ascii_digit() || ch == '-' {
+             let start = i;
+             while i < chars.len() && (chars[i].is_ascii_digit() || chars[i] == '.' || chars[i] == 'e' || chars[i] == 'E' || chars[i] == '-' || chars[i] == '+') {
+                 i += 1;
+             }
+             html.push_str(&format!("<span class=\"ts-constant\">{}</span>", &raw[start..i]));
+        } else if raw[i..].starts_with("true") || raw[i..].starts_with("false") || raw[i..].starts_with("null") {
+             if raw[i..].starts_with("true") { html.push_str("<span class=\"ts-keyword\">true</span>"); i += 4; }
+             else if raw[i..].starts_with("false") { html.push_str("<span class=\"ts-keyword\">false</span>"); i += 5; }
+             else { html.push_str("<span class=\"ts-keyword\">null</span>"); i += 4; }
+        } else if ch == '{' || ch == '}' || ch == '[' || ch == ']' || ch == ',' || ch == ':' {
+             html.push_str(&format!("<span class=\"ts-punctuation\">{}</span>", ch));
+             i += 1;
+        } else {
+             if ch == '<' { html.push_str("&lt;"); }
+             else if ch == '>' { html.push_str("&gt;"); }
+             else { html.push_str(&ch.to_string()); }
+             i += 1;
+        }
+    }
+    
+    html
+}
+
 #[component]
 fn FrameView(frame: SerializedFrame) -> impl IntoView {
     view! {
-        <div class="agent-frame">
-            <div class="frame-name">
-                "[" {frame.name} "]"
-            </div>
+        <details class="agent-frame custom-details" open>
+            <summary class="frame-name" style="cursor: pointer; display: flex; justify-content: flex-start; align-items: center; gap: 8px;">
+                <span class="chevron"></span>
+                <div>
+                    "[" {frame.name} "]"
+                    {
+                        if let Some(st) = frame.status.clone() {
+                            view! { <span class="sparkle-cursor" style="margin-left: 8px;">{st}</span> }.into_any()
+                        } else {
+                            view! { <span style="display: none;"></span> }.into_any()
+                        }
+                    }
+                </div>
+            </summary>
             <div class="frame-body">
                 <For
                     each=move || frame.elements.clone().into_iter().enumerate()
                     key=|(i, _)| *i
                     children=move |(_i, el)| {
                         match el {
-                            SerializedElement::Log { message } => leptos::either::Either::Left(view! {
+                            SerializedElement::Log { message } => leptos::either::Either::Left(leptos::either::Either::Left(view! {
                                 <div class="agent-element log-element">
                                     <span class="log-arrow">">"</span> " " {message}
                                 </div>
-                            }),
-                            SerializedElement::Data { key, value } => leptos::either::Either::Right(leptos::either::Either::Left(view! {
-                                <div class="agent-element data-element">
-                                    <span class="data-key">{key}": "</span>
-                                    <pre class="data-val">{serde_json::to_string_pretty(&value).unwrap_or_default()}</pre>
-                                </div>
                             })),
+                            SerializedElement::Data { key, value } => {
+                                if key == "system_prompt" || key == "user_prompt" {
+                                    let md_html = render_markdown(value.as_str().unwrap_or(""));
+                                    leptos::either::Either::Left(leptos::either::Either::Right(view! {
+                                        <details class="agent-element data-element custom-details" style="margin-bottom: 12px; margin-top: 8px;">
+                                            <summary style="display: flex; justify-content: flex-start; align-items: center; gap: 8px; cursor: pointer; opacity: 0.8; margin-bottom: 4px; padding: 4px;">
+                                                <span class="chevron"></span>
+                                                <div class="data-key" style="margin-bottom: 0;">{key}":"</div>
+                                            </summary>
+                                            <div class="data-val" style="padding: 12px; background: rgba(0,0,0,0.3); border-radius: 6px; border-left: 2px solid var(--accent-purple);" prop:innerHTML={md_html}></div>
+                                        </details>
+                                    }))
+                                } else {
+                                    let json_html = highlight_json(&value);
+                                    leptos::either::Either::Right(leptos::either::Either::Left(view! {
+                                        <details class="agent-element data-element custom-details" style="margin-bottom: 8px; margin-top: 8px;">
+                                            <summary style="display: flex; justify-content: flex-start; align-items: center; gap: 8px; cursor: pointer; opacity: 0.8; margin-bottom: 4px; padding: 4px;">
+                                                <span class="chevron"></span>
+                                                <div class="data-key" style="margin-bottom: 0;">{key}": "</div>
+                                            </summary>
+                                            <pre class="data-val tree-sitter-wrapper" style="margin-top: 4px; padding: 12px; background: rgba(0,0,0,0.4); border-radius: 6px;" prop:innerHTML={json_html}></pre>
+                                        </details>
+                                    }))
+                                }
+                            },
                             SerializedElement::Frame(child_frame) => leptos::either::Either::Right(leptos::either::Either::Right(view! {
                                 <FrameView frame=child_frame />
                             }.into_any()))
@@ -263,7 +357,7 @@ fn FrameView(frame: SerializedFrame) -> impl IntoView {
                     }
                 />
             </div>
-        </div>
+        </details>
     }
 }
 

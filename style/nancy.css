@@ -234,8 +234,47 @@ a:hover, a.active {
 .pulsate-orange {
   animation: pulse-orange 2.5s infinite ease-in-out;
 }
+
 @keyframes pulse-orange {
   0% { filter: drop-shadow(0 0 4px rgba(249, 115, 22, 0)); }
   50% { filter: drop-shadow(0 0 12px rgba(249, 115, 22, 0.4)); }
   100% { filter: drop-shadow(0 0 4px rgba(249, 115, 22, 0)); }
+}
+
+details > summary::-webkit-details-marker {
+  display: none;
+}
+
+.sparkle-cursor {
+  display: inline-block;
+  color: var(--accent-purple);
+  animation: sparkle 1.5s infinite;
+  text-shadow: 0 0 8px var(--accent-glow);
+}
+
+@keyframes sparkle {
+  0% { opacity: 0.5; filter: drop-shadow(0 0 2px var(--accent-purple)); }
+  50% { opacity: 1; filter: drop-shadow(0 0 8px var(--accent-purple)); }
+  100% { opacity: 0.5; filter: drop-shadow(0 0 2px var(--accent-purple)); }
+}
+
+.custom-details > summary::-webkit-details-marker {
+  display: none !important;
+}
+.custom-details > summary::marker {
+  display: none !important;
+  content: "" !important;
+}
+.custom-details > summary {
+  list-style: none !important;
+  list-style-type: none !important;
+}
+.custom-details > summary .chevron::after {
+  content: "▶";
+  font-size: 0.8em;
+  opacity: 0.7;
+  transition: transform 0.2s ease;
+}
+.custom-details[open] > summary .chevron::after {
+  content: "▼";
 }
