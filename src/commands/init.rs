@@ -1,8 +1,8 @@
 use anyhow::{Context, Result, bail};
 use did_key::{Ed25519KeyPair, Fingerprint, KeyMaterial, generate};
 use git2::Repository;
-use std::fs::{self, OpenOptions};
-use std::io::Write;
+use tokio::fs::{self, OpenOptions};
+use tokio::io::AsyncWriteExt;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -25,7 +25,7 @@ pub async fn init<P: AsRef<Path>>(dir: P, grinders: usize) -> Result<()> {
 
     // Ensure `.nancy` is in `.gitignore`
     let gitignore_path = workdir.join(".gitignore");
-    let gitignore_contents = fs::read_to_string(&gitignore_path).unwrap_or_default();
+    let gitignore_contents = fs::read_to_string(&gitignore_path).await.unwrap_or_default();
     let mut has_nancy = false;
     for line in gitignore_contents.lines() {
         if line.trim() == ".nancy" || line.trim() == "/.nancy" || line.trim() == ".nancy/" {
@@ -39,15 +39,16 @@ pub async fn init<P: AsRef<Path>>(dir: P, grinders: usize) -> Result<()> {
             .create(true)
             .append(true)
             .open(&gitignore_path)
+            .await
             .expect("Failed to open .gitignore for appending");
         if !gitignore_contents.ends_with('\n') && !gitignore_contents.is_empty() {
-            writeln!(file).expect("Failed to write to .gitignore");
+            file.write_all(b"\n").await.expect("Failed to write to .gitignore");
         }
-        writeln!(file, ".nancy").expect("Failed to write to .gitignore");
+        file.write_all(b".nancy\n").await.expect("Failed to write to .gitignore");
         println!("Added .nancy to .gitignore");
     }
 
-    if let Err(e) = fs::create_dir_all(&nancy_dir) {
+    if let Err(e) = fs::create_dir_all(&nancy_dir).await {
         bail!("Failed to create .nancy directory: {}", e);
     }
 
@@ -97,7 +98,7 @@ pub async fn init<P: AsRef<Path>>(dir: P, grinders: usize) -> Result<()> {
     if let Err(e) = fs::write(
         &identity_file,
         serde_json::to_string_pretty(&id_obj).unwrap(),
-    ) {
+    ).await {
         bail!("Failed to write identity.json: {}", e);
     }
 
@@ -150,7 +151,7 @@ mod tests {
         assert!(identity_file.exists(), "identity.json should exist");
 
         // Extract the generated DID from identity.json
-        let identity_content = fs::read_to_string(&identity_file)?;
+        let identity_content = std::fs::read_to_string(&identity_file)?;
         let id_obj: crate::schema::identity_config::Identity =
             serde_json::from_str(&identity_content)?;
         let did = id_obj.get_did_owner().did.clone();
@@ -236,7 +237,7 @@ mod tests {
 
         // Also verify .gitignore was updated
         let gitignore_path = repo_path.join(".gitignore");
-        let gitignore_content = fs::read_to_string(&gitignore_path)?;
+        let gitignore_content = std::fs::read_to_string(&gitignore_path)?;
         assert!(gitignore_content.contains(".nancy"));
 
         Ok(())

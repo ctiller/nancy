@@ -107,7 +107,6 @@ pub struct EvalRunner {
     pub temp_dir: std::path::PathBuf,
     pub repo: git2::Repository,
     pub id_obj: crate::schema::identity_config::Identity,
-    grinder_handle: Option<std::thread::JoinHandle<()>>,
 }
 
 impl EvalRunner {
@@ -122,7 +121,7 @@ impl EvalRunner {
 
         crate::commands::init::init(&repo_path, 1).await?;
 
-        let identity_content = std::fs::read_to_string(repo_path.join(".nancy/identity.json"))?;
+        let identity_content = tokio::fs::read_to_string(repo_path.join(".nancy/identity.json")).await?;
         let id_obj: crate::schema::identity_config::Identity =
             serde_json::from_str(&identity_content)?;
         let coord = id_obj.get_did_owner().did.clone();
@@ -144,7 +143,6 @@ impl EvalRunner {
             temp_dir,
             repo,
             id_obj,
-            grinder_handle: None,
         })
     }
 
@@ -160,31 +158,8 @@ impl EvalRunner {
     where
         F: FnMut(&crate::coordinator::appview::AppView) -> bool,
     {
-        let mut coordinator = crate::commands::coordinator::Coordinator::new(self.temp_dir.as_path())?;
-
-        let bg_dir = self.temp_dir.clone();
-        let explicit_coord = self.id_obj.get_did_owner().did.clone();
-        let explicit_grinder = if let crate::schema::identity_config::Identity::Coordinator { workers, .. } = &self.id_obj {
-            workers.first().map(|w| crate::schema::identity_config::Identity::Grinder(w.clone()))
-        } else {
-            None
-        };
-
-        self.grinder_handle = Some(std::thread::spawn(move || {
-            let rt = tokio::runtime::Runtime::new().unwrap();
-            let res = rt.block_on(crate::commands::grind::grind(
-                bg_dir,
-                Some(explicit_coord),
-                explicit_grinder,
-            ));
-            if let Err(e) = res {
-                tracing::error!("Grinder node catastrophically failed and terminated: {:?}", e);
-                crate::commands::grind::SHUTDOWN.store(true, std::sync::atomic::Ordering::SeqCst);
-            }
-        }));
-
-        coordinator.run_until(0, condition).await?;
-        crate::commands::grind::SHUTDOWN.store(true, std::sync::atomic::Ordering::SeqCst);
+        let mut coordinator = crate::commands::coordinator::Coordinator::new(self.temp_dir.as_path()).await?;
+        coordinator.run_until(0, None, condition).await?;
         Ok(())
     }
 
@@ -211,9 +186,6 @@ impl EvalRunner {
 impl Drop for EvalRunner {
     fn drop(&mut self) {
         crate::commands::grind::SHUTDOWN.store(true, std::sync::atomic::Ordering::SeqCst);
-        if let Some(handle) = self.grinder_handle.take() {
-            let _ = handle.join();
-        }
     }
 }
 
@@ -331,7 +303,6 @@ mod tests {
             temp_dir: tempfile::tempdir()?.into_path(),
             repo: git2::Repository::open(target_repo.workdir().unwrap())?,
             id_obj: coord_identity,
-            grinder_handle: None,
         };
 
         let resolved_hash = runner.get_request_hash()?;

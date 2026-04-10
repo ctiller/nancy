@@ -308,11 +308,11 @@ mod tests {
         }))?;
         writer.commit_batch()?;
 
-        let mut coord = Coordinator::new(temp_dir.path())?;
         let mut condition_met = false;
         let rt = tokio::runtime::Runtime::new().unwrap();
         rt.block_on(async {
-            coord.run_until(0, |appview| {
+            let mut coord = Coordinator::new(temp_dir.path()).await.unwrap();
+            coord.run_until(0, None, |appview| {
                 if appview.tasks.values().any(|ev| {
                     if let EventPayload::Task(t) = ev { t.action == TaskAction::Plan } else { false }
                 }) { true } else { false }
@@ -371,8 +371,8 @@ mod tests {
         let rt = tokio::runtime::Runtime::new().unwrap();
         rt.block_on(async {
             let _ = tokio::time::timeout(std::time::Duration::from_secs(5), async {
-                let mut coord = Coordinator::new(temp_dir.path()).unwrap();
-                coord.run_until(0, |appview| {
+                let mut coord = Coordinator::new(temp_dir.path()).await.unwrap();
+                coord.run_until(0, None, |appview| {
                     appview.tasks.iter().any(|(id, payload)| {
                         if let EventPayload::Task(t) = payload {
                              t.action == TaskAction::Implement && id != &implement_id
@@ -442,8 +442,8 @@ mod tests {
         let rt = tokio::runtime::Runtime::new().unwrap();
         rt.block_on(async {
             let _ = tokio::time::timeout(std::time::Duration::from_secs(5), async {
-                let mut coord = Coordinator::new(temp_dir.path()).unwrap();
-                coord.run_until(0, |appview| {
+                let mut coord = Coordinator::new(temp_dir.path()).await.unwrap();
+                coord.run_until(0, None, |appview| {
                     appview.tasks.values().any(|payload| {
                         if let EventPayload::Task(t) = payload {
                             t.description.contains("Resolve merge conflict on")

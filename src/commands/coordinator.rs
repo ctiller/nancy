@@ -1,6 +1,6 @@
 use anyhow::{Context, Result, bail};
 use git2::Repository;
-use std::fs;
+use tokio::fs;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -14,6 +14,7 @@ use crate::coordinator::workflow::process_app_view_events;
 use crate::schema::identity_config::Identity;
 
 pub static SHUTDOWN: AtomicBool = AtomicBool::new(false);
+pub static SHUTDOWN_NOTIFY: tokio::sync::Notify = tokio::sync::Notify::const_new();
 
 
 pub struct Coordinator {
@@ -23,7 +24,7 @@ pub struct Coordinator {
 }
 
 impl Coordinator {
-    pub fn new<P: AsRef<Path>>(dir: P) -> Result<Self> {
+    pub async fn new<P: AsRef<Path>>(dir: P) -> Result<Self> {
         if std::env::args().any(|arg| arg == "coordinator") {
             crate::llm::ban_llm();
         }
@@ -36,22 +37,24 @@ impl Coordinator {
             bail!("nancy not initialized");
         }
 
-        let identity_content = fs::read_to_string(&identity_file)?;
+        let identity_content = fs::read_to_string(&identity_file).await?;
         let identity: Identity = serde_json::from_str(&identity_content)?;
 
         if !matches!(identity, Identity::Coordinator { .. }) {
             bail!("'nancy coordinator' must run within an Identity::Coordinator context.");
         }
 
-        let socket_path = workdir.join(".nancy").join("coordinator.sock");
-        let _ = std::fs::remove_file(&socket_path);
+        let socket_dir = workdir.join(".nancy").join("sockets").join("coordinator");
+        fs::create_dir_all(&socket_dir).await.unwrap_or_default();
+        let socket_path = socket_dir.join("coordinator.sock");
+        let _ = fs::remove_file(&socket_path).await;
         let listener = std::os::unix::net::UnixListener::bind(&socket_path)?;
         listener.set_nonblocking(true)?;
 
         Ok(Self { repo, identity, listener: Some(listener) })
     }
 
-    pub async fn run_until<F>(&mut self, port: u16, mut condition: F) -> Result<()>
+    pub async fn run_until<F>(&mut self, port: u16, bind_cb: Option<tokio::sync::oneshot::Sender<u16>>, mut condition: F) -> Result<()>
     where
         F: FnMut(&AppView) -> bool,
     {
@@ -82,7 +85,18 @@ impl Coordinator {
         let actual_port = tcp_listener.local_addr().unwrap().port();
         eprintln!("Web server started at http://127.0.0.1:{}", actual_port);
         let web_server_task = spawn_web_server(tcp_listener);
+        
+        if let Some(tx) = bind_cb {
+            let _ = tx.send(actual_port);
+        }
 
+        let mut docker_orch = match crate::coordinator::docker::DockerOrchestrator::new(self.repo.workdir().unwrap().to_path_buf()) {
+            Ok(orch) => Some(orch),
+            Err(e) => {
+                tracing::warn!("Docker daemon unavailable! Coordinator will register assignments but Grinders will NOT be provisioned: {}", e);
+                None
+            }
+        };
         let mut sync_engine = GrinderSyncEngine::new();
 
         while !condition(&AppView::new()) && !SHUTDOWN.load(Ordering::SeqCst) {
@@ -103,24 +117,20 @@ impl Coordinator {
                 &mut processed_request_ids
             )?;
 
-            let mut will_sleep = false;
+            if let Some(ref mut d) = docker_orch {
+                d.sync_deployments(&appview, &self.identity).await;
+            }
 
             if logged_any {
                 tracing::debug!("[Coordinator] Successfully processed and committed Grinder events. Broadcasting tx_ready to unblock...");
                 shared_tx_ready.send_modify(|val| *val += 1); // increment state boundary safely
             } else if sync_engine.force_sync_broadcast {
                 shared_tx_ready.send_modify(|val| *val += 1); // increment state boundary cleanly
-            }
-
-            if !logged_any && !sync_engine.force_sync_broadcast {
-                will_sleep = true;
+            } else {
+                sync_engine.wait_for_events(&mut rx_updates).await;
             }
             
             sync_engine.force_sync_broadcast = false;
-
-            if will_sleep {
-                sync_engine.wait_for_events_or_timeout(&mut rx_updates).await;
-            }
         }
 
         // Notify Axum listeners of shutdown securely
@@ -140,9 +150,10 @@ pub async fn run<P: AsRef<Path>>(dir: P, port: u16) -> Result<()> {
     ctrlc::set_handler(move || {
         tracing::info!("Received interrupt signal. Shutting down Coordinator...");
         SHUTDOWN.store(true, Ordering::SeqCst);
+        crate::commands::coordinator::SHUTDOWN_NOTIFY.notify_waiters();
     })
     .unwrap_or_else(|e| tracing::error!("Error setting Ctrl-C handler: {}", e));
 
-    let mut coord = Coordinator::new(dir)?;
-    coord.run_until(port, |_| false).await
+    let mut coord = Coordinator::new(dir).await?;
+    coord.run_until(port, None, |_| false).await
 }

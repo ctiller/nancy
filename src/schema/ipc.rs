@@ -15,3 +15,4 @@ pub struct ReadyForPollPayload {
 pub struct ReadyForPollResponse {
     pub new_state_id: u64,
 }
+

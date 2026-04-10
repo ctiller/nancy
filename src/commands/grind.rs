@@ -1,12 +1,21 @@
 use anyhow::{Context, Result, bail};
 use git2::Repository;
-use std::fs;
+use tokio::fs;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::schema::identity_config::Identity;
 
+fn get_coordinator_socket_path(workdir: &Path) -> std::path::PathBuf {
+    if let Ok(custom) = std::env::var("NANCY_COORDINATOR_SOCKET_PATH") {
+        std::path::PathBuf::from(custom)
+    } else {
+        workdir.join(".nancy").join("sockets").join("coordinator").join("coordinator.sock")
+    }
+}
+
 pub static SHUTDOWN: AtomicBool = AtomicBool::new(false);
+pub static SHUTDOWN_NOTIFY: tokio::sync::Notify = tokio::sync::Notify::const_new();
 
 pub async fn grind<P: AsRef<Path>>(
     dir: P,
@@ -24,7 +33,7 @@ pub async fn grind<P: AsRef<Path>>(
             if !identity_file.exists() {
                 bail!("nancy not initialized");
             }
-            let identity_content = fs::read_to_string(&identity_file)?;
+            let identity_content = fs::read_to_string(&identity_file).await?;
             serde_json::from_str(&identity_content)?
         }
     };
@@ -44,6 +53,7 @@ pub async fn grind<P: AsRef<Path>>(
     ctrlc::set_handler(move || {
         tracing::info!("Received interrupt signal. Shutting down grinder safely...");
         SHUTDOWN.store(true, Ordering::SeqCst);
+        crate::commands::grind::SHUTDOWN_NOTIFY.notify_waiters();
     })
     .unwrap_or_else(|e| tracing::error!("Error setting Ctrl-C handler: {}", e));
 
@@ -55,6 +65,63 @@ pub async fn grind<P: AsRef<Path>>(
     let global_writer = crate::events::writer::Writer::new(&repo, id_obj.clone())?;
     crate::events::logger::init_global_writer(global_writer.tracer());
 
+    use crate::introspection::{IntrospectionTreeRoot, IntrospectionContext, INTROSPECTION_CTX};
+
+    let tree_root = std::sync::Arc::new(IntrospectionTreeRoot::new());
+
+    let socket_path_self = if let Ok(custom) = std::env::var("NANCY_GRINDER_SOCKET_PATH") {
+        let p = std::path::PathBuf::from(custom);
+        if let Some(parent) = p.parent() {
+            fs::create_dir_all(parent).await.unwrap_or_default();
+        }
+        p
+    } else {
+        let socket_dir_self = workdir.join(".nancy").join("sockets").join(&worker_did);
+        fs::create_dir_all(&socket_dir_self).await.unwrap_or_default();
+        socket_dir_self.join("grinder.sock")
+    };
+    let _ = fs::remove_file(&socket_path_self).await;
+    let listener_self = std::os::unix::net::UnixListener::bind(&socket_path_self)?;
+    listener_self.set_nonblocking(true)?;
+    let stream_listener_self = tokio::net::UnixListener::from_std(listener_self)?;
+
+    let state_clone = tree_root.clone();
+    let app_self = axum::Router::new()
+        .route("/live-state", axum::routing::get(
+            move |axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>| {
+                let state = state_clone.clone();
+                async move {
+                    let requested_version = params.get("last_update").and_then(|v| v.parse::<u64>().ok());
+                    let mut rx = state.receiver.clone();
+                    let current_version = *rx.borrow();
+
+                    if let Some(req_ver) = requested_version {
+                        if current_version <= req_ver {
+                            let _ = rx.changed().await;
+                        }
+                    }
+
+                    let new_version = *rx.borrow();
+                    let snapshot = state.root_frame.snapshot();
+
+                    axum::Json(serde_json::json!({
+                        "update_number": new_version,
+                        "tree": snapshot
+                    }))
+                }
+            }
+        ))
+        .layer(tower_http::trace::TraceLayer::new_for_http());
+
+    let _server_task = tokio::spawn(async move {
+        let shutdown_signal = async {
+            if !SHUTDOWN.load(Ordering::SeqCst) {
+                crate::commands::grind::SHUTDOWN_NOTIFY.notified().await;
+            }
+        };
+        let _ = axum::serve(stream_listener_self, app_self).with_graceful_shutdown(shutdown_signal).await;
+    });
+
     let mut last_state_id: u64 = 0;
     while !SHUTDOWN.load(Ordering::SeqCst) {
         let assigned = identify_assigned_task(&repo, &worker_did, &coordinator_did);
@@ -62,14 +129,25 @@ pub async fn grind<P: AsRef<Path>>(
 
         let mut processed = false;
         if let Some((task_id, assignment, payload)) = assigned {
-            let execute_fut = crate::grind::execute_task::execute(
-                &repo,
-                &id_obj,
-                &task_id,
-                &assignment.task_ref,
-                &payload,
-                &global_writer,
-            );
+            *tree_root.root_frame.elements.lock().unwrap() = Vec::new();
+            let _ = tree_root.updater.send_modify(|v| *v += 1);
+
+            let ctx = IntrospectionContext {
+                current_frame: tree_root.root_frame.clone(),
+                updater: tree_root.updater.clone(),
+            };
+
+            let execute_fut = INTROSPECTION_CTX.scope(ctx, async {
+                crate::introspection::log(&format!("Starting assignment {}", assignment.task_ref));
+                crate::grind::execute_task::execute(
+                    &repo,
+                    &id_obj,
+                    &task_id,
+                    &assignment.task_ref,
+                    &payload,
+                    &global_writer,
+                ).await
+            });
             tokio::pin!(execute_fut);
 
             let mut interval = tokio::time::interval(tokio::time::Duration::from_millis(500));
@@ -92,34 +170,35 @@ pub async fn grind<P: AsRef<Path>>(
                 let _ = global_writer.commit_batch();
                 return Err(e);
             }
+            
             processed = true;
         }
 
         if !processed {
-            let socket_path = workdir.join(".nancy").join("coordinator.sock");
+            let socket_path = get_coordinator_socket_path(&workdir);
             if socket_path.exists() {
-                if let Ok(client) = reqwest::Client::builder()
-                    .unix_socket(socket_path.clone())
-                    .build() 
-                {
-                    let payload = crate::schema::ipc::ReadyForPollPayload { last_state_id };
-                    let res = client.post("http://localhost/ready-for-poll")
-                        .json(&payload)
-                        .send()
-                        .await;
-                    
-                    if let Ok(resp) = res {
-                        if let Ok(data) = resp.json::<crate::schema::ipc::ReadyForPollResponse>().await {
-                            last_state_id = data.new_state_id;
-                            tracing::debug!("[Grinder] /ready-for-poll updated bound state: {}", last_state_id);
+                match reqwest::Client::builder().unix_socket(socket_path.clone()).build() {
+                    Ok(client) => {
+                        let payload = crate::schema::ipc::ReadyForPollPayload { last_state_id };
+                        let res = client.post("http://localhost/ready-for-poll")
+                            .json(&payload)
+                            .send()
+                            .await;
+                        
+                        if let Ok(resp) = res {
+                            if let Ok(data) = resp.json::<crate::schema::ipc::ReadyForPollResponse>().await {
+                                last_state_id = data.new_state_id;
+                                tracing::debug!("[Grinder] /ready-for-poll updated bound state: {}", last_state_id);
+                            } else {
+                                tracing::error!("[Grinder] /ready-for-poll failed to decode response bounds.");
+                            }
                         } else {
-                            tracing::error!("[Grinder] /ready-for-poll failed to decode response bounds.");
+                            tracing::error!("[Grinder] /ready-for-poll HTTP error.");
                         }
-                    } else {
-                        tracing::error!("[Grinder] /ready-for-poll HTTP error.");
                     }
-                } else {
-                    panic!("Failed to build UDS client securely");
+                    Err(e) => {
+                        panic!("Failed to build UDS client securely: {:?}", e);
+                    }
                 }
             } else {
                 panic!("UDS socket does not exist");
@@ -136,7 +215,7 @@ pub async fn grind<P: AsRef<Path>>(
         // Push our completed update statuses to the Coordinator directly asynchronously!
         if logged_any {
             tracing::debug!("[Grinder] Commits made to local ledger! Dispatching to Coordinator via /updates-ready");
-            let socket_path = workdir.join(".nancy").join("coordinator.sock");
+            let socket_path = get_coordinator_socket_path(&workdir);
             if socket_path.exists() {
                 let payload = crate::schema::ipc::UpdateReadyPayload {
                     grinder_did: worker_did.clone(),
@@ -154,13 +233,14 @@ pub async fn grind<P: AsRef<Path>>(
         }
         
         // Optionally listen to immediate exit if requested locally!
-        let socket_path_local = workdir.join(".nancy").join("coordinator.sock");
+        let socket_path_local = get_coordinator_socket_path(&workdir);
         if socket_path_local.exists() {
             if let Ok(client) = reqwest::Client::builder().unix_socket(socket_path_local.clone()).build() {
                 tokio::spawn(async move {
                     if let Ok(resp) = client.get("http://localhost/shutdown-requested").send().await {
                         if resp.status().is_success() {
                             SHUTDOWN.store(true, Ordering::SeqCst);
+                            crate::commands::grind::SHUTDOWN_NOTIFY.notify_waiters();
                         }
                     }
                 });
@@ -169,6 +249,7 @@ pub async fn grind<P: AsRef<Path>>(
     }
 
     tracing::info!("Grinder {} gracefully shut down.", worker_did);
+                    let _ = tokio::fs::remove_file(&socket_path_self).await;
     Ok(())
 }
 
@@ -249,18 +330,19 @@ mod tests {
         let td = &_tr.td;
         let _repo = &_tr.repo;
         let nancy_dir = td.path().join(".nancy");
-        std::fs::create_dir_all(&nancy_dir)?;
+        fs::create_dir_all(&nancy_dir).await?;
         
         let identity = Identity::Coordinator {
             did: DidOwner { did: "mock1".into(), public_key_hex: "00".into(), private_key_hex: "00".into() },
             workers: vec![],
         };
-        std::fs::write(nancy_dir.join("identity.json"), serde_json::to_string(&identity)?)?;
+        fs::write(nancy_dir.join("identity.json"), serde_json::to_string(&identity)?).await?;
         
         SHUTDOWN.store(false, Ordering::SeqCst);
         tokio::spawn(async {
-            tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+            for _ in 0..10 { tokio::task::yield_now().await; }
             SHUTDOWN.store(true, Ordering::SeqCst);
+            crate::commands::grind::SHUTDOWN_NOTIFY.notify_waiters();
         });
         
         let _ = grind(td.path(), Some("mock_coord".into()), Some(identity)).await;
@@ -272,16 +354,18 @@ mod tests {
         let td = &_tr.td;
         let _repo = &_tr.repo;
         let nancy_dir = td.path().join(".nancy");
-        std::fs::create_dir_all(&nancy_dir)?;
+        fs::create_dir_all(&nancy_dir).await?;
         
         let identity = Identity::Coordinator {
             did: DidOwner { did: "mock1".into(), public_key_hex: "00".into(), private_key_hex: "00".into() },
             workers: vec![],
         };
-        std::fs::write(nancy_dir.join("identity.json"), serde_json::to_string(&identity)?)?;
+        fs::write(nancy_dir.join("identity.json"), serde_json::to_string(&identity)?).await?;
         
         // Mock Axum UDS listener for real HTTP POST processing
-        let socket_path = nancy_dir.join("coordinator.sock");
+        let socket_dir = nancy_dir.join("sockets").join("coordinator");
+        fs::create_dir_all(&socket_dir).await.unwrap();
+        let socket_path = socket_dir.join("coordinator.sock");
         let listener = tokio::net::UnixListener::bind(&socket_path)?;
         
         // Build a fake router that mocks Coordinator bounds synchronously
@@ -299,8 +383,9 @@ mod tests {
 
         SHUTDOWN.store(false, Ordering::SeqCst);
         tokio::spawn(async {
-            tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+            for _ in 0..10 { tokio::task::yield_now().await; }
             SHUTDOWN.store(true, Ordering::SeqCst);
+            crate::commands::grind::SHUTDOWN_NOTIFY.notify_waiters();
         });
         
         let _ = grind(td.path(), Some("mock_coord".into()), Some(identity)).await;

@@ -25,13 +25,9 @@ pub async fn ready_for_poll_handler(
         return axum::Json(crate::schema::ipc::ReadyForPollResponse { new_state_id: current_state });
     }
     
-    loop {
-        if crate::commands::coordinator::SHUTDOWN.load(Ordering::SeqCst) {
-            break;
-        }
-        if let Ok(_) = tokio::time::timeout(std::time::Duration::from_millis(100), rx.changed()).await {
-            break;
-        }
+    tokio::select! {
+        _ = rx.changed() => {}
+        _ = crate::commands::coordinator::SHUTDOWN_NOTIFY.notified() => {}
     }
 
     let new_state = *rx.borrow();
@@ -39,15 +35,9 @@ pub async fn ready_for_poll_handler(
     axum::Json(crate::schema::ipc::ReadyForPollResponse { new_state_id: new_state })
 }
 
-pub async fn shutdown_requested_handler(State(state): State<IpcState>) {
-    let mut rx = state.tx_ready.subscribe();
-    loop {
-        if crate::commands::coordinator::SHUTDOWN.load(Ordering::SeqCst) {
-            break;
-        }
-        if rx.changed().await.is_err() {
-            break;
-        }
+pub async fn shutdown_requested_handler(State(_state): State<IpcState>) {
+    if !crate::commands::coordinator::SHUTDOWN.load(Ordering::SeqCst) {
+        crate::commands::coordinator::SHUTDOWN_NOTIFY.notified().await;
     }
 }
 
@@ -65,15 +55,13 @@ pub fn spawn_ipc_server(listener: UnixListener, ipc_state: IpcState) -> tokio::t
         .route("/ready-for-poll", post(ready_for_poll_handler))
         .route("/shutdown-requested", get(shutdown_requested_handler))
         .route("/updates-ready", post(updates_ready_handler))
+        .layer(tower_http::trace::TraceLayer::new_for_http())
         .with_state(ipc_state);
 
     tokio::spawn(async move {
         let shutdown_signal = async {
-            loop {
-                if crate::commands::coordinator::SHUTDOWN.load(Ordering::SeqCst) {
-                    break;
-                }
-                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            if !crate::commands::coordinator::SHUTDOWN.load(Ordering::SeqCst) {
+                crate::commands::coordinator::SHUTDOWN_NOTIFY.notified().await;
             }
         };
         axum::serve(listener, ipc_app).with_graceful_shutdown(shutdown_signal).await.ok();
@@ -162,7 +150,7 @@ mod tests {
                 res2.json::<crate::schema::ipc::ReadyForPollResponse>().await.unwrap()
             });
 
-            tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+            for _ in 0..10 { tokio::task::yield_now().await; }
             // Broadcast new state boundary
             shared_tx_ready.send_modify(|val| *val += 1);
 
@@ -178,8 +166,9 @@ mod tests {
                     .send().await.unwrap()
             });
             
-            tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+            for _ in 0..10 { tokio::task::yield_now().await; }
             crate::commands::coordinator::SHUTDOWN.store(true, std::sync::atomic::Ordering::SeqCst);
+            crate::commands::coordinator::SHUTDOWN_NOTIFY.notify_waiters();
             shared_tx_ready.send_modify(|val| *val += 1); // trigger condition
             let _ = shutdown_req.await?;
 

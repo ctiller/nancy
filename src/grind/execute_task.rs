@@ -106,15 +106,18 @@ async fn handle_plan_task(
     task_payload: &TaskPayload,
     writer: &Writer<'_>,
 ) -> Result<String> {
-    let all_personas = crate::personas::get_all_personas();
-    let mod_prompt = crate::grind::prompts::ModeratorPromptTemplate { personas: &all_personas }.render()?;
+    crate::introspection::frame("handle_plan_task", async {
+        crate::introspection::log("Initializing planning phase...");
+        let all_personas = crate::personas::get_all_personas();
+        let mod_prompt = crate::grind::prompts::ModeratorPromptTemplate { personas: &all_personas }.render()?;
 
-    let mut coord_client = crate::llm::thinking_llm("planning_moderator")
-        .with_writer(writer)
-        .system_prompt(&mod_prompt)
-        .build()?;
+        let mut coord_client = crate::llm::thinking_llm("planning_moderator")
+            .with_writer(writer)
+            .system_prompt(&mod_prompt)
+            .build()?;
 
-    let team_selection = coord_client
+        crate::introspection::log("Asking moderator for team selection...");
+        let team_selection = coord_client
         .ask::<TeamSelectionPayload>(&format!("Task description: {}", task_payload.description))
         .await?;
         
@@ -123,18 +126,23 @@ async fn handle_plan_task(
     let mut compiled_ideations = String::new();
     let ideation_experts = session.enforce_role_bounds(&team_selection.experts, crate::personas::PersonaRole::PlanIdeation);
 
-    for expert in &ideation_experts {
-        if let Some(p) = all_personas.iter().find(|x| &x.name == expert) {
-            let prompt = crate::grind::prompts::IdeationPromptTemplate {
-                task_description: &task_payload.description,
-            }.render()?;
-            
-            let res = session.ask_reviewers::<String>(&[p.name.to_string()], &prompt).await?;
-            if let Some(Ok(ideation)) = res.into_iter().next() {
-                compiled_ideations.push_str(&format!("Expert {} ideation:\n{}\n\n", p.name, ideation));
+    crate::introspection::frame("ideation", async {
+        crate::introspection::log(&format!("Gathering ideation from {} experts", ideation_experts.len()));
+        for expert in &ideation_experts {
+            if let Some(p) = all_personas.iter().find(|x| &x.name == expert) {
+                let prompt = crate::grind::prompts::IdeationPromptTemplate {
+                    task_description: &task_payload.description,
+                }.render()?;
+                
+                let res = session.ask_reviewers::<String>(&[p.name.to_string()], &prompt).await?;
+                if let Some(Ok(ideation)) = res.into_iter().next() {
+                    crate::introspection::log(&format!("Received ideation from {}", p.name));
+                    compiled_ideations.push_str(&format!("Expert {} ideation:\n{}\n\n", p.name, ideation));
+                }
             }
         }
-    }
+        anyhow::Result::<()>::Ok(())
+    }).await?;
 
     let mut feedback_context = String::new();
     let mut iteration = 0;
@@ -144,11 +152,13 @@ async fn handle_plan_task(
         .system_prompt(&format!("You are the Nancy Moderator. Synthesize the final execution plan and its DAG task mapping purely into the requested strict JSON format.\n\n{}", crate::grind::prompts::TDD_GUIDELINES))
         .build()?;
 
-    loop {
-        iteration += 1;
-        if iteration > 15 {
-            anyhow::bail!("Exceeded max synthesis loops!");
-        }
+    crate::introspection::frame("synthesis_loops", async {
+        loop {
+            crate::introspection::log(&format!("Starting synthesis iteration {}", iteration + 1));
+            iteration += 1;
+            if iteration > 15 {
+                anyhow::bail!("Exceeded max synthesis loops!");
+            }
 
         let iter_ctx = if iteration == 1 { &compiled_ideations } else { &feedback_context };
         
@@ -214,12 +224,12 @@ async fn handle_plan_task(
         tracing::info!("Consensus Reached! Committing Tasks implicitly.");
         
         let agent_plans_dir = target_path.parent().unwrap().parent().unwrap().join(".nancy").join("agents").join("plans");
-        std::fs::create_dir_all(&agent_plans_dir)?;
+        tokio::fs::create_dir_all(&agent_plans_dir).await?;
         let request_id_basename = target_path.file_name().unwrap_or_default().to_str().unwrap_or("generic_plan").replace("refs_heads_nancy_plans_", "");
         let persistent_plan_path = agent_plans_dir.join(format!("{}.json", request_id_basename));
         
         let tdd_pretty = serde_json::to_string_pretty(&output.tdd)?;
-        std::fs::write(&persistent_plan_path, tdd_pretty)?;
+        tokio::fs::write(&persistent_plan_path, tdd_pretty).await?;
 
         let mut task_id_mappings = std::collections::HashMap::new();
         
@@ -248,10 +258,12 @@ async fn handle_plan_task(
             }
         }
         
+        crate::introspection::log("Plan successfully generated.");
         return Ok(format!("Plan successfully generated via Multi-Agent loops functionally."));
-    }
+        }
+    }).await
+    }).await
 }
-
 async fn handle_implement_task(
     target_path: &std::path::Path,
     task_payload: &TaskPayload,
@@ -377,14 +389,15 @@ pub async fn execute<'a>(
         safe_target_branch = default_fallback;
     }
 
-    let status = std::process::Command::new("git")
+    let status = tokio::process::Command::new("git")
         .arg("worktree")
         .arg("add")
         .arg("-f")
         .arg(&target_path)
         .arg(&safe_target_branch)
         .current_dir(workdir)
-        .status()?;
+        .status()
+        .await?;
 
     if !status.success() {
         bail!("Failed to spawn worktree for {}", task_ref);
@@ -393,7 +406,7 @@ pub async fn execute<'a>(
     if task_payload.action == TaskAction::Plan {
         tracing::info!("Provisioning localized dual-worktree for planning evaluation bounds...");
         let plan_exec_path = target_path.join("codebase_checkout");
-        std::process::Command::new("git")
+        tokio::process::Command::new("git")
             .arg("worktree")
             .arg("add")
             .arg("-d") // Detach securely to avoid branching conflicts
@@ -401,7 +414,8 @@ pub async fn execute<'a>(
             .arg(&plan_exec_path)
             .arg("HEAD")
             .current_dir(workdir)
-            .status()?;
+            .status()
+            .await?;
     }
 
     // The writer is provided organically by the orchestrator polling loop
@@ -426,22 +440,24 @@ pub async fn execute<'a>(
 
     if task_payload.action == TaskAction::Plan {
         let plan_exec_path = target_path.join("codebase_checkout");
-        std::process::Command::new("git")
+        tokio::process::Command::new("git")
             .arg("worktree")
             .arg("remove")
             .arg("-f")
             .arg(&plan_exec_path)
             .current_dir(workdir)
-            .status()?;
+            .status()
+            .await?;
     }
 
-    std::process::Command::new("git")
+    tokio::process::Command::new("git")
         .arg("worktree")
         .arg("remove")
         .arg("-f")
         .arg(&target_path)
         .current_dir(workdir)
-        .status()?;
+        .status()
+        .await?;
 
     tracing::info!("Completed Task: {}", task_ref);
     Ok(())
@@ -504,7 +520,7 @@ mod tests {
         repo.branch("working_branch", &commit, false)?;
 
         let nancy_dir = td.path().join(".nancy");
-        std::fs::create_dir_all(&nancy_dir)?;
+        tokio::fs::create_dir_all(&nancy_dir).await?;
 
         let identity = Identity::Grinder(DidOwner {
             did: "mock1".into(),
@@ -578,7 +594,7 @@ mod tests {
         let commit1 = repo.find_commit(commit_id1)?;
         
         let path = td.path().join("file.patch");
-        std::fs::write(&path, "1")?;
+        tokio::fs::write(&path, "1").await?;
         let mut index2 = repo.index()?;
         index2.add_path(std::path::Path::new("file.patch"))?;
         let tree_id2 = index2.write_tree()?;
@@ -589,7 +605,7 @@ mod tests {
         repo.branch("working_branch", &commit, false)?;
 
         let nancy_dir = td.path().join(".nancy");
-        std::fs::create_dir_all(&nancy_dir)?;
+        tokio::fs::create_dir_all(&nancy_dir).await?;
 
         crate::llm::mock::builder::MockChatBuilder::new()
             .respond(r#"{"experts": ["The Pedant"]}"#) // TeamSelection
@@ -652,7 +668,7 @@ mod tests {
         repo.branch("working_branch", &commit, false)?;
 
         let nancy_dir = td.path().join(".nancy");
-        std::fs::create_dir_all(&nancy_dir)?;
+        tokio::fs::create_dir_all(&nancy_dir).await?;
 
         crate::llm::mock::builder::MockChatBuilder::new()
             .respond("Implemented safely bounded!")
@@ -712,7 +728,7 @@ mod tests {
         repo.branch("working_branch", &commit, false)?;
 
         let nancy_dir = td.path().join(".nancy");
-        std::fs::create_dir_all(&nancy_dir)?;
+        tokio::fs::create_dir_all(&nancy_dir).await?;
 
         let mut builder = crate::llm::mock::builder::MockChatBuilder::new()
             .respond(r#"{"experts": ["The Pedant"]}"#);
@@ -795,7 +811,7 @@ mod tests {
         repo.branch("working_branch", &commit, false)?;
 
         let nancy_dir = td.path().join(".nancy");
-        std::fs::create_dir_all(&nancy_dir)?;
+        tokio::fs::create_dir_all(&nancy_dir).await?;
 
         let worktrees_dir = repo.workdir().unwrap().join("worktrees").join("task_ref_complex");
         let _plan_file = worktrees_dir.join("plan.md");

@@ -63,7 +63,7 @@ pub struct FileFilters {
     pub excludes: Option<Vec<String>>,
 }
 
-fn suggest_closest_path(target: &Path) -> Option<String> {
+async fn suggest_closest_path(target: &Path) -> Option<String> {
     let parent = target.parent().unwrap_or_else(|| Path::new("."));
     let parent = if parent.as_os_str().is_empty() {
         Path::new(".")
@@ -74,8 +74,8 @@ fn suggest_closest_path(target: &Path) -> Option<String> {
 
     let mut closest: Option<(String, usize)> = None;
 
-    if let Ok(entries) = std::fs::read_dir(parent) {
-        for entry in entries.filter_map(|e| e.ok()) {
+    if let Ok(mut entries) = tokio::fs::read_dir(parent).await {
+        while let Ok(Some(entry)) = entries.next_entry().await {
             let name = entry.file_name().to_string_lossy().to_lowercase();
             let distance = strsim::levenshtein(&target_name, &name);
 
@@ -129,7 +129,7 @@ pub async fn grep_search_impl(
                 continue;
             }
 
-            if let Ok(content) = std::fs::read_to_string(entry.path()) {
+            if let Ok(content) = tokio::fs::read_to_string(entry.path()).await {
                 let mut file_matches = Vec::new();
 
                 for (i, line) in content.lines().enumerate() {
@@ -177,7 +177,7 @@ pub async fn list_dir_impl(
     }
     
     if !path.exists() {
-        if let Some(suggestion) = suggest_closest_path(path) {
+        if let Some(suggestion) = suggest_closest_path(path).await {
             bail!(
                 "Error: Directory '{}' does not exist. Did you mean '{}'?",
                 target_directory,
@@ -237,7 +237,7 @@ pub async fn view_files_impl(
         }
         
         if !path.exists() {
-            if let Some(suggestion) = suggest_closest_path(path) {
+            if let Some(suggestion) = suggest_closest_path(path).await {
                 results.push(serde_json::json!({ "file": target, "error": format!("File does not exist. Did you mean '{}'?", suggestion) }));
             } else {
                 results.push(serde_json::json!({ "file": target, "error": "File does not exist" }));
@@ -313,7 +313,7 @@ pub async fn multi_replace_file_content_impl(
     }
     
     if !path.exists() {
-        if let Some(suggestion) = suggest_closest_path(path) {
+        if let Some(suggestion) = suggest_closest_path(path).await {
             bail!(
                 "Error: Target file '{}' does not exist. Cannot modify missing structures. Did you mean '{}'?",
                 target_file,
@@ -445,7 +445,7 @@ pub async fn manage_paths_impl(perms: Arc<Permissions>, operations: Vec<PathOper
         match op.action.as_str() {
             "delete" => {
                 if !target.exists() {
-                    if let Some(suggestion) = suggest_closest_path(target) {
+                    if let Some(suggestion) = suggest_closest_path(target).await {
                         bail!(
                             "Error resolving target '{:?}': Object conceptually absent explicitly. Did you mean '{}'?",
                             target,
@@ -477,7 +477,7 @@ pub async fn manage_paths_impl(perms: Arc<Permissions>, operations: Vec<PathOper
                 }
 
                 if !source.exists() {
-                    if let Some(suggestion) = suggest_closest_path(source) {
+                    if let Some(suggestion) = suggest_closest_path(source).await {
                         bail!(
                             "Source Object '{:?}' resolving to missing pointer conceptually. Did you mean '{}'?",
                             source,

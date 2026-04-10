@@ -63,3 +63,12 @@ lib-package = "web"
 lib-features = ["hydrate"]
 style-file = "style/nancy.css"
 assets-dir = "public"
+
+[profile.dev.package.web]
+opt-level = 3
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = 'z'
+panic = "abort"

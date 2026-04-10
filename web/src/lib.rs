@@ -1,5 +1,6 @@
 pub mod repo;
-
+pub mod agents;
+pub mod schema;
 use leptos::prelude::*;
 use leptos_meta::{provide_meta_context, Stylesheet, Title, MetaTags};
 use leptos_router::components::{Router, Route, Routes};
@@ -21,11 +22,11 @@ pub fn Shell() -> impl IntoView {
                     {
                         let options = leptos::prelude::use_context::<leptos::config::LeptosOptions>()
                             .expect("LeptosOptions missing in SSR context");
-                        view! { <HydrationScripts options=options/> }.into_any()
+                        view! { <HydrationScripts options=options/> }
                     }
                     #[cfg(not(feature = "ssr"))]
                     {
-                        view! { "" }.into_any()
+                        view! { "" }
                     }
                 }
                 <Stylesheet id="leptos" href="/pkg/nancy.css"/>
@@ -51,7 +52,7 @@ pub fn App() -> impl IntoView {
                     <Routes fallback=NotFound>
                         <Route path=path!("") view=CommandView/>
                         <Route path=path!("tasks") view=TasksView/>
-                        <Route path=path!("agents") view=AgentsView/>
+                        <Route path=path!("agents") view=agents::AgentsView/>
                         <Route path=path!("repo") view=RepoView/>
                         <Route path=path!("logs") view=SettingsLogsView/>
                     </Routes>
@@ -113,18 +114,7 @@ fn TasksView() -> impl IntoView {
     }
 }
 
-#[component]
-fn AgentsView() -> impl IntoView {
-    view! {
-        <div class="glass-panel" style="padding: 20px;">
-            <h2>"Active Grinders"</h2>
-            <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px;">
-                <div class="glass-panel" style="padding: 16px;">"Grinder: Alpha"</div>
-                <div class="glass-panel" style="padding: 16px;">"Grinder: Beta"</div>
-            </div>
-        </div>
-    }
-}
+
 
 #[component]
 fn RepoView() -> impl IntoView {
@@ -221,7 +211,7 @@ fn FileTree(
         <Suspense fallback=move || view! { <div>"Loading..."</div> }>
             <div class="file-tree" style="margin-left: 12px; font-family: monospace; font-size: 0.9rem;">
                 {move || match files.get() {
-                    Some(Ok(nodes)) => {
+                    Some(Ok(nodes)) => leptos::either::Either::Left({
                         let nodes_clone = nodes.clone();
                         let branch_for_for = branch_for_match.clone();
                         view! {
@@ -262,10 +252,10 @@ fn FileTree(
                                     }
                                 }
                             />
-                        }.into_any()
-                    },
-                    Some(Err(e)) => view! { <div style="color: red;">{format!("Error: {:?}", e)}</div> }.into_any(),
-                    None => view! { <div>"..."</div> }.into_any(),
+                        }
+                    }),
+                    Some(Err(e)) => leptos::either::Either::Right(leptos::either::Either::Left(view! { <div style="color: red;">{format!("Error: {:?}", e)}</div> })),
+                    None => leptos::either::Either::Right(leptos::either::Either::Right(view! { <div>"..."</div> })),
                 }}
             </div>
         </Suspense>
@@ -293,30 +283,32 @@ fn FileInspector(
             {move || {
                 let target = active_file.get();
                 if let Some(path) = target {
-                    let p_lower = path.to_lowercase();
-                    if p_lower.ends_with(".png") || p_lower.ends_with(".jpg") || p_lower.ends_with(".svg") {
-                        return view! {
-                            <div style="padding: 24px; display: flex; justify-content: center; align-items: center; min-height: 100%;">
-                                <img src=format!("/api/fs/{}", path) style="max-width: 100%; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.5);" />
-                            </div>
-                        }.into_any();
-                    }
-                    
-                    match file_content.get() {
-                        Some(Ok(html)) => view! {
-                            <div style="padding: 16px; font-family: monospace; font-size: 0.9rem;" inner_html=html></div>
-                        }.into_any(),
-                        Some(Err(e)) => view! {
-                            <div style="padding: 20px; color: #f43f5e;">"Fail: " {format!("{:?}", e)}</div>
-                        }.into_any(),
-                        None => view! { <div></div> }.into_any()
-                    }
+                    leptos::either::Either::Left({
+                        let p_lower = path.to_lowercase();
+                        if p_lower.ends_with(".png") || p_lower.ends_with(".jpg") || p_lower.ends_with(".svg") {
+                            leptos::either::Either::Left(view! {
+                                <div style="padding: 24px; display: flex; justify-content: center; align-items: center; min-height: 100%;">
+                                    <img src=format!("/api/fs/{}", path) style="max-width: 100%; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.5);" />
+                                </div>
+                            })
+                        } else {
+                            leptos::either::Either::Right(match file_content.get() {
+                                Some(Ok(html)) => leptos::either::Either::Left(view! {
+                                    <div style="padding: 16px; font-family: monospace; font-size: 0.9rem;" inner_html=html></div>
+                                }),
+                                Some(Err(e)) => leptos::either::Either::Right(leptos::either::Either::Left(view! {
+                                    <div style="padding: 20px; color: #f43f5e;">"Fail: " {format!("{:?}", e)}</div>
+                                })),
+                                None => leptos::either::Either::Right(leptos::either::Either::Right(view! { <div></div> }))
+                            })
+                        }
+                    })
                 } else {
-                    view! {
+                    leptos::either::Either::Right(view! {
                         <div style="padding: 20px; color: var(--text-muted); display:flex; align-items:center; justify-content:center; height:100%;">
                             "Select a file to inspect."
                         </div>
-                    }.into_any()
+                    })
                 }
             }}
         </Suspense>

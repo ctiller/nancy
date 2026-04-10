@@ -1,6 +1,6 @@
 use anyhow::{Context, Result, bail};
 use git2::Repository;
-use std::fs;
+use tokio::fs;
 use std::path::{Path, PathBuf};
 
 use crate::events::writer::Writer;
@@ -28,14 +28,14 @@ pub async fn add_task<P: AsRef<Path>>(
     }
 
     let identity_content =
-        fs::read_to_string(&identity_file).context("Failed to read identity.json")?;
+        fs::read_to_string(&identity_file).await.context("Failed to read identity.json")?;
     let id_obj: Identity =
         serde_json::from_str(&identity_content).context("Failed to parse identity.json")?;
 
     // Determine the description based on the provided inputs
     let description = match (task, file) {
         (Some(t), _) => t,
-        (None, Some(f)) => fs::read_to_string(&f)
+        (None, Some(f)) => fs::read_to_string(&f).await
             .with_context(|| format!("Failed to read task file at {}", f.display()))?,
         _ => bail!("Either --task or --file must be provided."),
     };
@@ -69,7 +69,7 @@ mod tests {
         add_task(repo_path, Some("Test task 1".to_string()), None).await?;
 
         let nancy_dir = repo_path.join(".nancy");
-        let identity_content = fs::read_to_string(nancy_dir.join("identity.json"))?;
+        let identity_content = fs::read_to_string(nancy_dir.join("identity.json")).await?;
         let id_obj: Identity = serde_json::from_str(&identity_content)?;
 
         let repo = Repository::open(repo_path)?;
@@ -115,12 +115,12 @@ mod tests {
         init(repo_path, 2).await?;
 
         let task_file = repo_path.join("task.txt");
-        fs::write(&task_file, "File task desc")?;
+        fs::write(&task_file, "File task desc").await?;
 
         add_task(repo_path, None, Some(task_file)).await?;
 
         let nancy_dir = repo_path.join(".nancy");
-        let identity_content = fs::read_to_string(nancy_dir.join("identity.json"))?;
+        let identity_content = fs::read_to_string(nancy_dir.join("identity.json")).await?;
         let id_obj: Identity = serde_json::from_str(&identity_content)?;
 
         let repo = Repository::open(repo_path)?;

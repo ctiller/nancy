@@ -167,3 +167,57 @@ a:hover, a.active {
 .ts-variable { color: #f8f8f2; }
 .ts-variable-builtin { color: #bd93f9; font-style: italic; }
 .ts-variable-parameter { color: #ffb86c; font-style: italic; }
+
+/* Agent Introspection Elements */
+.agent-card {
+  transition: all 0.2s ease-in-out;
+}
+.agent-card:hover {
+  border-left-color: var(--accent-purple) !important;
+  background: rgba(0,0,0,0.3) !important;
+}
+
+.agent-frame {
+  margin-bottom: 4px;
+  padding-left: 12px;
+  border-left: 1px solid var(--panel-border);
+  transition: border-color 0.2s ease;
+}
+
+.agent-frame:hover {
+  border-left-color: rgba(255, 255, 255, 0.3);
+}
+
+.frame-name {
+  color: var(--accent-cyan);
+  margin-bottom: 2px;
+  font-weight: bold;
+}
+
+.agent-element {
+  margin-left: 8px;
+  line-height: 1.4;
+}
+
+.log-element {
+  color: #d1d5db;
+}
+
+.log-arrow {
+  color: #6b7280;
+}
+
+.data-element {
+  display: flex;
+  flex-direction: column;
+}
+
+.data-key {
+  color: #eab308;
+}
+
+.data-val {
+  margin: 0;
+  color: #a3e635;
+  white-space: pre-wrap;
+}

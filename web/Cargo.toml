@@ -25,9 +25,13 @@ ignore = { version = "0.4.25", optional = true }
 serde = { version = "1.0.228", features = ["derive"] }
 wasm-bindgen = { version = "0.2.117", optional = true }
 git2 = { version = "0.20.4", optional = true }
+gloo-net = { version = "0.3.1", optional = true }
+serde_json = "1.0.149"
+gloo-timers = { version = "0.4.0", features = ["futures"] }
+tokio = { version = "1.51.1", features = ["fs", "process"], optional = true }
 
 [features]
-hydrate = ["leptos/hydrate", "dep:wasm-bindgen"]
+hydrate = ["leptos/hydrate", "dep:wasm-bindgen", "dep:gloo-net"]
 ssr = [
     "leptos/ssr", 
     "leptos_meta/ssr", 
@@ -41,7 +45,8 @@ ssr = [
     "dep:tree-sitter-javascript",
     "dep:syntect",
     "dep:ignore",
-    "dep:git2"
+    "dep:git2",
+    "dep:tokio"
 ]
 tree-sitter-highlight = ["dep:tree-sitter-highlight"]
 tree-sitter-rust = ["dep:tree-sitter-rust"]
@@ -51,6 +56,7 @@ tree-sitter-javascript = ["dep:tree-sitter-javascript"]
 syntect = ["dep:syntect"]
 ignore = ["dep:ignore"]
 wasm-bindgen = ["dep:wasm-bindgen"]
+tokio = ["dep:tokio"]
 
 [dev-dependencies]
 sealed_test = "1.1.0"

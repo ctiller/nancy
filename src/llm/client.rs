@@ -121,6 +121,7 @@ impl LlmClient {
             let response_payload =
                 if let Some(tool) = self.tools.iter().find(|t| t.name() == tool_name) {
                     tracing::info!("==== [LLM Client] Executing tool: {} ====", tool_name);
+                    crate::introspection::log(&format!("Executing tool: {}", tool_name));
                     let result = tokio::time::timeout(std::time::Duration::from_secs(30), tool.call(args)).await;
                     tracing::info!("==== [LLM Client] Finished executing tool: {} ====", tool_name);
                     match result {
@@ -160,6 +161,9 @@ impl LlmClient {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs();
+        
+        let peek = if question.len() > 100 { format!("{}...", &question[..100]) } else { question.to_string() };
+        crate::introspection::log(&format!("LLM Ask ({}): {}", self.subagent, peek.replace("\n", " ")));
             
         if let Some(tx) = &self.trace_tx {
             let _ = tx.send(crate::schema::registry::EventPayload::LlmPrompt(

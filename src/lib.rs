@@ -3,6 +3,7 @@ pub mod coordinator;
 pub mod eval;
 pub mod events;
 pub mod grind;
+pub mod introspection;
 pub mod llm;
 pub mod personas;
 pub mod pre_review;

@@ -4,3 +4,4 @@ pub mod ipc;
 pub mod web;
 pub mod workflow;
 pub mod git;
+pub mod docker;

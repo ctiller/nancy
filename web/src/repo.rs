@@ -16,23 +16,23 @@ pub async fn get_repo_tree_ssr(branch: String, dir: Option<String>) -> Result<Ve
     let root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let repo = match Repository::discover(&root) {
         Ok(r) => r,
-        Err(e) => return Err(ServerFnError::ServerError(format!("Git discovery failed: {}", e))),
+        Err(e) => { leptos::logging::log!("Git discovery failed: {}", e); return Err(ServerFnError::ServerError(format!("Git discovery failed: {}", e))); },
     };
 
     // Fallback to active commit if branch is empty or strictly working directory
     let obj = match repo.revparse_single(&branch).or_else(|_| repo.revparse_single("HEAD")) {
         Ok(o) => o,
-        Err(e) => return Err(ServerFnError::ServerError(format!("Revision not found: {}", e))),
+        Err(e) => { leptos::logging::log!("Revision not found: {}", e); return Err(ServerFnError::ServerError(format!("Revision not found: {}", e))); },
     };
         
     let commit = match obj.peel_to_commit() {
         Ok(c) => c,
-        Err(e) => return Err(ServerFnError::ServerError(format!("Not a commit: {}", e))),
+        Err(e) => { leptos::logging::log!("Not a commit: {}", e); return Err(ServerFnError::ServerError(format!("Not a commit: {}", e))); },
     };
         
     let head_tree = match commit.tree() {
         Ok(t) => t,
-        Err(e) => return Err(ServerFnError::ServerError(format!("Failed to get tree: {}", e))),
+        Err(e) => { leptos::logging::log!("Failed to get tree: {}", e); return Err(ServerFnError::ServerError(format!("Failed to get tree: {}", e))); },
     };
 
     let mut nodes = Vec::new();
@@ -42,7 +42,7 @@ pub async fn get_repo_tree_ssr(branch: String, dir: Option<String>) -> Result<Ve
         Some(d) if !d.is_empty() => {
             let entry = match head_tree.get_path(std::path::Path::new(d)) {
                 Ok(e) => e,
-                Err(e) => return Err(ServerFnError::ServerError(format!("Path not found in tree: {}", e))),
+                Err(e) => { leptos::logging::log!("Path not found in tree: {}", e); return Err(ServerFnError::ServerError(format!("Path not found in tree: {}", e))); },
             };
             let obj = match entry.to_object(&repo) {
                 Ok(o) => o,
@@ -159,22 +159,22 @@ pub async fn read_file_text_ssr(branch: String, path: String) -> Result<String, 
     let root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let repo = match Repository::discover(&root) {
         Ok(r) => r,
-        Err(e) => return Err(ServerFnError::ServerError(format!("Git discovery failed: {}", e))),
+        Err(e) => { leptos::logging::log!("Git discovery failed: {}", e); return Err(ServerFnError::ServerError(format!("Git discovery failed: {}", e))); },
     };
 
     let obj = match repo.revparse_single(&branch).or_else(|_| repo.revparse_single("HEAD")) {
         Ok(o) => o,
-        Err(e) => return Err(ServerFnError::ServerError(format!("Revision not found: {}", e))),
+        Err(e) => { leptos::logging::log!("Revision not found: {}", e); return Err(ServerFnError::ServerError(format!("Revision not found: {}", e))); },
     };
         
     let commit = match obj.peel_to_commit() {
         Ok(c) => c,
-        Err(e) => return Err(ServerFnError::ServerError(format!("Not a commit: {}", e))),
+        Err(e) => { leptos::logging::log!("Not a commit: {}", e); return Err(ServerFnError::ServerError(format!("Not a commit: {}", e))); },
     };
         
     let head_tree = match commit.tree() {
         Ok(t) => t,
-        Err(e) => return Err(ServerFnError::ServerError(format!("Failed to get tree: {}", e))),
+        Err(e) => { leptos::logging::log!("Failed to get tree: {}", e); return Err(ServerFnError::ServerError(format!("Failed to get tree: {}", e))); },
     };
         
     let entry = match head_tree.get_path(Path::new(&path)) {

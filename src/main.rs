@@ -19,8 +19,6 @@ enum Commands {
     Grind,
     /// Run the coordinator dispatch queue loop
     Coordinator(CoordinatorArgs),
-    /// Provision orchestration environments locally
-    Run,
     /// Evaluate a task request tailored to a yaml definition
     Eval {
         #[arg(index = 1)]
@@ -70,9 +68,6 @@ pub(crate) async fn execute_command(args: &Args, cwd: PathBuf) -> Result<()> {
         }
         Commands::Coordinator(coord_args) => {
             nancy::commands::coordinator::run(cwd, coord_args.port).await?;
-        }
-        Commands::Run => {
-            nancy::commands::run::run(cwd).await?;
         }
         Commands::Eval { action, file } => {
             nancy::commands::eval::run(action.clone(), file.clone()).await?;
@@ -131,7 +126,6 @@ mod tests {
         } else {
             panic!("Expected Coordinator command");
         }
-        assert!(Args::try_parse_from(["nancy", "run"]).is_ok());
         assert!(Args::try_parse_from(["nancy", "add-task", "--task", "test"]).is_ok());
         assert!(Args::try_parse_from(["nancy", "add-task", "--file", "test.txt"]).is_ok());
     }
@@ -179,15 +173,6 @@ mod tests {
             }
         }
 
-        // Test Run explicitly triggering loop correctly cleanly
-        let args_run = Args::try_parse_from(["nancy", "run"]).unwrap();
-        let run_dir = grind_dir.clone();
-        tokio::select! {
-            _ = tokio::time::sleep(tokio::time::Duration::from_secs(2)) => {}
-            res = execute_command(&args_run, run_dir) => {
-                let _ = res;
-            }
-        }
         
         Ok(())
     }

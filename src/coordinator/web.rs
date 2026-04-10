@@ -32,12 +32,12 @@ async fn fs_asset_handler(axum::extract::Path(path): axum::extract::Path<String>
     if path.contains(".git/") || path.starts_with(".git") {
         return (StatusCode::FORBIDDEN, "Forbidden").into_response();
     }
-    let target = match std::fs::canonicalize(root.join(&path)) {
+    let target = match tokio::fs::canonicalize(root.join(&path)).await {
         Ok(t) => t,
         Err(_) => return (StatusCode::NOT_FOUND, "Not Found").into_response(),
     };
     
-    let root_canon = std::fs::canonicalize(&root).unwrap_or(root);
+    let root_canon = tokio::fs::canonicalize(&root).await.unwrap_or(root);
 
     if !target.starts_with(&root_canon) {
         return (StatusCode::FORBIDDEN, "Forbidden").into_response();
@@ -65,6 +65,49 @@ async fn fs_asset_handler(axum::extract::Path(path): axum::extract::Path<String>
     }
 }
 
+async fn proxy_grinder_state(
+    axum::extract::Path(did): axum::extract::Path<String>,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> impl IntoResponse {
+    let root = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let socket_path = root.join(".nancy").join("sockets").join(&did).join("grinder.sock");
+
+    if !socket_path.exists() {
+        tracing::debug!("Proxy error: UDS socket not found at {:?}", socket_path);
+        return (StatusCode::NO_CONTENT, "Grinder socket not found").into_response();
+    }
+
+    if let Ok(client) = reqwest::Client::builder().unix_socket(socket_path).build() {
+        let url = if let Some(last_update) = params.get("last_update") {
+            format!("http://localhost/live-state?last_update={}", last_update)
+        } else {
+            "http://localhost/live-state".to_string()
+        };
+        
+        match client.get(&url).send().await {
+            Ok(resp) => {
+                let status = resp.status();
+                if let Ok(data) = resp.bytes().await {
+                    if status != 200 {
+                        tracing::error!("Proxy error: grinder backend returned {} with body {:?}", status, data);
+                        return (status, data).into_response();
+                    }
+                    return ([(CONTENT_TYPE, "application/json")], data).into_response();
+                } else {
+                    tracing::error!("Proxy error: failed to read bytes from grinder backend");
+                }
+            }
+            Err(e) => {
+                tracing::error!("Proxy error: client.get failed: {}", e);
+            }
+        }
+    } else {
+        tracing::error!("Proxy error: failed to build reqwest client with unix socket");
+    }
+
+    (StatusCode::INTERNAL_SERVER_ERROR, "Failed to pull from grinder").into_response()
+}
+
 pub fn spawn_web_server(tcp_listener: tokio::net::TcpListener) -> tokio::task::JoinHandle<()> {
     let conf = leptos::prelude::get_configuration(None).unwrap();
     let leptos_options = conf.leptos_options;
@@ -76,8 +119,13 @@ pub fn spawn_web_server(tcp_listener: tokio::net::TcpListener) -> tokio::task::J
 
     let options_clone = leptos_options.clone();
     let web_app = Router::new()
+        .route("/api/grinders", get(|| async {
+            let res = web::agents::get_active_grinders().await.unwrap_or_default();
+            axum::Json(res)
+        }))
         .route("/api/{*fn_name}", axum::routing::post(leptos_axum::handle_server_fns))
         .route("/api/fs/{*path}", get(fs_asset_handler))
+        .route("/api/grinders/{did}/state", get(proxy_grinder_state))
         .leptos_routes_with_context(&leptos_options, routes, move || {
             leptos::prelude::provide_context(options_clone.clone());
         }, web::Shell)
@@ -87,11 +135,8 @@ pub fn spawn_web_server(tcp_listener: tokio::net::TcpListener) -> tokio::task::J
 
     tokio::spawn(async move {
         let shutdown_signal = async {
-            loop {
-                if crate::commands::coordinator::SHUTDOWN.load(Ordering::SeqCst) {
-                    break;
-                }
-                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            if !crate::commands::coordinator::SHUTDOWN.load(Ordering::SeqCst) {
+                crate::commands::coordinator::SHUTDOWN_NOTIFY.notified().await;
             }
         };
         axum::serve(tcp_listener, web_app).with_graceful_shutdown(shutdown_signal).await.ok();

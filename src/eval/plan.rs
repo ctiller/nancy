@@ -1,10 +1,10 @@
 use crate::eval::EvalDefinition;
 use anyhow::{Context, Result, bail};
-use std::fs;
+use tokio::fs;
 
-pub fn parse_eval_definition(path: &std::path::Path) -> Result<EvalDefinition> {
+pub async fn parse_eval_definition(path: &std::path::Path) -> Result<EvalDefinition> {
     let def: EvalDefinition =
-        serde_yaml::from_slice(&fs::read(path).context("Failed to read eval yaml mapping")?)?;
+        serde_yaml::from_slice(&fs::read(path).await.context("Failed to read eval yaml mapping")?)?;
     if def.action != "plan" {
         bail!("Only 'plan' supported");
     }
@@ -12,7 +12,7 @@ pub fn parse_eval_definition(path: &std::path::Path) -> Result<EvalDefinition> {
 }
 
 pub async fn eval_plan(path: &str, output_path: &std::path::Path) -> Result<()> {
-    let def = parse_eval_definition(std::path::Path::new(path))?;
+    let def = parse_eval_definition(std::path::Path::new(path)).await?;
 
     let mut runner = crate::eval::EvalRunner::setup(&def).await?;
     runner.push_task(def.task_description.clone()).await?;
@@ -33,7 +33,7 @@ pub async fn eval_plan(path: &str, output_path: &std::path::Path) -> Result<()> 
             }
             if final_plan_doc.is_none() {
                 if let Some(plan_path_str) = &payload.plan {
-                    if let Ok(content) = std::fs::read_to_string(plan_path_str) {
+                    if let Ok(content) = tokio::fs::read_to_string(plan_path_str).await {
                         if let Ok(doc) = serde_json::from_str::<crate::schema::task::TddDocument>(&content) {
                             final_plan_doc = Some(doc);
                         }
@@ -49,7 +49,7 @@ pub async fn eval_plan(path: &str, output_path: &std::path::Path) -> Result<()> 
     let result = crate::eval::EvalResult { final_plan, recommended_tasks, traces: runner.extract_traces() };
 
     let result_yaml = serde_yaml::to_string(&result)?;
-    fs::write(output_path, result_yaml)?;
+    tokio::fs::write(output_path, result_yaml).await?;
     println!(
         "Eval finalized and mapped into eval_out.yaml at: {}",
         output_path.display()

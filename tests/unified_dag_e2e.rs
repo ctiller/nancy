@@ -68,11 +68,11 @@ async fn test_coordinator_generates_plan_from_task_request() -> Result<()> {
     }))?;
     writer.commit_batch()?;
 
-    let mut coord = Coordinator::new(temp_dir.path())?;
+    let mut coord = Coordinator::new(temp_dir.path()).await?;
 
     let mut req_plan_task_id = String::new();
     coord
-        .run_until(0, |appview| {
+        .run_until(0, None, |appview| {
             for (id, payload) in &appview.tasks {
                 if let EventPayload::Task(t) = payload {
                     if t.action == TaskAction::Plan {
@@ -157,9 +157,9 @@ async fn test_coordinator_generates_review_plan_task_upon_plan_completion() -> R
     ))?;
     writer.commit_batch()?;
 
-    let mut coord = Coordinator::new(temp_dir.path())?;
+    let mut coord = Coordinator::new(temp_dir.path()).await?;
     coord
-        .run_until(0, |appview| {
+        .run_until(0, None, |appview| {
             appview.tasks.values().any(|p| {
                 if let EventPayload::Task(t) = p {
                     t.action == TaskAction::Plan
@@ -264,9 +264,9 @@ async fn test_coordinator_inherits_task_parent_from_feature_branch() -> Result<(
     
     writer.commit_batch()?;
 
-    let mut coord = Coordinator::new(temp_dir.path())?;
+    let mut coord = Coordinator::new(temp_dir.path()).await?;
     coord
-        .run_until(0, |appview| appview.assignments.contains_key("work_088"))
+        .run_until(0, None, |appview| appview.assignments.contains_key("work_088"))
         .await?;
 
     // Ensure Task execution naturally spans dynamically bounds
@@ -411,12 +411,12 @@ async fn test_coordinator_generates_rework_implementation_upon_dissent() -> Resu
     ))?;
     writer.commit_batch()?;
 
-    let mut coord = Coordinator::new(temp_dir.path())?;
+    let mut coord = Coordinator::new(temp_dir.path()).await?;
 
     // Evaluating conflict generative fallback bounding
     let mut generated_implement_rework = false;
     tokio::time::timeout(std::time::Duration::from_secs(20), coord
-        .run_until(0, |appview| {
+        .run_until(0, None, |appview| {
             for (_id, payload) in &appview.tasks {
                 if let EventPayload::Task(t) = payload {
                     if t.action == TaskAction::Implement
@@ -546,9 +546,9 @@ async fn test_coordinator_applies_fast_forward_merge_to_feature_branch() -> Resu
     ))?;
     writer.commit_batch()?;
 
-    let mut coord = Coordinator::new(temp_dir.path())?;
+    let mut coord = Coordinator::new(temp_dir.path()).await?;
     tokio::time::timeout(std::time::Duration::from_secs(20), coord
-        .run_until(0, |_appview| {
+        .run_until(0, None, |_appview| {
             if let Ok(feat_ref) = repo.find_reference("refs/heads/nancy/features/root_plan_id") {
                 if let Ok(c) = feat_ref.peel_to_commit() {
                     let is_match = c.id() == task_commit_id;
