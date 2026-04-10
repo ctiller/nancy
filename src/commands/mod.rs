@@ -3,3 +3,4 @@ pub mod coordinator;
 pub mod eval;
 pub mod grind;
 pub mod init;
+pub mod cleanup;

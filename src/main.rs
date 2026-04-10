@@ -26,6 +26,8 @@ enum Commands {
         #[arg(index = 2)]
         file: Option<String>,
     },
+    /// Cleanup nancy resources and branches
+    Cleanup,
 }
 
 #[derive(clap::Args, Debug)]
@@ -71,6 +73,9 @@ pub(crate) async fn execute_command(args: &Args, cwd: PathBuf) -> Result<()> {
         }
         Commands::Eval { action, file } => {
             nancy::commands::eval::run(action.clone(), file.clone()).await?;
+        }
+        Commands::Cleanup => {
+            nancy::commands::cleanup::cleanup(cwd).await?;
         }
     }
 
@@ -128,6 +133,7 @@ mod tests {
         }
         assert!(Args::try_parse_from(["nancy", "add-task", "--task", "test"]).is_ok());
         assert!(Args::try_parse_from(["nancy", "add-task", "--file", "test.txt"]).is_ok());
+        assert!(Args::try_parse_from(["nancy", "cleanup"]).is_ok());
     }
 
     #[tokio::test]
@@ -173,6 +179,10 @@ mod tests {
             }
         }
 
+        // Test Cleanup
+        let args_cleanup = Args::try_parse_from(["nancy", "cleanup"]).unwrap();
+        execute_command(&args_cleanup, grind_dir.clone()).await?;
+        assert!(!grind_dir.join(".nancy").exists());
         
         Ok(())
     }
