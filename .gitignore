@@ -4,3 +4,4 @@
 /target_check
 .env
 eval_out.yaml
+node_modules
