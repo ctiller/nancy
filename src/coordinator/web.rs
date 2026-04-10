@@ -7,7 +7,7 @@ use axum::{
 use leptos_axum::{generate_route_list, LeptosRoutes};
 use std::sync::atomic::Ordering;
 use tower_http::trace::TraceLayer;
-use web::{App, Shell};
+use web::App;
 
 #[derive(rust_embed::RustEmbed, Clone)]
 #[folder = "target/site/"]
@@ -25,12 +25,21 @@ async fn static_asset_handler(uri: Uri) -> impl IntoResponse {
 }
 
 async fn fs_asset_handler(axum::extract::Path(path): axum::extract::Path<String>) -> impl IntoResponse {
-    use std::path::PathBuf;
-    
-    let root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let target = root.join(&path);
 
-    if !target.starts_with(&root) {
+    
+    let root = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+
+    if path.contains(".git/") || path.starts_with(".git") {
+        return (StatusCode::FORBIDDEN, "Forbidden").into_response();
+    }
+    let target = match std::fs::canonicalize(root.join(&path)) {
+        Ok(t) => t,
+        Err(_) => return (StatusCode::NOT_FOUND, "Not Found").into_response(),
+    };
+    
+    let root_canon = std::fs::canonicalize(&root).unwrap_or(root);
+
+    if !target.starts_with(&root_canon) {
         return (StatusCode::FORBIDDEN, "Forbidden").into_response();
     }
 
@@ -87,4 +96,44 @@ pub fn spawn_web_server(tcp_listener: tokio::net::TcpListener) -> tokio::task::J
         };
         axum::serve(tcp_listener, web_app).with_graceful_shutdown(shutdown_signal).await.ok();
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::http::Uri;
+
+    #[tokio::test]
+    async fn test_static_asset_handler() {
+        let uri = Uri::builder().path_and_query("/nancy-avatar.png").build().unwrap();
+        let resp = static_asset_handler(uri).await.into_response();
+        assert_eq!(resp.status(), StatusCode::OK);
+        
+        let uri_404 = Uri::builder().path_and_query("/not_found_test_123.png").build().unwrap();
+        let resp_404 = static_asset_handler(uri_404).await.into_response();
+        assert_eq!(resp_404.status(), StatusCode::NOT_FOUND);
+    }
+    
+    #[tokio::test]
+    async fn test_fs_asset_handler() {
+        // Test valid file within workspace boundaries
+        let path = axum::extract::Path("Cargo.toml".to_string());
+        let resp = fs_asset_handler(path).await.into_response();
+        assert_eq!(resp.status(), StatusCode::OK);
+        
+        // Test out of bounds constraint
+        let path_oob = axum::extract::Path("../../../../etc/passwd".to_string());
+        let resp_oob = fs_asset_handler(path_oob).await.into_response();
+        assert_eq!(resp_oob.status(), StatusCode::FORBIDDEN);
+        
+        // Test gitignore constraint (.git directory is implicitly ignored)
+        let path_git = axum::extract::Path(".git/config".to_string());
+        let resp_git = fs_asset_handler(path_git).await.into_response();
+        assert_eq!(resp_git.status(), StatusCode::FORBIDDEN);
+        
+        // Test not found constraint
+        let path_nf = axum::extract::Path("does_not_exist_ever_123.txt".to_string());
+        let resp_nf = fs_asset_handler(path_nf).await.into_response();
+        assert_eq!(resp_nf.status(), StatusCode::NOT_FOUND);
+    }
 }

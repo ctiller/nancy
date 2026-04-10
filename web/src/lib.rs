@@ -129,15 +129,75 @@ fn AgentsView() -> impl IntoView {
 #[component]
 fn RepoView() -> impl IntoView {
     let (active_file, set_active_file) = signal::<Option<String>>(None);
+    let (selected_branch, set_selected_branch) = signal::<Option<String>>(None);
+    
+    let branches_ctx = Resource::new(
+        move || (),
+        move |_| async move {
+            crate::repo::get_git_branches().await.unwrap_or(crate::repo::GitBranchContext {
+                active_branch: "master".to_string(),
+                all_branches: vec!["master".to_string()]
+            })
+        }
+    );
     
     view! {
         <div class="grid-2">
             <div class="glass-panel" style="padding: 20px; overflow-y: auto;">
-                <h3>"Repository Explorer"</h3>
-                <FileTree current_dir=None set_active_file=set_active_file />
+                <div style="display: flex; flex-direction: column; gap: 12px; margin-bottom: 16px;">
+                    <h3 style="margin: 0; white-space: nowrap; flex-shrink: 0;">"Repository Explorer"</h3>
+                    <Suspense fallback=move || view! { <span>"..."</span> }>
+                        {move || {
+                            branches_ctx.get().map(|ctx| {
+                                view! {
+                                    <select 
+                                        class="branch-select"
+                                        style="background: rgba(0,0,0,0.2); color: var(--text-main); border: 1px solid var(--panel-border); padding: 6px 8px; border-radius: 4px; outline: none; font-size: 0.85rem; width: 100%; box-sizing: border-box; text-overflow: ellipsis; overflow: hidden; white-space: nowrap;"
+                                        on:change=move |ev| {
+                                            let branch = event_target_value(&ev);
+                                            set_selected_branch.set(Some(branch));
+                                            set_active_file.set(None);
+                                        }
+                                    >
+                                        <For
+                                            each=move || ctx.all_branches.clone()
+                                            key=|br| br.clone()
+                                            children={let active = ctx.active_branch.clone(); move |br| {
+                                                let br_clone = br.clone();
+                                                let br_val = br.clone();
+                                                view! {
+                                                    <option value=br_val selected={br == active}>{br_clone}</option>
+                                                }
+                                            }}
+                                        />
+                                    </select>
+                                }
+                            })
+                        }}
+                    </Suspense>
+                </div>
+                <Suspense fallback=move || view! { <span>"Loading Tree..."</span> }>
+                    {move || {
+                        let curr_branch = selected_branch.get().unwrap_or_else(|| {
+                            branches_ctx.get().map(|c| c.active_branch).unwrap_or_default()
+                        });
+                        view! {
+                            <FileTree current_dir=None set_active_file=set_active_file branch=curr_branch />
+                        }
+                    }}
+                </Suspense>
             </div>
             <div class="glass-panel code-inspector" style="padding: 0; overflow-y: auto;">
-                <FileInspector active_file=active_file />
+                <Suspense fallback=move || view! { <span>"..."</span> }>
+                    {move || {
+                        let curr_branch = selected_branch.get().unwrap_or_else(|| {
+                            branches_ctx.get().map(|c| c.active_branch).unwrap_or_default()
+                        });
+                        view! {
+                            <FileInspector active_file=active_file branch=curr_branch />
+                        }
+                    }}
+                </Suspense>
             </div>
         </div>
     }
@@ -146,20 +206,24 @@ fn RepoView() -> impl IntoView {
 #[component]
 fn FileTree(
     current_dir: Option<String>,
-    #[prop(into)] set_active_file: WriteSignal<Option<String>>,
+    set_active_file: WriteSignal<Option<String>>,
+    branch: String
 ) -> impl IntoView {
     let dir_clone = current_dir.clone();
+    let branch_clone = branch.clone();
     let files = Resource::new(
-        move || (),
-        move |_| crate::repo::get_repo_tree(dir_clone.clone())
+        move || branch_clone.clone(),
+        move |b| crate::repo::get_repo_tree(b, dir_clone.clone())
     );
 
+    let branch_for_match = branch.clone();
     view! {
         <Suspense fallback=move || view! { <div>"Loading..."</div> }>
             <div class="file-tree" style="margin-left: 12px; font-family: monospace; font-size: 0.9rem;">
                 {move || match files.get() {
                     Some(Ok(nodes)) => {
                         let nodes_clone = nodes.clone();
+                        let branch_for_for = branch_for_match.clone();
                         view! {
                             <For
                                 each=move || nodes_clone.clone()
@@ -169,6 +233,7 @@ fn FileTree(
                                     let path = node.path.clone();
                                     let name = node.name.clone();
                                     let (expanded, set_expanded) = signal(false);
+                                    let branch_c = branch_for_for.clone();
                                     
                                     view! {
                                         <div class="file-node" style="margin-top: 4px;">
@@ -189,7 +254,8 @@ fn FileTree(
                                                 {
                                                     let p = node.path.clone();
                                                     let set_act = set_active_file;
-                                                    move || view! { <FileTree current_dir=Some(p.clone()) set_active_file=set_act /> }
+                                                    let b_pass = branch_c.clone();
+                                                    move || view! { <FileTree current_dir=Some(p.clone()) set_active_file=set_act branch=b_pass.clone() /> }
                                                 }
                                             </Show>
                                         </div>
@@ -207,12 +273,16 @@ fn FileTree(
 }
 
 #[component]
-fn FileInspector(active_file: ReadSignal<Option<String>>) -> impl IntoView {
+fn FileInspector(
+    active_file: ReadSignal<Option<String>>,
+    branch: String
+) -> impl IntoView {
+    let branch_clone = branch.clone();
     let file_content = Resource::new(
-        move || active_file.get(),
-        move |path| async move {
+        move || (active_file.get(), branch_clone.clone()),
+        move |(path, b)| async move {
             match path {
-                Some(p) => crate::repo::read_file_text(p).await,
+                Some(p) => crate::repo::read_file_text(b, p).await,
                 None => Ok("".to_string()),
             }
         }

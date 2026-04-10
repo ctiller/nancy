@@ -8,113 +8,215 @@ pub struct FileNode {
     pub is_dir: bool,
 }
 
+#[cfg(feature = "ssr")]
+pub async fn get_repo_tree_ssr(branch: String, dir: Option<String>) -> Result<Vec<FileNode>, ServerFnError> {
+    use std::path::PathBuf;
+    use git2::Repository;
+
+    let root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let repo = match Repository::discover(&root) {
+        Ok(r) => r,
+        Err(e) => return Err(ServerFnError::ServerError(format!("Git discovery failed: {}", e))),
+    };
+
+    // Fallback to active commit if branch is empty or strictly working directory
+    let obj = match repo.revparse_single(&branch).or_else(|_| repo.revparse_single("HEAD")) {
+        Ok(o) => o,
+        Err(e) => return Err(ServerFnError::ServerError(format!("Revision not found: {}", e))),
+    };
+        
+    let commit = match obj.peel_to_commit() {
+        Ok(c) => c,
+        Err(e) => return Err(ServerFnError::ServerError(format!("Not a commit: {}", e))),
+    };
+        
+    let head_tree = match commit.tree() {
+        Ok(t) => t,
+        Err(e) => return Err(ServerFnError::ServerError(format!("Failed to get tree: {}", e))),
+    };
+
+    let mut nodes = Vec::new();
+    
+    // Resolve nested tree if directory is specified
+    let target_tree = match &dir {
+        Some(d) if !d.is_empty() => {
+            let entry = match head_tree.get_path(std::path::Path::new(d)) {
+                Ok(e) => e,
+                Err(e) => return Err(ServerFnError::ServerError(format!("Path not found in tree: {}", e))),
+            };
+            let obj = match entry.to_object(&repo) {
+                Ok(o) => o,
+                Err(_) => return Err(ServerFnError::ServerError("Failed to resolve tree object".into())),
+            };
+            match obj.into_tree() {
+                Ok(t) => t,
+                Err(_) => return Err(ServerFnError::ServerError("Path is not a directory".into())),
+            }
+        },
+        _ => head_tree
+    };
+
+    for entry in target_tree.iter() {
+        if let Some(name) = entry.name() {
+            let is_dir = entry.kind() == Some(git2::ObjectType::Tree);
+            let rel_path = match &dir {
+                Some(d) if !d.is_empty() => format!("{}/{}", d, name),
+                _ => name.to_string(),
+            };
+            
+            nodes.push(FileNode {
+                name: name.to_string(),
+                path: rel_path,
+                is_dir,
+            });
+        }
+    }
+
+    nodes.sort_by(|a, b| b.is_dir.cmp(&a.is_dir).then(a.name.cmp(&b.name)));
+    Ok(nodes)
+}
+
 #[server(GetRepoTree, "/api")]
-pub async fn get_repo_tree(dir: Option<String>) -> Result<Vec<FileNode>, ServerFnError> {
+pub async fn get_repo_tree(branch: String, dir: Option<String>) -> Result<Vec<FileNode>, ServerFnError> {
     #[cfg(feature = "ssr")]
     {
-        use ignore::WalkBuilder;
-        use std::path::PathBuf;
-
-        let root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-        let target_dir = match dir {
-            Some(d) => root.join(d),
-            None => root.clone(),
-        };
-
-        // Enforce boundary strictly within the root git repo for security
-        if !target_dir.starts_with(&root) {
-            return Err(ServerFnError::ServerError("Security violation: path out of bounds".into()));
-        }
-
-        let mut nodes = Vec::new();
-
-        let walker = WalkBuilder::new(&target_dir).max_depth(Some(1)).build();
-
-        for result in walker {
-            match result {
-                Ok(entry) => {
-                    let path = entry.path();
-                    if path == target_dir {
-                        continue; // Skip the directory itself
-                    }
-
-                    let rel_path = path
-                        .strip_prefix(&root)
-                        .unwrap_or(path)
-                        .to_string_lossy()
-                        .to_string();
-                    let name = entry.file_name().to_string_lossy().to_string();
-                    let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
-
-                    nodes.push(FileNode {
-                        name,
-                        path: rel_path,
-                        is_dir,
-                    });
-                }
-                Err(_) => continue,
-            }
-        }
-
-        // Sort: Directories first, then alphabetical
-        nodes.sort_by(|a, b| b.is_dir.cmp(&a.is_dir).then(a.name.cmp(&b.name)));
-
-        Ok(nodes)
+        get_repo_tree_ssr(branch, dir).await
     }
     #[cfg(not(feature = "ssr"))]
     {
         unimplemented!()
     }
+}
+
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct GitBranchContext {
+    pub active_branch: String,
+    pub all_branches: Vec<String>,
+}
+
+#[server(GetGitBranches, "/api")]
+pub async fn get_git_branches() -> Result<GitBranchContext, ServerFnError> {
+    #[cfg(feature = "ssr")]
+    {
+        use std::process::Command;
+        
+        let root = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        // Get all branches
+        let output = match Command::new("git")
+            .arg("branch")
+            .arg("--format=%(refname:short)")
+            .current_dir(&root)
+            .output() {
+                Ok(o) => o,
+                Err(e) => return Err(ServerFnError::ServerError(e.to_string())),
+            };
+            
+        let mut branches = Vec::new();
+        if output.status.success() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            for line in stdout.lines() {
+                let br = line.trim().to_string();
+                if !br.is_empty() {
+                    branches.push(br);
+                }
+            }
+        }
+        
+        // Get active branch
+        let active_output = match Command::new("git")
+            .arg("branch")
+            .arg("--show-current")
+            .current_dir(&root)
+            .output() {
+                Ok(o) => o,
+                Err(e) => return Err(ServerFnError::ServerError(e.to_string())),
+            };
+            
+        let mut active_branch = String::new();
+        if active_output.status.success() {
+            active_branch = String::from_utf8_lossy(&active_output.stdout).trim().to_string();
+        }
+        
+        Ok(GitBranchContext {
+            active_branch,
+            all_branches: branches,
+        })
+    }
+    #[cfg(not(feature = "ssr"))]
+    {
+        unimplemented!()
+    }
+}
+
+
+
+#[cfg(feature = "ssr")]
+pub async fn read_file_text_ssr(branch: String, path: String) -> Result<String, ServerFnError> {
+    use std::path::{Path, PathBuf};
+    use git2::Repository;
+
+    let root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let repo = match Repository::discover(&root) {
+        Ok(r) => r,
+        Err(e) => return Err(ServerFnError::ServerError(format!("Git discovery failed: {}", e))),
+    };
+
+    let obj = match repo.revparse_single(&branch).or_else(|_| repo.revparse_single("HEAD")) {
+        Ok(o) => o,
+        Err(e) => return Err(ServerFnError::ServerError(format!("Revision not found: {}", e))),
+    };
+        
+    let commit = match obj.peel_to_commit() {
+        Ok(c) => c,
+        Err(e) => return Err(ServerFnError::ServerError(format!("Not a commit: {}", e))),
+    };
+        
+    let head_tree = match commit.tree() {
+        Ok(t) => t,
+        Err(e) => return Err(ServerFnError::ServerError(format!("Failed to get tree: {}", e))),
+    };
+        
+    let entry = match head_tree.get_path(Path::new(&path)) {
+        Ok(e) => e,
+        Err(e) => return Err(ServerFnError::ServerError(format!("File not found in tree: {}", e))),
+    };
+        
+    let blob = match entry.to_object(&repo) {
+        Ok(o) => match o.into_blob() {
+            Ok(b) => b,
+            Err(_) => return Err(ServerFnError::ServerError("Path is not a file".into())),
+        },
+        Err(_) => return Err(ServerFnError::ServerError("Failed to resolve object".into())),
+    };
+
+    let content = match String::from_utf8(blob.content().to_vec()) {
+        Ok(c) => c,
+        Err(_) => return Err(ServerFnError::ServerError("File is not valid UTF-8 text".into())),
+    };
+
+    let ext = Path::new(&path).extension().and_then(|s| s.to_str()).unwrap_or("");
+
+    // 3. Highlight
+    if let Some(highlighted) = tree_sitter_highlight_file(ext, &content) {
+        return Ok(highlighted);
+    }
+
+    Ok(syntect_highlight_file(ext, &content))
 }
 
 #[server(ReadFileText, "/api")]
-pub async fn read_file_text(path: String) -> Result<String, ServerFnError> {
+pub async fn read_file_text(branch: String, path: String) -> Result<String, ServerFnError> {
     #[cfg(feature = "ssr")]
     {
-        use ignore::WalkBuilder;
-        use std::fs;
-        use std::path::{Path, PathBuf};
-
-        let root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-        let target = root.join(&path);
-
-        if !target.starts_with(&root) {
-            return Err(ServerFnError::ServerError("Security violation".into()));
-        }
-
-        // 1. Verify Gitignore Rules exist for file
-        let mut is_ignored = true;
-        for result in WalkBuilder::new(&target).max_depth(Some(0)).build() {
-            if result.is_ok() {
-                is_ignored = false;
-                break;
-            }
-        }
-
-        if is_ignored {
-            return Err(ServerFnError::ServerError("File is computationally ignored or omitted.".into()));
-        }
-
-        // 2. Read Text
-        let content = match fs::read_to_string(&target) {
-            Ok(c) => c,
-            Err(e) => return Err(e.into()),
-        };
-
-        let ext = Path::new(&path).extension().and_then(|s| s.to_str()).unwrap_or("");
-
-        // 3. Highlight
-        if let Some(highlighted) = tree_sitter_highlight_file(ext, &content) {
-            return Ok(highlighted);
-        }
-
-        Ok(syntect_highlight_file(ext, &content))
+        read_file_text_ssr(branch, path).await
     }
     #[cfg(not(feature = "ssr"))]
     {
         unimplemented!()
     }
 }
+
 
 #[cfg(feature = "ssr")]
 fn tree_sitter_highlight_file(ext: &str, content: &str) -> Option<String> {

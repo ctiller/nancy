@@ -235,7 +235,7 @@ mod tests {
 
     #[test]
     fn test_enforce_role_bounds_drops_never() {
-        let mut session = ReviewSession::new(std::path::PathBuf::from("/tmp/nancy"));
+        let session = ReviewSession::new(std::path::PathBuf::from("/tmp/nancy"));
         let requested = vec!["The Team Player".to_string(), "The Pedant".to_string(), "Fake Persona".to_string()];
         
         let bounded = session.enforce_role_bounds(&requested, crate::personas::PersonaRole::PlanIdeation);
