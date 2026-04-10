@@ -92,8 +92,6 @@ fn AgentCard(status: GrinderStatus) -> impl IntoView {
     {
         let did_clone = did.clone();
         spawn_local(async move {
-            // Delay to wait for full SSR hydration to mount to avoid hydration panics on instant error returns.
-            gloo_timers::future::sleep(std::time::Duration::from_millis(1500)).await;
             let mut last_update: Option<u64> = None;
             loop {
                 let url = if let Some(lu) = last_update {
