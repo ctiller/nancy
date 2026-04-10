@@ -52,13 +52,16 @@ pub async fn get_active_grinders() -> Result<Vec<GrinderStatus>, ServerFnError> 
 
 #[component]
 pub fn AgentsView() -> impl IntoView {
+    let grinders = Resource::new(|| (), |_| async move {
+        get_active_grinders().await.unwrap_or_default()
+    });
+
     view! {
         <div class="glass-panel" style="padding: 20px;">
             <h2>"Active Grinders"</h2>
             <Suspense fallback=move || view! { <div>"Loading grinders..."</div> }>
                 <div style="display: flex; flex-direction: column; gap: 16px;">
-                    {Suspend::new(async move {
-                        let list = get_active_grinders().await.unwrap_or_default();
+                    {move || grinders.get().map(|list| {
                         if list.is_empty() {
                             leptos::either::Either::Left(view! { <div class="text-muted">"No active grinders found."</div> })
                         } else {
@@ -190,7 +193,7 @@ fn FrameView(frame: SerializedFrame) -> impl IntoView {
                             })),
                             SerializedElement::Frame(child_frame) => leptos::either::Either::Right(leptos::either::Either::Right(view! {
                                 <FrameView frame=child_frame />
-                            }))
+                            }.into_any()))
                         }
                     }
                 />

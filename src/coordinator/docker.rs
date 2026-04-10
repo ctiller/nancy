@@ -116,7 +116,7 @@ impl DockerOrchestrator {
         }
 
         // Make sure base image is ready
-        let rt_image = "rust:bookworm";
+        let rt_image = "rust:latest";
         let mut pull_stream = self.docker.create_image(
             Some(CreateImageOptions {
                 from_image: Some(rt_image.to_string()),

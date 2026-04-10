@@ -245,7 +245,7 @@ fn FileTree(
                                                     let p = node.path.clone();
                                                     let set_act = set_active_file;
                                                     let b_pass = branch_c.clone();
-                                                    move || view! { <FileTree current_dir=Some(p.clone()) set_active_file=set_act branch=b_pass.clone() /> }
+                                                    move || view! { <FileTree current_dir=Some(p.clone()) set_active_file=set_act branch=b_pass.clone() /> }.into_any()
                                                 }
                                             </Show>
                                         </div>
