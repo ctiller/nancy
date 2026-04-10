@@ -108,7 +108,7 @@ impl ReviewSession {
         &mut self,
         experts: &[String],
         prompt: &str,
-    ) -> Result<Vec<Result<T>>> {
+    ) -> Result<Vec<(String, Result<T>)>> {
         let all_personas = get_all_personas();
 
         for expert_id in experts {
@@ -137,8 +137,9 @@ impl ReviewSession {
         for (id, client) in self.reviewers.iter_mut() {
             if experts.contains(id) {
                 let prompt = prompt.to_string();
+                let expert_id = id.clone();
                 futures.push(async move {
-                    client.ask::<T>(&prompt).await
+                    (expert_id, client.ask::<T>(&prompt).await)
                 });
             }
         }
@@ -206,9 +207,10 @@ mod tests {
         let outputs = res.expect("ask_reviewers failed internally");
         assert_eq!(outputs.len(), 6);
         
-        for p in outputs {
+        for (expert_id, p) in outputs {
             let out = p.expect("ReviewOutput parse failed");
             assert_eq!(serde_json::to_string(&out.vote).unwrap(), "\"approve\"");
+            assert!(expert_id.len() > 0);
         }
     }
 

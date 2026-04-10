@@ -128,17 +128,17 @@ async fn handle_plan_task(
 
     crate::introspection::frame("ideation", async {
         crate::introspection::log(&format!("Gathering ideation from {} experts", ideation_experts.len()));
-        for expert in &ideation_experts {
-            if let Some(p) = all_personas.iter().find(|x| &x.name == expert) {
-                let prompt = crate::grind::prompts::IdeationPromptTemplate {
-                    task_description: &task_payload.description,
-                }.render()?;
-                
-                let res = session.ask_reviewers::<String>(&[p.name.to_string()], &prompt).await?;
-                if let Some(Ok(ideation)) = res.into_iter().next() {
-                    crate::introspection::log(&format!("Received ideation from {}", p.name));
-                    compiled_ideations.push_str(&format!("Expert {} ideation:\n{}\n\n", p.name, ideation));
-                }
+        
+        let prompt = crate::grind::prompts::IdeationPromptTemplate {
+            task_description: &task_payload.description,
+        }.render()?;
+
+        let res = session.ask_reviewers::<String>(&ideation_experts, &prompt).await?;
+        
+        for (expert_id, ideation_result) in res {
+            if let Ok(ideation) = ideation_result {
+                crate::introspection::log(&format!("Received ideation from {}", expert_id));
+                compiled_ideations.push_str(&format!("Expert {} ideation:\n{}\n\n", expert_id, ideation));
             }
         }
         anyhow::Result::<()>::Ok(())
@@ -203,7 +203,7 @@ async fn handle_plan_task(
         let formal_panel = session.enforce_quorum(&team_selection.experts, crate::personas::PersonaRole::PlanReview);
         let review_outputs = session.ask_reviewers::<crate::pre_review::schema::ReviewOutput>(&formal_panel, &review_prompt).await?;
         
-        let valid_outputs: Vec<_> = review_outputs.into_iter().filter_map(|x| x.ok()).collect();
+        let valid_outputs: Vec<_> = review_outputs.into_iter().filter_map(|(_, x)| x.ok()).collect();
         
         let mut consensus = crate::schema::task::Consensus::Approve;
         let mut general_notes = String::new();
@@ -340,7 +340,7 @@ async fn handle_review_task(
         .system_prompt(&crate::grind::prompts::review_synthesis_prompt(&target_path))
         .build()?;
 
-    let valid_outputs: Vec<_> = outputs.into_iter().filter_map(|x| x.ok()).collect();
+    let valid_outputs: Vec<_> = outputs.into_iter().filter_map(|(_, x)| x.ok()).collect();
     let synthesis_str = serde_json::to_string(&valid_outputs)?;
 
     let report = synthesis_client

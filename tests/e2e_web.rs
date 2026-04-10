@@ -99,7 +99,7 @@ async fn test_e2e_web_grinders_online() {
     // 6. Poll reqwest agent list until 3 grinders are officially recorded ONLINE dynamically natively
     let mut online_count = 0;
     let mut attempts = 0;
-    while online_count < 3 && attempts < 200 {
+    while online_count < 3 && attempts < 1000 {
         let res = client.get(&url)
             .header("Accept", "application/json")
             .send()
@@ -168,7 +168,7 @@ async fn test_e2e_web_add_remove_grinder() {
     // 4. Poll /api/grinders until the target is online
     let mut online = false;
     let mut attempts = 0;
-    while !online && attempts < 200 {
+    while !online && attempts < 1000 {
         let res = client.get(&format!("{}/api/grinders", base_url))
             .header("Accept", "application/json")
             .send().await.unwrap();

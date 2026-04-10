@@ -204,15 +204,21 @@ pub async fn grind<P: AsRef<Path>>(
                                 tracing::error!("[Grinder] /ready-for-poll failed to decode response bounds.");
                             }
                         } else {
-                            tracing::error!("[Grinder] /ready-for-poll HTTP error.");
+                            tracing::warn!("[Grinder] /ready-for-poll HTTP error. Assuming Coordinator is unavailable.");
+                            SHUTDOWN.store(true, Ordering::SeqCst);
+                            crate::commands::grind::SHUTDOWN_NOTIFY.notify_waiters();
                         }
                     }
                     Err(e) => {
-                        panic!("Failed to build UDS client securely: {:?}", e);
+                        tracing::error!("Failed to build UDS client securely: {:?}", e);
+                        SHUTDOWN.store(true, Ordering::SeqCst);
+                        crate::commands::grind::SHUTDOWN_NOTIFY.notify_waiters();
                     }
                 }
             } else {
-                panic!("UDS socket does not exist");
+                tracing::warn!("UDS socket does not exist. Coordinator may have terminated.");
+                SHUTDOWN.store(true, Ordering::SeqCst);
+                crate::commands::grind::SHUTDOWN_NOTIFY.notify_waiters();
             }
         } else {
             tracing::debug!("[Grinder] Processed a task in this loop. Skipping /ready-for-poll explicitly.");
@@ -238,8 +244,17 @@ pub async fn grind<P: AsRef<Path>>(
                         .json(&payload)
                         .send()
                         .await;
+                    if res.is_err() {
+                        tracing::warn!("[Grinder] /updates-ready failed. Coordinator may be down.");
+                        SHUTDOWN.store(true, Ordering::SeqCst);
+                        crate::commands::grind::SHUTDOWN_NOTIFY.notify_waiters();
+                    }
                     tracing::debug!("[Grinder] Unblocked from /updates-ready ping. Response: {:?}", res.map(|r| r.status()));
                 }
+            } else {
+                tracing::warn!("UDS socket does not exist. Coordinator may have terminated.");
+                SHUTDOWN.store(true, Ordering::SeqCst);
+                crate::commands::grind::SHUTDOWN_NOTIFY.notify_waiters();
             }
         }
         
@@ -253,6 +268,10 @@ pub async fn grind<P: AsRef<Path>>(
                             SHUTDOWN.store(true, Ordering::SeqCst);
                             crate::commands::grind::SHUTDOWN_NOTIFY.notify_waiters();
                         }
+                    } else {
+                        tracing::warn!("[Grinder] Lost connection to /shutdown-requested long poll. Auto-terminating node securely.");
+                        SHUTDOWN.store(true, Ordering::SeqCst);
+                        crate::commands::grind::SHUTDOWN_NOTIFY.notify_waiters();
                     }
                 });
             }

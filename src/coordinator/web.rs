@@ -130,8 +130,14 @@ async fn get_api_grinders(
     let mut statuses = vec![];
     let identity = { state.shared_identity.read().await.clone() };
     
-    let repo = git2::Repository::discover(&root).ok();
-    let appview = repo.map(|r| crate::coordinator::appview::AppView::hydrate(&r, &identity, None));
+    let appview = tokio::task::spawn_blocking({
+        let root = root.clone();
+        let identity = identity.clone();
+        move || {
+            let repo = git2::Repository::discover(&root).ok();
+            repo.map(|r| crate::coordinator::appview::AppView::hydrate(&r, &identity, None))
+        }
+    }).await.unwrap_or(None);
     
     if let crate::schema::identity_config::Identity::Coordinator { workers, .. } = &identity {
         for worker in workers {
@@ -236,15 +242,25 @@ async fn get_api_tasks_topology(
     let version = *rx.borrow();
 
     let root = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-    let repo = match git2::Repository::discover(&root) {
-        Ok(r) => r,
-        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "No repo found").into_response(),
-    };
-    
     let identity = { state.shared_identity.read().await.clone() };
     
-    let appview = crate::coordinator::appview::AppView::hydrate(&repo, &identity, None);
-    let mut topology = appview.get_topology();
+    let appview_opt = tokio::task::spawn_blocking({
+        let root = root.clone();
+        let identity = identity.clone();
+        move || {
+            let repo = match git2::Repository::discover(&root) {
+                Ok(r) => r,
+                Err(_) => return None,
+            };
+            Some(crate::coordinator::appview::AppView::hydrate(&repo, &identity, None))
+        }
+    }).await.unwrap_or(None);
+    
+    let mut topology = if let Some(av) = appview_opt {
+        av.get_topology()
+    } else {
+        return (StatusCode::INTERNAL_SERVER_ERROR, "No repo found").into_response();
+    };
     topology.version = version;
 
     axum::Json(topology).into_response()

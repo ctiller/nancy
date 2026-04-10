@@ -1,5 +1,5 @@
 [workspace]
-members = ["llm-macros", "ptntest", "scratch_test", "web"]
+members = ["llm-macros", "scratch_test", "web"]
 
 [package]
 name = "nancy"

@@ -71,16 +71,22 @@ pub async fn build_container_config(
 
     let host_config = HostConfig {
         binds: Some(binds),
+        auto_remove: Some(true),
         ..Default::default()
     };
 
     let uid = String::from_utf8(tokio::process::Command::new("id").arg("-u").output().await.unwrap().stdout).unwrap().trim().to_string();
     let gid = String::from_utf8(tokio::process::Command::new("id").arg("-g").output().await.unwrap().stdout).unwrap().trim().to_string();
 
+    let cmd_str = format!(
+        "/nancy grind > /tmp/nancy_sockets/{worker}/container.log 2>&1; echo $? > /tmp/nancy_sockets/{worker}/exit_code",
+        worker = worker_did
+    );
+
     Config {
         image: Some(rt_image.to_string()),
         user: Some(format!("{}:{}", uid, gid)),
-        cmd: Some(vec!["/nancy".to_string(), "grind".to_string()]),
+        cmd: Some(vec!["sh".to_string(), "-c".to_string(), cmd_str]),
         env: Some(env_vars),
         host_config: Some(host_config),
         working_dir: Some(canonical_path),
@@ -99,6 +105,7 @@ pub struct DockerOrchestrator {
     workdir: PathBuf,
     active_containers: HashSet<String>,
     crash_backoffs: HashMap<String, ContainerState>,
+    has_spawned_pull: bool,
 }
 
 impl DockerOrchestrator {
@@ -109,7 +116,16 @@ impl DockerOrchestrator {
             workdir,
             active_containers: HashSet::new(),
             crash_backoffs: HashMap::new(),
+            has_spawned_pull: false,
         })
+    }
+
+    pub async fn shutdown(&mut self) {
+        let containers: Vec<String> = self.active_containers.drain().collect();
+        for name in containers {
+            tracing::info!("Cleaning up container {} gracefully...", name);
+            let _ = self.docker.remove_container(&name, Some(bollard::query_parameters::RemoveContainerOptions { force: true, ..Default::default() })).await;
+        }
     }
 
     pub async fn sync_deployments(&mut self, _appview: &AppView, identity: &Identity) -> Vec<(crate::schema::task::AgentCrashReportPayload, String)> {
@@ -126,17 +142,28 @@ impl DockerOrchestrator {
 
         // Make sure base image is ready
         let rt_image = "rust:latest";
-        let mut pull_stream = self.docker.create_image(
-            Some(CreateImageOptions {
-                from_image: Some(rt_image.to_string()),
-                ..Default::default()
-            }),
-            None,
-            None,
-        );
-        while let Some(res) = pull_stream.next().await {
-            if let Err(e) = res {
-                tracing::warn!("Docker image pull partial error: {}", e);
+        if !self.has_spawned_pull {
+            self.has_spawned_pull = true;
+            let docker_clone = self.docker.clone();
+            
+            // Check if image exists cleanly
+            if docker_clone.inspect_image(&rt_image).await.is_err() {
+                tokio::spawn(async move {
+                    tracing::info!("Pulling {} asynchronously in the background...", rt_image);
+                    let mut pull_stream = docker_clone.create_image(
+                        Some(CreateImageOptions {
+                            from_image: Some(rt_image.to_string()),
+                            ..Default::default()
+                        }),
+                        None,
+                        None,
+                    );
+                    while let Some(res) = pull_stream.next().await {
+                        if let Err(e) = res {
+                            tracing::warn!("Docker image pull partial error natively: {}", e);
+                        }
+                    }
+                });
             }
         }
 
@@ -162,65 +189,61 @@ impl DockerOrchestrator {
         let mut crash_reports = Vec::new();
         let mut to_remove = Vec::new();
         for container_name in &self.active_containers {
-            if let Ok(inspect) = self.docker.inspect_container(container_name, None).await {
-                if let Some(state) = inspect.state {
-                    if let Some(running) = state.running {
-                        if !running {
-                            // Container died! Interrogate logs
-                                let logs_opts = bollard::query_parameters::LogsOptions {
-                                    stdout: true,
-                                    stderr: true,
-                                    tail: "1000".to_string(),
-                                    ..Default::default()
-                                };
-                            let mut log_stream = self.docker.logs(container_name, Some(logs_opts));
-                            let mut logs = String::new();
-                            while let Some(log_res) = log_stream.next().await {
-                                if let Ok(l) = log_res {
-                                    logs.push_str(&l.to_string());
-                                }
-                            }
-                            let did = container_name.replace("nancy-worker-", "");
-                            
-                            let entry = self.crash_backoffs.entry(container_name.clone()).or_insert(ContainerState {
-                                name: container_name.clone(),
-                                failures: 0,
-                                next_restart_allowed_at: None,
-                            });
-                            entry.failures += 1;
-                            
-                            let base_delay = 5_u64;
-                            let max_delay = 300_u64;
-                            let mut delay = base_delay * (2_u64.pow((entry.failures - 1).min(6) as u32));
-                            delay = std::cmp::min(delay, max_delay);
-                            
-                            let jitter = rand::thread_rng().gen_range(0..=std::cmp::max(delay / 4, 1));
-                            let total_delay = delay + jitter;
-                            let now = std::time::Instant::now();
-                            entry.next_restart_allowed_at = Some(now + std::time::Duration::from_secs(total_delay));
-                            
-                            let timestamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
-                            let log_filename = format!("nancy-worker-{}-crash-{}.log", did, timestamp);
-                            
-                            crash_reports.push((
-                                crate::schema::task::AgentCrashReportPayload {
-                                    crashing_agent_did: did.clone(),
-                                    log_ref: log_filename,
-                                    next_restart_at_unix: Some(timestamp + total_delay),
-                                    failures: Some(entry.failures),
-                                },
-                                logs
-                            ));
-                            
-                            tracing::warn!("Worker {} crashed! failures={} backoff={}s", did, entry.failures, total_delay);
-                            
-                            let _ = self.docker.remove_container(container_name, Some(bollard::query_parameters::RemoveContainerOptions { force: true, ..Default::default() })).await;
-                            to_remove.push(container_name.clone());
-                        }
-                    }
-                }
+            let did = container_name.replace("nancy-worker-", "");
+            
+            // With auto_remove: true, the docker daemon will implicitly destroy the container the 
+            // instant it exits. Therefore, if inspect_container returns Err, we evaluate its volume logs natively!
+            if let Ok(_inspect) = self.docker.inspect_container(container_name, None).await {
+                // Container is actively breathing
             } else {
                 to_remove.push(container_name.clone());
+                
+                let worker_sock_dir = self.workdir.join(".nancy").join("sockets").join(&did);
+                let exit_code_path = worker_sock_dir.join("exit_code");
+                let log_path = worker_sock_dir.join("container.log");
+                
+                let mut is_crash = true;
+                if let Ok(code_str) = fs::read_to_string(&exit_code_path).await {
+                    if code_str.trim() == "0" {
+                        is_crash = false;
+                    }
+                }
+                
+                if is_crash {
+                    let logs = fs::read_to_string(&log_path).await.unwrap_or_else(|_| "No host logs found.".to_string());
+                    
+                    let entry = self.crash_backoffs.entry(container_name.clone()).or_insert(ContainerState {
+                        name: container_name.clone(),
+                        failures: 0,
+                        next_restart_allowed_at: None,
+                    });
+                    entry.failures += 1;
+                    
+                    let base_delay = 5_u64;
+                    let max_delay = 300_u64;
+                    let mut delay = base_delay * (2_u64.pow((entry.failures - 1).min(6) as u32));
+                    delay = std::cmp::min(delay, max_delay);
+                    
+                    let jitter = rand::thread_rng().gen_range(0..=std::cmp::max(delay / 4, 1));
+                    let total_delay = delay + jitter;
+                    let now = std::time::Instant::now();
+                    entry.next_restart_allowed_at = Some(now + std::time::Duration::from_secs(total_delay));
+                    
+                    let timestamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+                    let log_filename = format!("nancy-worker-{}-crash-{}.log", did, timestamp);
+                    
+                    crash_reports.push((
+                        crate::schema::task::AgentCrashReportPayload {
+                            crashing_agent_did: did.clone(),
+                            log_ref: log_filename,
+                            next_restart_at_unix: Some(timestamp + total_delay),
+                            failures: Some(entry.failures),
+                        },
+                        logs
+                    ));
+                    
+                    tracing::warn!("Worker {} crashed and was auto-removed! failures={} backoff={}s", did, entry.failures, total_delay);
+                }
             }
         }
         

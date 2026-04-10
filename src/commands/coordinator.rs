@@ -102,9 +102,9 @@ impl Coordinator {
         let mut sync_engine = GrinderSyncEngine::new();
 
         while !condition(&AppView::new()) && !SHUTDOWN.load(Ordering::SeqCst) {
-            let identity_guard = shared_identity.read().await;
+            let active_identity = { shared_identity.read().await.clone() };
 
-            let appview = AppView::hydrate(&self.repo, &*identity_guard, sync_engine.target_sync_grinder.as_deref());
+            let appview = AppView::hydrate(&self.repo, &active_identity, sync_engine.target_sync_grinder.as_deref());
             sync_engine.target_sync_grinder = None;
 
             // Test loop condition against synced view
@@ -116,15 +116,15 @@ impl Coordinator {
             let mut logged_any = process_app_view_events(
                 &self.repo, 
                 &appview, 
-                &*identity_guard, 
+                &active_identity, 
                 &mut processed_completed_tasks, 
                 &mut processed_request_ids
             )?;
 
             if let Some(ref mut d) = docker_orch {
-                let crashes = d.sync_deployments(&appview, &*identity_guard).await;
+                let crashes = d.sync_deployments(&appview, &active_identity).await;
                 if !crashes.is_empty() {
-                    let writer = crate::events::writer::Writer::new(&self.repo, identity_guard.clone()).expect("Failed to init writer");
+                    let writer = crate::events::writer::Writer::new(&self.repo, active_identity.clone()).expect("Failed to init writer");
                     for (report, logs) in crashes {
                         writer.attach_incident_log(&report.log_ref, &logs);
                         let _ = writer.log_event(crate::schema::registry::EventPayload::AgentCrashReport(report));
@@ -134,9 +134,6 @@ impl Coordinator {
                     }
                 }
             }
-
-            // Drop the read guard immediately before we possibly block polling
-            drop(identity_guard);
 
             if logged_any {
                 tracing::debug!("[Coordinator] Successfully processed and committed Grinder events. Broadcasting tx_ready to unblock...");
@@ -154,6 +151,10 @@ impl Coordinator {
         shared_tx_ready.send_modify(|val| *val += 1);
         _axum_server_task.abort();
         web_server_task.abort();
+
+        if let Some(ref mut d) = docker_orch {
+            d.shutdown().await;
+        }
 
         tracing::info!(
             "Coordinator halted. SHUTDOWN: {}",
