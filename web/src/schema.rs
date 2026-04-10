@@ -19,3 +19,9 @@ pub struct GrinderStatus {
     pub did: String,
     pub is_online: bool,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GrindersResponse {
+    pub version: u64,
+    pub grinders: Vec<GrinderStatus>,
+}

@@ -73,18 +73,20 @@ impl Coordinator {
         let (tx_ready, _rx_ready) = tokio::sync::watch::channel::<u64>(0);
         let shared_tx_ready = Arc::new(tx_ready);
         let (tx_updates, mut rx_updates) = tokio::sync::mpsc::unbounded_channel();
+        let shared_identity = Arc::new(tokio::sync::RwLock::new(self.identity.clone()));
         let ipc_state = IpcState {
             tx_ready: shared_tx_ready.clone(),
             tx_updates: Arc::new(tx_updates),
+            shared_identity: shared_identity.clone(),
         };
 
         let listener = tokio::net::UnixListener::from_std(self.listener.take().expect("UnixListener was missing from Coordinator struct mapping!"))?;
-        let _axum_server_task = spawn_ipc_server(listener, ipc_state);
+        let _axum_server_task = spawn_ipc_server(listener, ipc_state.clone());
 
-        let tcp_listener = tokio::net::TcpListener::bind(format!("127.0.0.1:{}", port)).await.unwrap();
+        let tcp_listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", port)).await.unwrap();
         let actual_port = tcp_listener.local_addr().unwrap().port();
-        eprintln!("Web server started at http://127.0.0.1:{}", actual_port);
-        let web_server_task = spawn_web_server(tcp_listener);
+        eprintln!("Web server started at http://0.0.0.0:{}", actual_port);
+        let web_server_task = spawn_web_server(tcp_listener, ipc_state.clone());
         
         if let Some(tx) = bind_cb {
             let _ = tx.send(actual_port);
@@ -100,7 +102,9 @@ impl Coordinator {
         let mut sync_engine = GrinderSyncEngine::new();
 
         while !condition(&AppView::new()) && !SHUTDOWN.load(Ordering::SeqCst) {
-            let appview = AppView::hydrate(&self.repo, &self.identity, sync_engine.target_sync_grinder.as_deref());
+            let identity_guard = shared_identity.read().await;
+
+            let appview = AppView::hydrate(&self.repo, &*identity_guard, sync_engine.target_sync_grinder.as_deref());
             sync_engine.target_sync_grinder = None;
 
             // Test loop condition against synced view
@@ -112,14 +116,17 @@ impl Coordinator {
             let logged_any = process_app_view_events(
                 &self.repo, 
                 &appview, 
-                &self.identity, 
+                &*identity_guard, 
                 &mut processed_completed_tasks, 
                 &mut processed_request_ids
             )?;
 
             if let Some(ref mut d) = docker_orch {
-                d.sync_deployments(&appview, &self.identity).await;
+                d.sync_deployments(&appview, &*identity_guard).await;
             }
+
+            // Drop the read guard immediately before we possibly block polling
+            drop(identity_guard);
 
             if logged_any {
                 tracing::debug!("[Coordinator] Successfully processed and committed Grinder events. Broadcasting tx_ready to unblock...");

@@ -17,13 +17,20 @@ async fn test_e2e_web_grinder_list() {
     // 2. nancy init (provision 3 grinders)
     nancy::commands::init::init(tmp.path(), 3).await.unwrap();
     
-    // Explicitly register the server function for the test AXUM router
-    leptos::server_fn::axum::register_explicit::<web::agents::GetActiveGrinders>();
+    // Explicit leptos bindings obsolete: Grinder endpoint migrated to pure Axum handling organically.
     
     // 3. start web server
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let local_addr = listener.local_addr().unwrap();
-    let _handle = spawn_web_server(listener);
+    let (tx_ready, _) = tokio::sync::watch::channel(0);
+    let (tx_updates, _) = tokio::sync::mpsc::unbounded_channel();
+    let loaded_identity = nancy::schema::identity_config::Identity::load(tmp.path()).await.unwrap();
+    let ipc_state = nancy::coordinator::ipc::IpcState {
+        tx_ready: std::sync::Arc::new(tx_ready),
+        tx_updates: std::sync::Arc::new(tx_updates),
+        shared_identity: std::sync::Arc::new(tokio::sync::RwLock::new(loaded_identity)),
+    };
+    let _handle = spawn_web_server(listener, ipc_state);
     
     // Allow server to boot explicitly cleanly
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
@@ -46,8 +53,9 @@ async fn test_e2e_web_grinder_list() {
     }
     assert_eq!(status, reqwest::StatusCode::OK, "API returned non-200");
     
-    let statuses: Vec<web::schema::GrinderStatus> = serde_json::from_str(&text)
-        .expect("Failed to deserialize GrinderStatus vector");
+    let parsed: web::schema::GrindersResponse = serde_json::from_str(&text)
+        .expect("Failed to deserialize GrindersResponse");
+    let statuses = parsed.grinders;
         
     assert_eq!(statuses.len(), 3, "Expected 3 provisioned grinders from identity.json");
     for s in statuses {
@@ -64,13 +72,13 @@ async fn test_e2e_web_grinders_online() {
     std::env::set_current_dir(tmp.path()).unwrap();
     
     // 1. git init
-    let repo = git2::Repository::init(tmp.path()).unwrap();
+    let _repo = git2::Repository::init(tmp.path()).unwrap();
     
     // 2. nancy init (provision 3 grinders)
     nancy::commands::init::init(tmp.path(), 3).await.unwrap();
     
     let identity_file = tmp.path().join(".nancy").join("identity.json");
-    let root_id: nancy::schema::identity_config::Identity = serde_json::from_str(&fs::read_to_string(&identity_file).unwrap()).unwrap();
+    let _root_id: nancy::schema::identity_config::Identity = serde_json::from_str(&fs::read_to_string(&identity_file).unwrap()).unwrap();
     
     // Secure authentic nancy executable mappings natively for tests running `DockerOrchestrator` organically 
     unsafe { std::env::set_var("NANCY_E2E_EXECUTABLE", env!("CARGO_BIN_EXE_nancy")); }
@@ -102,8 +110,9 @@ async fn test_e2e_web_grinders_online() {
         assert_eq!(status, reqwest::StatusCode::OK, "API returned non-200");
         
         let text = res.text().await.unwrap();
-        let statuses: Vec<web::schema::GrinderStatus> = serde_json::from_str(&text)
-            .expect("Failed to deserialize GrinderStatus vector");
+        let parsed: web::schema::GrindersResponse = serde_json::from_str(&text)
+            .expect("Failed to deserialize GrindersResponse");
+        let statuses = parsed.grinders;
             
         online_count = statuses.iter().filter(|s| s.is_online).count();
         if online_count < 3 {
@@ -115,4 +124,95 @@ async fn test_e2e_web_grinders_online() {
     }
     
     assert_eq!(online_count, 3, "Failed to observe 3 ONLINE Grinders before timeout");
+}
+
+#[tokio::test]
+#[sealed_test(env = [
+    ("GEMINI_API_KEY", "mock")
+])]
+async fn test_e2e_web_add_remove_grinder() {
+    let tmp = TempDir::new().unwrap();
+    std::env::set_current_dir(tmp.path()).unwrap();
+    
+    // 1. git init
+    let _repo = git2::Repository::init(tmp.path()).unwrap();
+    
+    // 2. nancy init (provision 0 grinders)
+    nancy::commands::init::init(tmp.path(), 0).await.unwrap();
+    
+    // Secure authentic nancy executable mappings natively for tests running `DockerOrchestrator` organically 
+    unsafe { std::env::set_var("NANCY_E2E_EXECUTABLE", env!("CARGO_BIN_EXE_nancy")); }
+    let mut coord = nancy::commands::coordinator::Coordinator::new(tmp.path()).await.unwrap();
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    
+    tokio::spawn(async move {
+        // Run coordinator indefinitely with bound port callback wrapper
+        let _ = coord.run_until(0, Some(tx), |_| false).await;
+    });
+    
+    // Acquire the dynamic local port published via the socket bind callback
+    let port = rx.await.expect("Coordinator boot dropped callback!");
+    
+    let client = reqwest::Client::new();
+    let base_url = format!("http://127.0.0.1:{}", port);
+    
+    // 3. POST /api/add-grinder
+    let add_res = client.post(&format!("{}/api/add-grinder", base_url))
+        .send().await.expect("Failed to POST add-grinder");
+        
+    assert_eq!(add_res.status(), reqwest::StatusCode::OK);
+    
+    let add_json: serde_json::Value = add_res.json().await.unwrap();
+    let added_did = add_json["did"].as_str().expect("Add Grinder response missing did").to_string();
+    
+    // 4. Poll /api/grinders until the target is online
+    let mut online = false;
+    let mut attempts = 0;
+    while !online && attempts < 200 {
+        let res = client.get(&format!("{}/api/grinders", base_url))
+            .header("Accept", "application/json")
+            .send().await.unwrap();
+            
+        let parsed: web::schema::GrindersResponse = res.json().await.unwrap();
+        let statuses = parsed.grinders;
+        if let Some(target) = statuses.iter().find(|s| s.did == added_did) {
+            online = target.is_online;
+        }
+        
+        if !online {
+            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+            attempts += 1;
+        }
+    }
+    
+    assert!(online, "Failed to observe newly added Grinder {} as ONLINE before timeout", added_did);
+    
+    // 5. POST /api/remove-grinder
+    let remove_payload = serde_json::json!({ "did": added_did });
+    let remove_res = client.post(&format!("{}/api/remove-grinder", base_url))
+        .header("Content-Type", "application/json")
+        .json(&remove_payload)
+        .send().await.expect("Failed to POST remove-grinder");
+        
+    assert_eq!(remove_res.status(), reqwest::StatusCode::OK);
+    
+    // 6. Poll /api/grinders until the target is gone
+    let mut is_gone = false;
+    attempts = 0;
+    while !is_gone && attempts < 200 {
+        let res = client.get(&format!("{}/api/grinders", base_url))
+            .header("Accept", "application/json")
+            .send().await.unwrap();
+            
+        let parsed: web::schema::GrindersResponse = res.json().await.unwrap();
+        let statuses = parsed.grinders;
+        is_gone = !statuses.iter().any(|s| s.did == added_did);
+        
+        if !is_gone {
+            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+            attempts += 1;
+        }
+    }
+    
+    assert!(is_gone, "Failed to observe Grinder {} removal before timeout", added_did);
 }

@@ -108,7 +108,62 @@ async fn proxy_grinder_state(
     (StatusCode::BAD_GATEWAY, "Failed to pull from grinder").into_response()
 }
 
-pub fn spawn_web_server(tcp_listener: tokio::net::TcpListener) -> tokio::task::JoinHandle<()> {
+async fn get_api_grinders(
+    axum::extract::Extension(state): axum::extract::Extension<crate::coordinator::ipc::IpcState>,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> impl IntoResponse {
+    let mut rx = state.tx_ready.subscribe();
+    
+    if let Some(target_version) = params.get("last_version").and_then(|v| v.parse::<u64>().ok()) {
+        let current_state = *rx.borrow_and_update();
+        if current_state == target_version {
+            tokio::select! {
+                _ = rx.changed() => {}
+                _ = crate::commands::coordinator::SHUTDOWN_NOTIFY.notified() => {}
+            }
+        }
+    }
+
+    let version = *rx.borrow();
+
+    let root = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let mut statuses = vec![];
+    let identity = state.shared_identity.read().await;
+    
+    if let crate::schema::identity_config::Identity::Coordinator { workers, .. } = &*identity {
+        for worker in workers {
+            statuses.push(web::schema::GrinderStatus {
+                did: worker.did.clone(),
+                is_online: false,
+            });
+        }
+    }
+    drop(identity);
+
+    let sockets_dir = root.join(".nancy").join("sockets");
+    if let Ok(mut entries) = tokio::fs::read_dir(&sockets_dir).await {
+        while let Ok(Some(entry)) = entries.next_entry().await {
+            let meta = entry.metadata().await;
+            if meta.map(|m| m.is_dir()).unwrap_or(false) {
+                let did = entry.file_name().to_string_lossy().to_string();
+                if did != "coordinator" && tokio::fs::metadata(entry.path().join("grinder.sock")).await.is_ok() {
+                    if let Some(existing) = statuses.iter_mut().find(|s| s.did == did) {
+                        existing.is_online = true;
+                    } else {
+                        statuses.push(web::schema::GrinderStatus {
+                            did: did.to_string(),
+                            is_online: true,
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    axum::Json(web::schema::GrindersResponse { version, grinders: statuses })
+}
+
+pub fn spawn_web_server(tcp_listener: tokio::net::TcpListener, ipc_state: crate::coordinator::ipc::IpcState) -> tokio::task::JoinHandle<()> {
     let conf = leptos::prelude::get_configuration(None).unwrap();
     let leptos_options = conf.leptos_options;
     let options_clone = leptos_options.clone();
@@ -119,18 +174,18 @@ pub fn spawn_web_server(tcp_listener: tokio::net::TcpListener) -> tokio::task::J
 
     let options_clone = leptos_options.clone();
     let web_app = Router::new()
-        .route("/api/grinders", get(|| async {
-            let res = web::agents::get_active_grinders().await.unwrap_or_default();
-            axum::Json(res)
-        }))
+        .route("/api/grinders", get(get_api_grinders))
         .route("/api/{*fn_name}", axum::routing::post(leptos_axum::handle_server_fns))
         .route("/api/fs/{*path}", get(fs_asset_handler))
         .route("/api/grinders/{did}/state", get(proxy_grinder_state))
+        .route("/api/add-grinder", axum::routing::post(crate::coordinator::ipc::add_grinder_handler))
+        .route("/api/remove-grinder", axum::routing::post(crate::coordinator::ipc::remove_grinder_handler))
         .leptos_routes_with_context(&leptos_options, routes, move || {
             leptos::prelude::provide_context(options_clone.clone());
         }, web::Shell)
         .fallback(static_asset_handler)
         .layer(TraceLayer::new_for_http())
+        .layer(axum::Extension(ipc_state))
         .with_state(leptos_options);
 
     tokio::spawn(async move {

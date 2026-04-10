@@ -111,6 +111,12 @@ pub async fn grind<P: AsRef<Path>>(
                 }
             }
         ))
+        .route("/shutdown-requested", axum::routing::post(|| async {
+            tracing::info!("Received UDS shutdown signal asynchronously. Evacuating bounded limits...");
+            crate::commands::grind::SHUTDOWN.store(true, Ordering::SeqCst);
+            crate::commands::grind::SHUTDOWN_NOTIFY.notify_waiters();
+            axum::Json(serde_json::json!({"status": "ok"}))
+        }))
         .layer(tower_http::trace::TraceLayer::new_for_http());
 
     let _server_task = tokio::spawn(async move {

@@ -1,5 +1,5 @@
 use anyhow::{Context, Result, bail};
-use did_key::{Ed25519KeyPair, Fingerprint, KeyMaterial, generate};
+// Unused did_key footprint cleared safely
 use git2::Repository;
 use tokio::fs::{self, OpenOptions};
 use tokio::io::AsyncWriteExt;
@@ -54,14 +54,8 @@ pub async fn init<P: AsRef<Path>>(dir: P, grinders: usize) -> Result<()> {
 
     // Generate a new Ed25519 key pair
     println!("Generating a new Ed25519 DID...");
-    let key = generate::<Ed25519KeyPair>(None);
-    let did = key.fingerprint();
-
-    let did_owner = crate::schema::identity_config::DidOwner {
-        did: did.clone(),
-        public_key_hex: hex::encode(key.public_key_bytes()),
-        private_key_hex: hex::encode(key.private_key_bytes()),
-    };
+    let did_owner = crate::schema::identity_config::DidOwner::generate();
+    let did = did_owner.did.clone();
 
     let mut workers = Vec::new();
     let mut worker_payloads = Vec::new();
@@ -71,34 +65,26 @@ pub async fn init<P: AsRef<Path>>(dir: P, grinders: usize) -> Result<()> {
     use crate::schema::registry::EventPayload;
 
     for i in 0..grinders {
-        let worker_key = generate::<Ed25519KeyPair>(None);
-        let worker_did = worker_key.fingerprint();
-
-        let worker_owner = crate::schema::identity_config::DidOwner {
-            did: worker_did.clone(),
-            public_key_hex: hex::encode(worker_key.public_key_bytes()),
-            private_key_hex: hex::encode(worker_key.private_key_bytes()),
-        };
-        workers.push(worker_owner);
+        let worker_owner = crate::schema::identity_config::DidOwner::generate();
+        let worker_did = worker_owner.did.clone();
+        
+        workers.push(worker_owner.clone());
 
         println!("Provisioned grinder {} DID: {}", i + 1, worker_did);
 
         worker_payloads.push(EventPayload::Identity(IdentityPayload {
             did: worker_did,
-            public_key_hex: hex::encode(worker_key.public_key_bytes()),
+            public_key_hex: worker_owner.public_key_hex.clone(),
             timestamp, // can use the same timestamp for simplicity
         }));
     }
 
     let id_obj = crate::schema::identity_config::Identity::Coordinator {
-        did: did_owner,
+        did: did_owner.clone(),
         workers,
     };
 
-    if let Err(e) = fs::write(
-        &identity_file,
-        serde_json::to_string_pretty(&id_obj).unwrap(),
-    ).await {
+    if let Err(e) = id_obj.save(dir).await {
         bail!("Failed to write identity.json: {}", e);
     }
 
@@ -108,7 +94,7 @@ pub async fn init<P: AsRef<Path>>(dir: P, grinders: usize) -> Result<()> {
 
     let payload = EventPayload::Identity(IdentityPayload {
         did: did.clone(),
-        public_key_hex: hex::encode(key.public_key_bytes()),
+        public_key_hex: did_owner.public_key_hex.clone(),
         timestamp,
     });
 

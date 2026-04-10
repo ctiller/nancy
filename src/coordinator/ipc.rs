@@ -1,8 +1,9 @@
 use axum::{
-    extract::State,
+    extract::{Extension, State},
     routing::{get, post},
     Router,
 };
+// Unused did_key imports cleared
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use tokio::net::UnixListener;
@@ -11,6 +12,60 @@ use tokio::net::UnixListener;
 pub struct IpcState {
     pub tx_ready: Arc<tokio::sync::watch::Sender<u64>>,
     pub tx_updates: Arc<tokio::sync::mpsc::UnboundedSender<(crate::schema::ipc::UpdateReadyPayload, tokio::sync::oneshot::Sender<()>)>>,
+    pub shared_identity: Arc<tokio::sync::RwLock<crate::schema::identity_config::Identity>>,
+}
+
+#[derive(serde::Deserialize)]
+pub struct RemoveGrinderPayload {
+    pub did: String,
+}
+
+pub async fn add_grinder_handler(Extension(state): Extension<IpcState>) -> axum::Json<serde_json::Value> {
+    tracing::info!("[Coordinator Web API] Processing /api/add-grinder securely...");
+    let root = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    
+    let mut identity = state.shared_identity.write().await;
+    if let crate::schema::identity_config::Identity::Coordinator { workers, .. } = &mut *identity {
+        let worker_owner = crate::schema::identity_config::DidOwner::generate();
+        let worker_did = worker_owner.did.clone();
+        workers.push(worker_owner);
+        if identity.save(&root).await.is_ok() {
+            state.tx_ready.send_modify(|v| *v += 1);
+            return axum::Json(serde_json::json!({"status": "ok", "did": worker_did}));
+        }
+    }
+    axum::Json(serde_json::json!({"status": "error"}))
+}
+
+pub async fn remove_grinder_handler(
+    Extension(state): Extension<IpcState>,
+    axum::Json(payload): axum::Json<RemoveGrinderPayload>,
+) -> axum::Json<serde_json::Value> {
+    tracing::info!("[Coordinator Web API] Processing /api/remove-grinder for {}", payload.did);
+    let root = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let sock_path = root.join(".nancy").join("sockets").join(&payload.did).join("grinder.sock");
+    
+    if sock_path.exists() {
+        if let Ok(client) = reqwest::Client::builder().unix_socket(sock_path.clone()).build() {
+            let _ = client.post("http://localhost/shutdown-requested").send().await;
+            
+            // Wait for it to close cleanly natively gracefully dropping Docker containers natively structurally
+            let start = std::time::Instant::now();
+            while sock_path.exists() && start.elapsed().as_secs() < 10 {
+                tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            }
+        }
+    }
+
+    let mut identity = state.shared_identity.write().await;
+    if let crate::schema::identity_config::Identity::Coordinator { workers, .. } = &mut *identity {
+        workers.retain(|w| w.did != payload.did);
+        let _ = identity.save(&root).await;
+        let _ = tokio::fs::remove_dir_all(root.join(".nancy").join("sockets").join(&payload.did)).await;
+        state.tx_ready.send_modify(|v| *v += 1);
+        return axum::Json(serde_json::json!({"status": "ok"}));
+    }
+    axum::Json(serde_json::json!({"status": "error"}))
 }
 
 pub async fn ready_for_poll_handler(
@@ -90,6 +145,12 @@ mod tests {
             let ipc_state = IpcState {
                 tx_ready: shared_tx_ready.clone(),
                 tx_updates: Arc::new(tx_updates),
+                shared_identity: Arc::new(tokio::sync::RwLock::new(
+                    crate::schema::identity_config::Identity::Coordinator { 
+                        did: crate::schema::identity_config::DidOwner::generate(), 
+                        workers: vec![] 
+                    }
+                )),
             };
 
             let app = Router::new()
