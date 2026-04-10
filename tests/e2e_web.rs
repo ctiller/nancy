@@ -216,3 +216,59 @@ async fn test_e2e_web_add_remove_grinder() {
     
     assert!(is_gone, "Failed to observe Grinder {} removal before timeout", added_did);
 }
+
+#[tokio::test]
+#[sealed_test(env = [
+    ("GEMINI_API_KEY", "mock")
+])]
+async fn test_e2e_web_tasks_topology() {
+    let tmp = TempDir::new().unwrap();
+    std::env::set_current_dir(tmp.path()).unwrap();
+    
+    let repo = git2::Repository::init(tmp.path()).unwrap();
+    nancy::commands::init::init(tmp.path(), 0).await.unwrap();
+    
+    let identity_file = tmp.path().join(".nancy").join("identity.json");
+    let root_id: nancy::schema::identity_config::Identity = serde_json::from_str(&fs::read_to_string(&identity_file).unwrap()).unwrap();
+    
+    let writer = nancy::events::writer::Writer::new(&repo, root_id).unwrap();
+    writer.log_event(nancy::schema::registry::EventPayload::TaskRequest(
+        nancy::schema::task::TaskRequestPayload {
+            requestor: "tester".to_string(),
+            description: "Test Topology Request".to_string(),
+        }
+    )).unwrap();
+    writer.commit_batch().unwrap();
+
+    let mut coord = nancy::commands::coordinator::Coordinator::new(tmp.path()).await.unwrap();
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    
+    tokio::spawn(async move {
+        let _ = coord.run_until(0, Some(tx), |_| false).await;
+    });
+    
+    let port = rx.await.expect("Coordinator boot dropped callback!");
+    let client = reqwest::Client::new();
+    let url = format!("http://127.0.0.1:{}/api/tasks/topology", port);
+    
+    let mut found = false;
+    let mut attempts = 0;
+    while !found && attempts < 50 {
+        let res = client.get(&url).send().await.unwrap();
+        assert_eq!(res.status(), reqwest::StatusCode::OK);
+        
+        let text = res.text().await.unwrap();
+        let parsed: web::schema::TopologyResponse = serde_json::from_str(&text).unwrap();
+        
+        if parsed.nodes.iter().any(|n| n.name == "Test Topology Request") {
+            assert!(parsed.max_width > 0.0, "Expected max_width to be populated by backend dugong layout");
+            assert!(parsed.max_height > 0.0, "Expected max_height to be populated by backend dugong layout");
+            found = true;
+        } else {
+            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+            attempts += 1;
+        }
+    }
+    
+    assert!(found, "Failed to observe Test Topology Request in topology response");
+}

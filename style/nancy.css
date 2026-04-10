@@ -221,3 +221,21 @@ a:hover, a.active {
   color: #a3e635;
   white-space: pre-wrap;
 }
+
+.pulsate-cyan {
+  animation: pulse-cyan 2.5s infinite ease-in-out;
+}
+@keyframes pulse-cyan {
+  0% { filter: drop-shadow(0 0 4px rgba(6, 182, 212, 0)); }
+  50% { filter: drop-shadow(0 0 12px rgba(6, 182, 212, 0.4)); }
+  100% { filter: drop-shadow(0 0 4px rgba(6, 182, 212, 0)); }
+}
+
+.pulsate-orange {
+  animation: pulse-orange 2.5s infinite ease-in-out;
+}
+@keyframes pulse-orange {
+  0% { filter: drop-shadow(0 0 4px rgba(249, 115, 22, 0)); }
+  50% { filter: drop-shadow(0 0 12px rgba(249, 115, 22, 0.4)); }
+  100% { filter: drop-shadow(0 0 4px rgba(249, 115, 22, 0)); }
+}

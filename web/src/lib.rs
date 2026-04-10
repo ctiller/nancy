@@ -1,6 +1,7 @@
 pub mod repo;
 pub mod agents;
 pub mod schema;
+pub mod tasks;
 use leptos::prelude::*;
 use leptos_meta::{provide_meta_context, Stylesheet, Title, MetaTags};
 use leptos_router::components::{Router, Route, Routes};
@@ -51,7 +52,7 @@ pub fn App() -> impl IntoView {
                 <main class="main-content">
                     <Routes fallback=NotFound>
                         <Route path=path!("") view=CommandView/>
-                        <Route path=path!("tasks") view=TasksView/>
+                        <Route path=path!("tasks") view=tasks::TasksView/>
                         <Route path=path!("agents") view=agents::AgentsView/>
                         <Route path=path!("repo") view=RepoView/>
                         <Route path=path!("logs") view=SettingsLogsView/>
@@ -104,15 +105,6 @@ fn CommandView() -> impl IntoView {
     }
 }
 
-#[component]
-fn TasksView() -> impl IntoView {
-    view! {
-        <div class="glass-panel" style="height: 100%; padding: 20px;">
-            <h2>"Task Topology Graph"</h2>
-            <p>"DAG visualization rendering here..."</p>
-        </div>
-    }
-}
 
 
 

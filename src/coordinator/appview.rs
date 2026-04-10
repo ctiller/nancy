@@ -220,6 +220,130 @@ impl AppView {
         }
         None
     }
+
+    pub fn get_topology(&self) -> web::schema::TopologyResponse {
+        let mut nodes = Vec::new();
+        let mut edges = Vec::new();
+
+        for (id, payload) in &self.requests {
+            if let EventPayload::TaskRequest(r) = payload {
+                nodes.push(web::schema::TopologyNode {
+                    id: id.clone(),
+                    node_type: web::schema::NodeType::TaskRequest,
+                    name: r.description.clone(),
+                    active_agent: None,
+                    is_completed: self.handled_requests.contains(id),
+                    x: 0.0,
+                    y: 0.0,
+                });
+            }
+        }
+
+        for (id, payload) in &self.tasks {
+            if let EventPayload::Task(t) = payload {
+                let node_type = if t.action == crate::schema::task::TaskAction::Plan {
+                    web::schema::NodeType::Plan
+                } else {
+                    web::schema::NodeType::Task
+                };
+                
+                let active_agent = self.assignments.get(id).cloned();
+                let is_completed = self.task_completions.contains(id);
+
+                nodes.push(web::schema::TopologyNode {
+                    id: id.clone(),
+                    node_type,
+                    name: t.description.clone(),
+                    active_agent,
+                    is_completed,
+                    x: 0.0,
+                    y: 0.0,
+                });
+            }
+        }
+
+        for (target, sources) in &self.blocked_by {
+            for source in sources {
+                edges.push(web::schema::TopologyEdge {
+                    source: source.clone(),
+                    target: target.clone(),
+                    points: Vec::new(),
+                });
+            }
+        }
+
+        // Layout evaluation
+        use dugong::graphlib::{Graph, GraphOptions};
+        use dugong::{EdgeLabel, GraphLabel, NodeLabel, RankDir, layout};
+
+        let mut g: Graph<NodeLabel, EdgeLabel, GraphLabel> = Graph::new(GraphOptions {
+            multigraph: true,
+            compound: true,
+            directed: true,
+        });
+
+        g.set_graph(GraphLabel {
+            rankdir: RankDir::TB,
+            nodesep: 60.0,
+            ranksep: 100.0,
+            ..Default::default()
+        });
+
+        g.set_default_edge_label(EdgeLabel::default);
+
+        const NODE_WIDTH: f64 = 280.0;
+        const NODE_HEIGHT: f64 = 80.0;
+
+        for node in &nodes {
+            g.set_node(&node.id, NodeLabel {
+                width: NODE_WIDTH,
+                height: NODE_HEIGHT,
+                ..Default::default()
+            });
+        }
+
+        for edge in &edges {
+            if g.has_node(&edge.source) && g.has_node(&edge.target) {
+                g.set_edge(&edge.source, &edge.target);
+            }
+        }
+
+        layout(&mut g);
+
+        let mut max_width = 0.0_f64;
+        let mut max_height = 0.0_f64;
+
+        for node in &mut nodes {
+            if let Some(n) = g.node(&node.id) {
+                let nx = n.x.unwrap_or(0.0);
+                let ny = n.y.unwrap_or(0.0);
+                node.x = nx;
+                node.y = ny;
+                max_width = max_width.max(nx + NODE_WIDTH + 200.0);
+                max_height = max_height.max(ny + NODE_HEIGHT + 200.0);
+            }
+        }
+
+        for edge in &mut edges {
+            if g.has_node(&edge.source) && g.has_node(&edge.target) {
+                if let Some(e) = g.edge(&edge.source, &edge.target, None) {
+                    edge.points = e.points.iter().map(|p| (p.x, p.y)).collect();
+                }
+            }
+        }
+
+        // Sort for deterministic layout stability organically
+        nodes.sort_by(|a, b| a.id.cmp(&b.id));
+        edges.sort_by(|a, b| a.source.cmp(&b.source).then(a.target.cmp(&b.target)));
+
+        web::schema::TopologyResponse {
+            version: 0,
+            max_width,
+            max_height,
+            nodes,
+            edges,
+        }
+    }
 }
 
 #[cfg(test)]

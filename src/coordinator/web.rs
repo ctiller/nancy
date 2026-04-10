@@ -163,6 +163,39 @@ async fn get_api_grinders(
     axum::Json(web::schema::GrindersResponse { version, grinders: statuses })
 }
 
+async fn get_api_tasks_topology(
+    axum::extract::Extension(state): axum::extract::Extension<crate::coordinator::ipc::IpcState>,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> impl IntoResponse {
+    let mut rx = state.tx_ready.subscribe();
+    
+    if let Some(target_version) = params.get("last_version").and_then(|v| v.parse::<u64>().ok()) {
+        let current_state = *rx.borrow_and_update();
+        if current_state == target_version {
+            tokio::select! {
+                _ = rx.changed() => {}
+                _ = crate::commands::coordinator::SHUTDOWN_NOTIFY.notified() => {}
+            }
+        }
+    }
+
+    let version = *rx.borrow();
+
+    let root = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let repo = match git2::Repository::discover(&root) {
+        Ok(r) => r,
+        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "No repo found").into_response(),
+    };
+    
+    let identity = { state.shared_identity.read().await.clone() };
+    
+    let appview = crate::coordinator::appview::AppView::hydrate(&repo, &identity, None);
+    let mut topology = appview.get_topology();
+    topology.version = version;
+
+    axum::Json(topology).into_response()
+}
+
 pub fn spawn_web_server(tcp_listener: tokio::net::TcpListener, ipc_state: crate::coordinator::ipc::IpcState) -> tokio::task::JoinHandle<()> {
     let conf = leptos::prelude::get_configuration(None).unwrap();
     let leptos_options = conf.leptos_options;
@@ -175,6 +208,7 @@ pub fn spawn_web_server(tcp_listener: tokio::net::TcpListener, ipc_state: crate:
     let options_clone = leptos_options.clone();
     let web_app = Router::new()
         .route("/api/grinders", get(get_api_grinders))
+        .route("/api/tasks/topology", get(get_api_tasks_topology))
         .route("/api/{*fn_name}", axum::routing::post(leptos_axum::handle_server_fns))
         .route("/api/fs/{*path}", get(fs_asset_handler))
         .route("/api/grinders/{did}/state", get(proxy_grinder_state))
