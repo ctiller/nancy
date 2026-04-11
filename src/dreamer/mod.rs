@@ -35,6 +35,10 @@ impl AgentTaskProcessor for DreamerTaskProcessor {
             tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
 
             // Run evaluate events background worker
+            {
+                *tree_root.root_frame.status.lock().unwrap() = Some("Evaluating Tasks...".to_string());
+                let _ = tree_root.updater.send_modify(|v| *v += 1);
+            }
             let _ = self.task_view.evaluate_events(repo, id_obj, tree_root, global_writer).await;
 
             Ok(false)

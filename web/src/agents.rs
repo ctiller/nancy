@@ -11,14 +11,27 @@ pub fn agents_view() -> Html {
         let reload = *reload_trigger;
         use_effect_with(reload, move |_| {
             let mut last_version: Option<u64> = None;
+            let cancelled = std::rc::Rc::new(std::cell::Cell::new(false));
+            let cancel_clone = cancelled.clone();
+            let abort_controller = web_sys::AbortController::new().ok();
+            let signal = abort_controller.as_ref().map(|ac| ac.signal());
+            
             wasm_bindgen_futures::spawn_local(async move {
                 loop {
+                    if cancel_clone.get() { break; }
                     let url = if let Some(lv) = last_version {
                         format!("/api/grinders?last_version={}", lv)
                     } else {
                         "/api/grinders".to_string()
                     };
-                    if let Ok(resp) = gloo_net::http::Request::get(&url).send().await {
+                    
+                    let mut req = gloo_net::http::Request::get(&url);
+                    if let Some(sig) = &signal {
+                        req = req.abort_signal(Some(sig));
+                    }
+                    
+                    if let Ok(resp) = req.send().await {
+                        if cancel_clone.get() { break; }
                         if resp.ok() {
                             if let Ok(data) = resp.json::<GrindersResponse>().await {
                                 if Some(data.version) != last_version {
@@ -28,10 +41,17 @@ pub fn agents_view() -> Html {
                             }
                         }
                     }
+                    if cancel_clone.get() { break; }
                     gloo_timers::future::sleep(std::time::Duration::from_secs(2)).await;
                 }
             });
-            || ()
+            
+            move || {
+                cancelled.set(true);
+                if let Some(ac) = abort_controller {
+                    ac.abort();
+                }
+            }
         });
     }
 
@@ -99,6 +119,11 @@ fn agent_card(props: &AgentCardProps) -> Html {
         let crash_log = crash_log.clone();
         
         use_effect_with((), move |_| {
+            let cancelled = std::rc::Rc::new(std::cell::Cell::new(false));
+            let cancel_clone = cancelled.clone();
+            let abort_controller = web_sys::AbortController::new().ok();
+            let signal = abort_controller.as_ref().map(|ac| ac.signal());
+
             if let Some(l_ref) = log_ref {
                 let crash_log = crash_log.clone();
                 wasm_bindgen_futures::spawn_local(async move {
@@ -113,12 +138,20 @@ fn agent_card(props: &AgentCardProps) -> Html {
             wasm_bindgen_futures::spawn_local(async move {
                 let mut last_update: Option<u64> = None;
                 loop {
+                    if cancel_clone.get() { break; }
                     let url = if let Some(lu) = last_update {
                         format!("/api/grinders/{}/state?last_update={}", did, lu)
                     } else {
                         format!("/api/grinders/{}/state", did)
                     };
-                    if let Ok(resp) = gloo_net::http::Request::get(&url).send().await {
+                    
+                    let mut req = gloo_net::http::Request::get(&url);
+                    if let Some(sig) = &signal {
+                        req = req.abort_signal(Some(sig));
+                    }
+                    
+                    if let Ok(resp) = req.send().await {
+                        if cancel_clone.get() { break; }
                         if resp.ok() {
                             if let Ok(json) = resp.json::<serde_json::Value>().await {
                                 if let (Some(new_update), Some(frame_val)) = (
@@ -142,10 +175,17 @@ fn agent_card(props: &AgentCardProps) -> Html {
                     } else {
                         is_online.set(false);
                     }
+                    if cancel_clone.get() { break; }
                     gloo_timers::future::sleep(std::time::Duration::from_secs(2)).await;
                 }
             });
-            || ()
+            
+            move || {
+                cancelled.set(true);
+                if let Some(ac) = abort_controller {
+                    ac.abort();
+                }
+            }
         });
     }
 
@@ -174,11 +214,13 @@ fn agent_card(props: &AgentCardProps) -> Html {
         if online_val { "1.0" } else { "0.6" }
     );
 
+    let is_active = online_val && state.as_ref().map(|f| f.status.as_deref() != Some("Waiting for assignments...")).unwrap_or(false);
+
     let dot_style = format!(
         "background-color: {}; box-shadow: {}; animation: {};",
         if online_val { "var(--accent-cyan)" } else { "var(--text-muted)" },
         if online_val { "0 0 8px var(--accent-cyan)" } else { "none" },
-        if online_val { "pulse 2s infinite" } else { "none" }
+        if is_active { "pulse 2s infinite" } else { "none" }
     );
 
     html! {
@@ -330,7 +372,7 @@ fn frame_view(props: &FrameViewProps) -> Html {
                             </div>
                         },
                         SerializedElement::Data { key, value } => {
-                            if key == "system_prompt" || key == "user_prompt" {
+                            if key == "system_prompt" || key == "user_prompt" || key == "response" {
                                 let md_html = render_markdown(value.as_str().unwrap_or(""));
                                 html! {
                                     <details class="agent-element data-element custom-details" style="margin-bottom: 12px; margin-top: 8px;">

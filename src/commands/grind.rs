@@ -40,6 +40,7 @@ impl crate::agent::AgentTaskProcessor for GrinderTaskProcessor {
             
             if let Some((task_id, assignment, payload)) = assigned {
                 *tree_root.root_frame.elements.lock().unwrap() = Vec::new();
+                *tree_root.root_frame.status.lock().unwrap() = Some("Executing Task...".to_string());
                 let _ = tree_root.updater.send_modify(|v| *v += 1);
 
                 let ctx = crate::introspection::IntrospectionContext {

@@ -276,6 +276,7 @@ impl LlmClient {
                                 bail!("Max retries exceeded for Gemini API: {}", e)
                             }
                             retry_count += 1;
+                            crate::introspection::log(&format!("⚠️ API Error: {}. Retrying in {}s (Attempt {}/5)", e, duration.as_secs(), retry_count));
                             sleep(duration).await;
                         } else {
                             bail!("Gemini API error: {}", e)
@@ -306,6 +307,7 @@ impl LlmClient {
                         },
                     ));
                 }
+                crate::introspection::data_log("response", serde_json::json!(text.clone()));
                 crate::introspection::set_frame_status("Done ✓");
                 return parse_response(&text);
             }

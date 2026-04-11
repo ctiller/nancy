@@ -377,8 +377,10 @@ pub async fn execute<'a>(
     
     let default_fallback = if repo.find_reference("refs/heads/main").is_ok() {
         "main".to_string()
-    } else {
+    } else if repo.find_reference("refs/heads/master").is_ok() {
         "master".to_string()
+    } else {
+        repo.head().ok().and_then(|h| h.shorthand().map(|s| s.to_string())).unwrap_or_else(|| "HEAD".to_string())
     };
 
     if safe_target_branch.starts_with("nancy/") 
@@ -386,7 +388,7 @@ pub async fn execute<'a>(
         && !safe_target_branch.starts_with("nancy/features/") 
     {
         tracing::warn!("Task {} attempted to checkout mapped control branch {}. Falling back dynamically structurally.", task_ref, safe_target_branch);
-        safe_target_branch = default_fallback;
+        safe_target_branch = default_fallback.clone();
     }
 
     // Aggressively clean up any stranded/orphaned worktree from previous crashes
@@ -408,12 +410,18 @@ pub async fn execute<'a>(
         .status()
         .await;
 
-    let status = tokio::process::Command::new("git")
-        .arg("worktree")
-        .arg("add")
-        .arg("-f")
-        .arg(&target_path)
-        .arg(&safe_target_branch)
+    let branch_exists = repo.find_reference(&format!("refs/heads/{}", safe_target_branch)).is_ok() || safe_target_branch == "HEAD";
+
+    let mut add_cmd = tokio::process::Command::new("git");
+    add_cmd.arg("worktree").arg("add").arg("-f").arg(&target_path);
+    
+    if !branch_exists {
+        add_cmd.arg("-b").arg(&safe_target_branch).arg(&default_fallback);
+    } else {
+        add_cmd.arg(&safe_target_branch);
+    }
+
+    let status = add_cmd
         .current_dir(workdir)
         .status()
         .await?;

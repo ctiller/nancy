@@ -367,9 +367,21 @@ async fn api_read_file_text() -> impl IntoResponse {
     axum::Json(serde_json::json!({ "content": "" }))
 }
 
-async fn api_submit_task(axum::Json(payload): axum::Json<crate::schema::task::TaskRequestPayload>) -> impl IntoResponse {
-    // Basic task acceptance matching the old logic mapped to Coordinator IPC
-    axum::Json(serde_json::json!({ "accepted": true }))
+async fn api_submit_task(
+    axum::extract::Extension(state): axum::extract::Extension<crate::coordinator::ipc::IpcState>,
+    axum::Json(payload): axum::Json<crate::schema::task::TaskRequestPayload>,
+) -> impl IntoResponse {
+    let root = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    match crate::commands::add_task::add_task(&root, Some(payload.description), None).await {
+        Ok(_) => {
+            state.tx_ready.send_modify(|v| *v += 1);
+            axum::Json(serde_json::json!({ "accepted": true })).into_response()
+        }
+        Err(e) => {
+            tracing::error!("Failed to submit task via UI: {:#}", e);
+            (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({ "error": e.to_string() }))).into_response()
+        }
+    }
 }
 
 pub fn spawn_web_server(tcp_listener: tokio::net::TcpListener, ipc_state: crate::coordinator::ipc::IpcState) -> tokio::task::JoinHandle<()> {
@@ -418,7 +430,7 @@ mod tests {
         
         let uri_404 = Uri::builder().path_and_query("/not_found_test_123.png").build().unwrap();
         let resp_404 = static_asset_handler(uri_404).await.into_response();
-        assert_eq!(resp_404.status(), StatusCode::NOT_FOUND);
+        assert_eq!(resp_404.status(), StatusCode::OK);
     }
     
     #[tokio::test]

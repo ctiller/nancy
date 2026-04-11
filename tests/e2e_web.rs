@@ -53,7 +53,7 @@ async fn test_e2e_web_grinder_list() {
     }
     assert_eq!(status, reqwest::StatusCode::OK, "API returned non-200");
     
-    let parsed: web::schema::GrindersResponse = serde_json::from_str(&text)
+    let parsed: nancy::schema::web::GrindersResponse = serde_json::from_str(&text)
         .expect("Failed to deserialize GrindersResponse");
     let statuses = parsed.grinders;
         
@@ -110,7 +110,7 @@ async fn test_e2e_web_grinders_online() {
         assert_eq!(status, reqwest::StatusCode::OK, "API returned non-200");
         
         let text = res.text().await.unwrap();
-        let parsed: web::schema::GrindersResponse = serde_json::from_str(&text)
+        let parsed: nancy::schema::web::GrindersResponse = serde_json::from_str(&text)
             .expect("Failed to deserialize GrindersResponse");
         let statuses = parsed.grinders;
             
@@ -173,7 +173,7 @@ async fn test_e2e_web_add_remove_grinder() {
             .header("Accept", "application/json")
             .send().await.unwrap();
             
-        let parsed: web::schema::GrindersResponse = res.json().await.unwrap();
+        let parsed: nancy::schema::web::GrindersResponse = res.json().await.unwrap();
         let statuses = parsed.grinders;
         if let Some(target) = statuses.iter().find(|s| s.did == added_did) {
             online = target.is_online;
@@ -204,7 +204,7 @@ async fn test_e2e_web_add_remove_grinder() {
             .header("Accept", "application/json")
             .send().await.unwrap();
             
-        let parsed: web::schema::GrindersResponse = res.json().await.unwrap();
+        let parsed: nancy::schema::web::GrindersResponse = res.json().await.unwrap();
         let statuses = parsed.grinders;
         is_gone = !statuses.iter().any(|s| s.did == added_did);
         
@@ -258,7 +258,7 @@ async fn test_e2e_web_tasks_topology() {
         assert_eq!(res.status(), reqwest::StatusCode::OK);
         
         let text = res.text().await.unwrap();
-        let parsed: web::schema::TopologyResponse = serde_json::from_str(&text).unwrap();
+        let parsed: nancy::schema::web::TopologyResponse = serde_json::from_str(&text).unwrap();
         
         if parsed.nodes.iter().any(|n| n.name == "Test Topology Request") {
             assert!(parsed.max_width > 0.0, "Expected max_width to be populated by backend dugong layout");
@@ -379,7 +379,8 @@ async fn test_e2e_web_tasks_evaluations() {
         assert_eq!(res.status(), reqwest::StatusCode::OK);
         
         let text = res.text().await.unwrap();
-        let parsed: Vec<web::schema::TaskEvaluation> = serde_json::from_str(&text).unwrap();
+        let payload: serde_json::Value = serde_json::from_str(&text).unwrap();
+        let parsed: Vec<nancy::schema::web::TaskEvaluation> = serde_json::from_value(payload["evaluations"].clone()).unwrap();
         
         if parsed.iter().any(|e| e.id == "test-event-id-99" && e.score == 95) {
             found = true;

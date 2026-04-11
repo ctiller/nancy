@@ -126,7 +126,7 @@ pub async fn run_agent<P: AsRef<Path>, Processor: AgentTaskProcessor>(
                     if let Some(req_ver) = requested_version {
                         loop {
                             let current_version = *rx.borrow_and_update();
-                            if current_version > req_ver {
+                            if current_version != req_ver {
                                 break;
                             }
                             tokio::select! {
@@ -173,6 +173,15 @@ pub async fn run_agent<P: AsRef<Path>, Processor: AgentTaskProcessor>(
         let processed = processor.process(&repo, &id_obj, &worker_did, &coordinator_did, &tree_root, &global_writer).await?;
 
         if !processed {
+            {
+                let mut status_lock = tree_root.root_frame.status.lock().unwrap();
+                if status_lock.as_deref() != Some("Waiting for assignments...") {
+                    *status_lock = Some("Waiting for assignments...".to_string());
+                    drop(status_lock);
+                    let _ = tree_root.updater.send_modify(|v| *v += 1);
+                }
+            }
+
             let socket_path = get_coordinator_socket_path(&workdir);
             if socket_path.exists() {
                 match reqwest::Client::builder().unix_socket(socket_path.clone()).build() {
