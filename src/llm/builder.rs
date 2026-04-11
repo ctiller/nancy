@@ -118,6 +118,7 @@ impl LlmBuilder {
                     None
                 }
             },
+            created_at: std::time::Instant::now(),
         })
     }
 

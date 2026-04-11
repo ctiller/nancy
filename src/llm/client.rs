@@ -7,9 +7,6 @@ use schemars::JsonSchema;
 use serde::de::DeserializeOwned;
 use std::time::Duration;
 use tokio::time::sleep;
-use std::sync::OnceLock;
-
-static START_TIME: OnceLock<std::time::Instant> = OnceLock::new();
 
 #[cfg(test)]
 use std::sync::{Arc, Mutex};
@@ -30,6 +27,7 @@ pub struct LlmClient {
             >,
         >,
     >,
+    pub created_at: std::time::Instant,
 }
 
 fn should_retry(err: &gemini_client_api::gemini::error::GeminiResponseError) -> Option<Duration> {
@@ -182,7 +180,7 @@ impl LlmClient {
     }
 
     async fn ask_internal<T: DeserializeOwned + JsonSchema + 'static>(&mut self, question: &str) -> anyhow::Result<T> {
-        let runtime = START_TIME.get_or_init(|| std::time::Instant::now()).elapsed().as_secs();
+        let runtime = self.created_at.elapsed().as_secs();
         let dt: time::OffsetDateTime = std::time::SystemTime::now().into();
         let time_str = dt.format(&time::format_description::well_known::Rfc3339).unwrap_or_else(|_| "Unknown".to_string());
         
@@ -446,6 +444,7 @@ mod tests {
             tools: vec![Box::new(MockTool)],
             session: Session::new(10),
             mock_queue: None,
+            created_at: std::time::Instant::now(),
         };
 
         let responses = client.handle_tool_calls(chat).await;
@@ -500,6 +499,7 @@ mod tests {
             tools: vec![],
             session: Session::new(10),
             mock_queue: Some(Arc::new(Mutex::new(vec![Ok(resp)]))),
+            created_at: std::time::Instant::now(),
         };
 
         let result = client.ask::<String>("question").await.unwrap();
@@ -535,6 +535,7 @@ mod tests {
             tools: vec![],
             session: Session::new(10),
             mock_queue: Some(Arc::new(Mutex::new(responses))),
+            created_at: std::time::Instant::now(),
         };
 
         let mut gemini = Gemini::new("xxx", "test_model", None);
@@ -571,6 +572,7 @@ mod tests {
             tools: vec![],
             session: Session::new(10),
             mock_queue: Some(Arc::new(Mutex::new(vec![err]))),
+            created_at: std::time::Instant::now(),
         };
 
         let mut gemini = Gemini::new("xxx", "test", None);
@@ -617,6 +619,7 @@ mod tests {
             tools: vec![Box::new(MockTool)],
             session: Session::new(10),
             mock_queue: Some(Arc::new(Mutex::new(vec![Ok(resp1), Ok(resp2)]))),
+            created_at: std::time::Instant::now(),
         };
 
         let result = client.ask::<String>("dummy question").await.unwrap();
