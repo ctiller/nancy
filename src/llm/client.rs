@@ -7,6 +7,9 @@ use schemars::JsonSchema;
 use serde::de::DeserializeOwned;
 use std::time::Duration;
 use tokio::time::sleep;
+use std::sync::OnceLock;
+
+static START_TIME: OnceLock<std::time::Instant> = OnceLock::new();
 
 #[cfg(test)]
 use std::sync::{Arc, Mutex};
@@ -179,12 +182,18 @@ impl LlmClient {
     }
 
     async fn ask_internal<T: DeserializeOwned + JsonSchema + 'static>(&mut self, question: &str) -> anyhow::Result<T> {
+        let runtime = START_TIME.get_or_init(|| std::time::Instant::now()).elapsed().as_secs();
+        let dt: time::OffsetDateTime = std::time::SystemTime::now().into();
+        let time_str = dt.format(&time::format_description::well_known::Rfc3339).unwrap_or_else(|_| "Unknown".to_string());
+        
+        let final_question = format!("[SYSTEM]\nTime:{}\nRuntime:{}s\n[/SYSTEM]\n\n{}", time_str, runtime, question);
+
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs();
         
-        let peek = if question.len() > 100 { format!("{}...", &question[..100]) } else { question.to_string() };
+        let peek = if final_question.len() > 100 { format!("{}...", &final_question[..100]) } else { final_question.to_string() };
         crate::introspection::log(&format!("LLM Ask ({}): {}", self.subagent, peek.replace("\n", " ")));
             
         if let Some(tx) = &self.trace_tx {
@@ -192,11 +201,11 @@ impl LlmClient {
                 crate::schema::llm::LlmPromptPayload {
                     subagent: self.subagent.clone(),
                     timestamp,
-                    prompt: question.to_string(),
+                    prompt: final_question.clone(),
                 },
             ));
         }
-        self.session.ask(question.to_string());
+        self.session.ask(final_question.clone());
         
         let is_string = std::any::TypeId::of::<T>() == std::any::TypeId::of::<String>();
         let version = if is_string {
