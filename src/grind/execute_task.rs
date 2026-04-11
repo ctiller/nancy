@@ -132,7 +132,7 @@ async fn handle_plan_task(
             task_description: &task_payload.description,
         }.render()?;
 
-        let res = session.ask_reviewers::<String>(&ideation_experts, &prompt).await?;
+        let res = session.ask_reviewers::<String>(&ideation_experts, &prompt, "ideation round 1").await?;
         
         for (expert_id, ideation_result) in res {
             if let Ok(ideation) = ideation_result {
@@ -199,7 +199,7 @@ async fn handle_plan_task(
         }.render()?;
 
         let formal_panel = session.enforce_quorum(&team_selection.experts, crate::personas::PersonaRole::PlanReview);
-        let review_outputs = session.ask_reviewers::<crate::pre_review::schema::ReviewOutput>(&formal_panel, &review_prompt).await?;
+        let review_outputs = session.ask_reviewers::<crate::pre_review::schema::ReviewOutput>(&formal_panel, &review_prompt, &format!("review round {}", iteration)).await?;
         
         let valid_outputs: Vec<_> = review_outputs.into_iter().filter_map(|(_, x)| x.ok()).collect();
         
@@ -329,6 +329,7 @@ async fn handle_review_task(
         .ask_reviewers::<crate::pre_review::schema::ReviewOutput>(
             &formal_panel,
             &task_prompt,
+            "code review round 1"
         )
         .await?;
 

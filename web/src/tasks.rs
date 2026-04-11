@@ -10,6 +10,7 @@ pub fn tasks_view() -> Html {
     let rendered_edges = use_state(|| Vec::<TopologyEdge>::new());
     let max_width = use_state(|| 800.0);
     let max_height = use_state(|| 600.0);
+    let active_agent_statuses = use_state(|| std::collections::HashMap::<String, String>::new());
 
     {
         let rendered_nodes = rendered_nodes.clone();
@@ -63,6 +64,54 @@ pub fn tasks_view() -> Html {
         });
     }
 
+    {
+        let nodes_state = rendered_nodes.clone();
+        let statuses = active_agent_statuses.clone();
+        let active_dids: Vec<String> = rendered_nodes.iter()
+            .filter_map(|n| if !n.is_completed { n.active_agent.clone() } else { None })
+            .collect();
+        let active_dids_key = active_dids.join(",");
+        use_effect_with(active_dids_key, move |_| {
+            let active_dids: Vec<String> = nodes_state.iter()
+                .filter_map(|n| if !n.is_completed { n.active_agent.clone() } else { None })
+                .collect();
+
+                
+            let cancelled = std::rc::Rc::new(std::cell::Cell::new(false));
+            let cancel_clone = cancelled.clone();
+            
+            if !active_dids.is_empty() {
+                 wasm_bindgen_futures::spawn_local(async move {
+                     loop {
+                         if cancel_clone.get() { break; }
+                         let mut new_statuses = std::collections::HashMap::new();
+                         for did in &active_dids {
+                             let url = format!("/api/grinders/{}/state", did);
+                             if let Ok(resp) = gloo_net::http::Request::get(&url).send().await {
+                                 if let Ok(json) = resp.json::<serde_json::Value>().await {
+                                     if let Some(frame_val) = json.get("tree") {
+                                         if let Ok(frame) = serde_json::from_value::<schema::SerializedFrame>(frame_val.clone()) {
+                                             if let Some(st) = frame.status {
+                                                 new_statuses.insert(did.clone(), st);
+                                             }
+                                         }
+                                     }
+                                 }
+                             }
+                         }
+                         if cancel_clone.get() { break; }
+                         statuses.set(new_statuses);
+                         gloo_timers::future::sleep(std::time::Duration::from_secs(2)).await;
+                     }
+                 });
+            }
+            
+            move || {
+                cancelled.set(true);
+            }
+        });
+    }
+
     let nodes = rendered_nodes.iter().map(|n| {
         let (bg_color, border_color) = if n.is_completed {
             ("rgba(40, 40, 40, 0.8)", "rgba(100, 100, 100, 0.4)")
@@ -95,7 +144,11 @@ pub fn tasks_view() -> Html {
         let status_text = if n.is_completed {
             "COMPLETED".to_string()
         } else if let Some(agent) = &n.active_agent {
-            format!("Assigned: {}", &agent[..8.min(agent.len())])
+            if let Some(summary) = active_agent_statuses.get(agent) {
+                summary.clone()
+            } else {
+                format!("Assigned: {}", &agent[..8.min(agent.len())])
+            }
         } else {
             "PENDING".to_string()
         };

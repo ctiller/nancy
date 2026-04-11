@@ -108,6 +108,7 @@ impl ReviewSession {
         &mut self,
         experts: &[String],
         prompt: &str,
+        status_label: &str,
     ) -> Result<Vec<(String, Result<T>)>> {
         let all_personas = get_all_personas();
         let deadline_state = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
@@ -155,6 +156,9 @@ impl ReviewSession {
 
         use tokio::time::{timeout, Duration};
         
+        let initial_status = format!("{} : 0 agents finished, {} in progress", status_label, started_experts.len());
+        crate::introspection::set_frame_status(&initial_status);
+        
         loop {
             let current_deadline = deadline_state.load(std::sync::atomic::Ordering::SeqCst);
             let time_limit = if current_deadline > 0 {
@@ -169,6 +173,9 @@ impl ReviewSession {
                 Ok(Some((expert_id, res))) => {
                     completed_count += 1;
                     results.push((expert_id, res));
+                    
+                    let new_status = format!("{} : {} agents finished, {} in progress", status_label, completed_count, started_experts.len().saturating_sub(completed_count));
+                    crate::introspection::set_frame_status(&new_status);
 
                     if completed_count >= required_half && deadline_state.load(std::sync::atomic::Ordering::SeqCst) == 0 {
                         let timeout_epoch = std::time::SystemTime::now()
@@ -250,7 +257,7 @@ mod tests {
         
         let _ = session.enforce_quorum(&experts, crate::personas::PersonaRole::PlanReview);
         let active_panel = session.enforce_quorum(&experts, crate::personas::PersonaRole::PlanReview);
-        let res = session.ask_reviewers::<crate::pre_review::schema::ReviewOutput>(&active_panel, "Prompt test").await;
+        let res = session.ask_reviewers::<crate::pre_review::schema::ReviewOutput>(&active_panel, "Prompt test", "test").await;
         
         let outputs = res.expect("ask_reviewers failed internally");
         assert_eq!(outputs.len(), 6);
@@ -276,7 +283,7 @@ mod tests {
 
         let experts = vec!["Invalid Name That Drops Off Coverage".to_string(), "The Pedant".to_string()];
         
-        let res = session.ask_reviewers::<crate::pre_review::schema::ReviewOutput>(&experts, "Prompt test").await;
+        let res = session.ask_reviewers::<crate::pre_review::schema::ReviewOutput>(&experts, "Prompt test", "test").await;
         
         assert!(res.is_ok());
         let outputs = res.unwrap();
@@ -298,7 +305,7 @@ mod tests {
 
         let experts = vec!["The Pedant".to_string(), "The Team Player".to_string()];
         
-        let res = session.ask_reviewers::<crate::pre_review::schema::ReviewOutput>(&experts, "Prompt test").await;
+        let res = session.ask_reviewers::<crate::pre_review::schema::ReviewOutput>(&experts, "Prompt test", "test").await;
         
         assert!(res.is_ok());
         let outputs = res.unwrap();
