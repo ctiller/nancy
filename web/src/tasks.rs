@@ -1,5 +1,5 @@
 use yew::prelude::*;
-use crate::schema::{TopologyResponse, TopologyNode, TopologyEdge, NodeType};
+use schema::{TopologyResponse, TopologyNode, TopologyEdge, NodeType};
 
 const NODE_WIDTH: f64 = 280.0;
 const NODE_HEIGHT: f64 = 80.0;

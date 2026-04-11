@@ -4,7 +4,6 @@ use wasm_bindgen::prelude::*;
 
 pub mod repo;
 pub mod agents;
-pub mod schema;
 pub mod tasks;
 
 #[derive(Clone, Routable, PartialEq)]
@@ -94,7 +93,7 @@ fn command_view() -> Html {
                                     data.get("evaluations")
                                 ) {
                                     if Some(ver) != last_version {
-                                        if let Ok(parsed_evals) = serde_json::from_value::<Vec<crate::schema::TaskEvaluation>>(eval_array.clone()) {
+                                        if let Ok(parsed_evals) = serde_json::from_value::<Vec<schema::TaskEvaluation>>(eval_array.clone()) {
                                             last_version = Some(ver);
                                             evals.set(parsed_evals);
                                         }

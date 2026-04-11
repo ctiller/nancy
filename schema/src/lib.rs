@@ -41,6 +41,7 @@ pub enum NodeType {
     Task,
     TaskRequest,
     Plan,
+    Ask, // Ask was missing from web's schema!
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

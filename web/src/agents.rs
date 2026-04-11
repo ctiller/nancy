@@ -1,5 +1,5 @@
 use yew::prelude::*;
-use crate::schema::{GrinderStatus, SerializedElement, SerializedFrame, GrindersResponse};
+use schema::{GrinderStatus, SerializedElement, SerializedFrame, GrindersResponse};
 
 #[function_component(AgentsView)]
 pub fn agents_view() -> Html {

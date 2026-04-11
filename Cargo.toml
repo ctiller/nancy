@@ -1,5 +1,5 @@
 [workspace]
-members = ["llm-macros", "scratch_test", "web"]
+members = ["llm-macros", "scratch_test", "web", "schema"]
 
 [package]
 name = "nancy"
@@ -44,6 +44,7 @@ uuid = { version = "1.23.0", features = ["v4"] }
 rust-embed = "8.5"
 mime_guess = "2.0"
 web = { path = "web" }
+schema = { path = "schema" }
 dugong = "0.4.0"
 tree-sitter-highlight = "0.26.8"
 tree-sitter-rust = "0.24.2"

@@ -167,7 +167,7 @@ async fn get_api_grinders(
                 av.agent_crashes.get(&worker.did).map(|c| (c.next_restart_at_unix, c.failures, Some(c.log_ref.clone())))
             }).unwrap_or((None, None, None));
             
-            statuses.push(crate::schema::web::GrinderStatus {
+            statuses.push(schema::GrinderStatus {
                 did: worker.did.clone(),
                 agent_type: agent_type.to_string(),
                 is_online: false,
@@ -196,7 +196,7 @@ async fn get_api_grinders(
                                 av.agent_crashes.get(&did).map(|c| (c.next_restart_at_unix, c.failures, Some(c.log_ref.clone())))
                             }).unwrap_or((None, None, None));
                             
-                            statuses.push(crate::schema::web::GrinderStatus {
+                            statuses.push(schema::GrinderStatus {
                                 did: did.to_string(),
                                 agent_type: if is_dreamer { "dreamer".to_string() } else { "grinder".to_string() },
                                 is_online: true,
@@ -211,7 +211,7 @@ async fn get_api_grinders(
         }
     }
 
-    axum::Json(crate::schema::web::GrindersResponse { version, grinders: statuses })
+    axum::Json(schema::GrindersResponse { version, grinders: statuses })
 }
 
 async fn get_api_incident_log(
@@ -330,7 +330,7 @@ async fn get_api_tasks_evaluations(
     let mut evals = Vec::new();
     if let Some(av) = appview_opt {
         for (_, payload) in av.task_evaluations {
-            evals.push(crate::schema::web::TaskEvaluation {
+            evals.push(schema::TaskEvaluation {
                 id: payload.evaluated_event_id,
                 event_type: payload.event_type,
                 score: payload.score,
