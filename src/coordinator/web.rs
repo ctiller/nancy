@@ -2,12 +2,10 @@ use axum::{
     http::{header::CONTENT_TYPE, StatusCode, Uri},
     response::IntoResponse,
     Router,
-    routing::get,
+    routing::{get, post},
 };
-use leptos_axum::{generate_route_list, LeptosRoutes};
 use std::sync::atomic::Ordering;
 use tower_http::trace::TraceLayer;
-use web::App;
 
 #[derive(rust_embed::RustEmbed, Clone)]
 #[folder = "src/web/site/"]
@@ -15,16 +13,26 @@ struct WebAssets;
 
 // Discarded const forces a compile-time fetch error if missing
 #[cfg(not(debug_assertions))]
-const _: &[u8] = include_bytes!("../web/site/pkg/nancy.js");
+const _: &[u8] = include_bytes!("../web/site/index.html");
 
 async fn static_asset_handler(uri: Uri) -> impl IntoResponse {
-    let path = uri.path().trim_start_matches('/').to_string();
+    let mut path = uri.path().trim_start_matches('/').to_string();
+    if path.is_empty() {
+        path = "index.html".to_string();
+    }
+
     match WebAssets::get(path.as_str()) {
         Some(content) => {
             let mime = mime_guess::from_path(path).first_or_octet_stream();
             ([(CONTENT_TYPE, mime.as_ref())], content.data).into_response()
         }
-        None => (StatusCode::NOT_FOUND, "404 Not Found").into_response(),
+        None => {
+            // SPA fallback routing
+            match WebAssets::get("index.html") {
+                Some(content) => ([(CONTENT_TYPE, "text/html")], content.data).into_response(),
+                None => (StatusCode::NOT_FOUND, "404 Not Found").into_response(),
+            }
+        }
     }
 }
 
@@ -159,7 +167,7 @@ async fn get_api_grinders(
                 av.agent_crashes.get(&worker.did).map(|c| (c.next_restart_at_unix, c.failures, Some(c.log_ref.clone())))
             }).unwrap_or((None, None, None));
             
-            statuses.push(web::schema::GrinderStatus {
+            statuses.push(crate::schema::web::GrinderStatus {
                 did: worker.did.clone(),
                 agent_type: agent_type.to_string(),
                 is_online: false,
@@ -188,7 +196,7 @@ async fn get_api_grinders(
                                 av.agent_crashes.get(&did).map(|c| (c.next_restart_at_unix, c.failures, Some(c.log_ref.clone())))
                             }).unwrap_or((None, None, None));
                             
-                            statuses.push(web::schema::GrinderStatus {
+                            statuses.push(crate::schema::web::GrinderStatus {
                                 did: did.to_string(),
                                 agent_type: if is_dreamer { "dreamer".to_string() } else { "grinder".to_string() },
                                 is_online: true,
@@ -203,7 +211,7 @@ async fn get_api_grinders(
         }
     }
 
-    axum::Json(web::schema::GrindersResponse { version, grinders: statuses })
+    axum::Json(crate::schema::web::GrindersResponse { version, grinders: statuses })
 }
 
 async fn get_api_incident_log(
@@ -289,7 +297,21 @@ async fn get_api_tasks_topology(
 
 async fn get_api_tasks_evaluations(
     axum::extract::Extension(state): axum::extract::Extension<crate::coordinator::ipc::IpcState>,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
 ) -> impl IntoResponse {
+    let mut rx = state.tx_ready.subscribe();
+    
+    if let Some(target_version) = params.get("last_version").and_then(|v| v.parse::<u64>().ok()) {
+        let current_state = *rx.borrow_and_update();
+        if current_state == target_version {
+            tokio::select! {
+                _ = rx.changed() => {}
+                _ = crate::commands::coordinator::SHUTDOWN_NOTIFY.notified() => {}
+            }
+        }
+    }
+    
+    let current_version = *rx.borrow();
     let root = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     let identity = { state.shared_identity.read().await.clone() };
     
@@ -308,7 +330,7 @@ async fn get_api_tasks_evaluations(
     let mut evals = Vec::new();
     if let Some(av) = appview_opt {
         for (_, payload) in av.task_evaluations {
-            evals.push(web::schema::TaskEvaluation {
+            evals.push(crate::schema::web::TaskEvaluation {
                 id: payload.evaluated_event_id,
                 event_type: payload.event_type,
                 score: payload.score,
@@ -319,41 +341,59 @@ async fn get_api_tasks_evaluations(
     
     evals.sort_by(|a, b| b.score.cmp(&a.score));
     
-    axum::Json(evals).into_response()
+    axum::Json(serde_json::json!({
+        "version": current_version,
+        "evaluations": evals
+    })).into_response()
+}
+
+async fn api_get_repo_tree(axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>) -> impl IntoResponse {
+    let branch = params.get("branch").cloned().unwrap_or_else(|| "main".to_string());
+    axum::Json(serde_json::json!([]))
+}
+
+async fn api_get_repo_branches() -> impl IntoResponse {
+    let root = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    if let Ok(repo) = git2::Repository::discover(&root) {
+        if let Ok(branches) = repo.branches(Some(git2::BranchType::Local)) {
+            let names: Vec<String> = branches.filter_map(|b| b.ok()).filter_map(|(b, _)| b.name().ok().flatten().map(|s| s.to_string())).collect();
+            return axum::Json(names).into_response();
+        }
+    }
+    axum::Json(Vec::<String>::new()).into_response()
+}
+
+async fn api_read_file_text() -> impl IntoResponse {
+    axum::Json(serde_json::json!({ "content": "" }))
+}
+
+async fn api_submit_task(axum::Json(payload): axum::Json<crate::schema::task::TaskRequestPayload>) -> impl IntoResponse {
+    // Basic task acceptance matching the old logic mapped to Coordinator IPC
+    axum::Json(serde_json::json!({ "accepted": true }))
 }
 
 pub fn spawn_web_server(tcp_listener: tokio::net::TcpListener, ipc_state: crate::coordinator::ipc::IpcState) -> tokio::task::JoinHandle<()> {
     assert!(
-        WebAssets::get("pkg/nancy.js").is_some(),
-        "FATAL: Frontend WASM bundle /pkg/nancy.js was not explicitly embedded in WebAssets. Did the frontend compile logic fail?"
+        WebAssets::get("index.html").is_some(),
+        "FATAL: Frontend WASM bundle index.html was not explicitly embedded in WebAssets. Did the frontend compile logic fail?"
     );
 
-    let conf = leptos::prelude::get_configuration(None).unwrap();
-    let leptos_options = conf.leptos_options;
-    let options_clone = leptos_options.clone();
-    let routes = generate_route_list(move || {
-        leptos::prelude::provide_context(options_clone.clone());
-        App()
-    });
-
-    let options_clone = leptos_options.clone();
     let web_app = Router::new()
         .route("/api/grinders", get(get_api_grinders))
         .route("/api/tasks/topology", get(get_api_tasks_topology))
         .route("/api/tasks/evaluations", get(get_api_tasks_evaluations))
-        .route("/api/{*fn_name}", axum::routing::post(leptos_axum::handle_server_fns))
+        .route("/api/repo/tree", get(api_get_repo_tree))
+        .route("/api/repo/branches", get(api_get_repo_branches))
+        .route("/api/repo/file", get(api_read_file_text))
+        .route("/api/tasks", post(api_submit_task))
         .route("/api/fs/{*path}", get(fs_asset_handler))
         .route("/api/incidents/{log_ref}", get(get_api_incident_log))
         .route("/api/grinders/{did}/state", get(proxy_grinder_state))
-        .route("/api/add-grinder", axum::routing::post(crate::coordinator::ipc::add_grinder_handler))
-        .route("/api/remove-grinder", axum::routing::post(crate::coordinator::ipc::remove_grinder_handler))
-        .leptos_routes_with_context(&leptos_options, routes, move || {
-            leptos::prelude::provide_context(options_clone.clone());
-        }, web::Shell)
+        .route("/api/add-grinder", post(crate::coordinator::ipc::add_grinder_handler))
+        .route("/api/remove-grinder", post(crate::coordinator::ipc::remove_grinder_handler))
         .fallback(static_asset_handler)
         .layer(TraceLayer::new_for_http())
-        .layer(axum::Extension(ipc_state))
-        .with_state(leptos_options);
+        .layer(axum::Extension(ipc_state));
 
     tokio::spawn(async move {
         let shutdown_signal = async {

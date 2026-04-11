@@ -43,10 +43,14 @@ tower-http = { version = "0.6", features = ["fs", "cors", "trace"] }
 uuid = { version = "1.23.0", features = ["v4"] }
 rust-embed = "8.5"
 mime_guess = "2.0"
-web = { path = "web", features = ["ssr"] }
-leptos = { version = "0.8", features = ["ssr"] }
-leptos_axum = "0.8"
+web = { path = "web" }
 dugong = "0.4.0"
+tree-sitter-highlight = "0.26.8"
+tree-sitter-rust = "0.24.2"
+tree-sitter-md = "0.5.3"
+tree-sitter-typescript = "0.23.2"
+tree-sitter-javascript = "0.25.0"
+syntect = "5.3.0"
 
 reqwest = { version = "0.13.2", default-features = false, features = ["rustls", "json"] }
 tracing = "0.1.44"
@@ -56,16 +60,6 @@ ansi-to-html = "0.2.2"
 
 [dev-dependencies]
 proptest = "1.4.0"
-
-[[workspace.metadata.leptos]]
-name = "nancy"
-# The name used by wasm-bindgen/cargo-leptos for the JS/WASM bundle. Defaults to the crate name
-output-name = "nancy"
-bin-package = "nancy"
-lib-package = "web"
-lib-features = ["hydrate"]
-style-file = "style/nancy.css"
-assets-dir = "public"
 
 [profile.dev.package.web]
 opt-level = 3

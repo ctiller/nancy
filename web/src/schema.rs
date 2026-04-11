@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SerializedElement {
     Log { message: String },
@@ -8,7 +8,7 @@ pub enum SerializedElement {
     Frame(SerializedFrame),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SerializedFrame {
     pub name: String,
     #[serde(default)]
@@ -16,7 +16,7 @@ pub struct SerializedFrame {
     pub elements: Vec<SerializedElement>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct GrinderStatus {
     pub did: String,
     pub agent_type: String,
@@ -29,7 +29,7 @@ pub struct GrinderStatus {
     pub log_ref: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct GrindersResponse {
     pub version: u64,
     pub grinders: Vec<GrinderStatus>,
@@ -76,4 +76,10 @@ pub struct TaskEvaluation {
     pub event_type: String,
     pub score: u64,
     pub timestamp: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TaskRequestPayload {
+    pub requestor: String,
+    pub description: String,
 }

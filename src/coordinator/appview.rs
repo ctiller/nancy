@@ -231,15 +231,15 @@ impl AppView {
         None
     }
 
-    pub fn get_topology(&self) -> web::schema::TopologyResponse {
+    pub fn get_topology(&self) -> crate::schema::web::TopologyResponse {
         let mut nodes = Vec::new();
         let mut edges = Vec::new();
 
         for (id, payload) in &self.requests {
             if let EventPayload::TaskRequest(r) = payload {
-                nodes.push(web::schema::TopologyNode {
+                nodes.push(crate::schema::web::TopologyNode {
                     id: id.clone(),
-                    node_type: web::schema::NodeType::TaskRequest,
+                    node_type: crate::schema::web::NodeType::TaskRequest,
                     name: r.description.clone(),
                     active_agent: None,
                     is_completed: self.handled_requests.contains(id),
@@ -252,15 +252,15 @@ impl AppView {
         for (id, payload) in &self.tasks {
             if let EventPayload::Task(t) = payload {
                 let node_type = if t.action == crate::schema::task::TaskAction::Plan {
-                    web::schema::NodeType::Plan
+                    crate::schema::web::NodeType::Plan
                 } else {
-                    web::schema::NodeType::Task
+                    crate::schema::web::NodeType::Task
                 };
                 
                 let active_agent = self.assignments.get(id).cloned();
                 let is_completed = self.task_completions.contains(id);
 
-                nodes.push(web::schema::TopologyNode {
+                nodes.push(crate::schema::web::TopologyNode {
                     id: id.clone(),
                     node_type,
                     name: t.description.clone(),
@@ -274,7 +274,7 @@ impl AppView {
 
         for (target, sources) in &self.blocked_by {
             for source in sources {
-                edges.push(web::schema::TopologyEdge {
+                edges.push(crate::schema::web::TopologyEdge {
                     source: source.clone(),
                     target: target.clone(),
                     points: Vec::new(),
@@ -346,7 +346,7 @@ impl AppView {
         nodes.sort_by(|a, b| a.id.cmp(&b.id));
         edges.sort_by(|a, b| a.source.cmp(&b.source).then(a.target.cmp(&b.target)));
 
-        web::schema::TopologyResponse {
+        crate::schema::web::TopologyResponse {
             version: 0,
             max_width,
             max_height,

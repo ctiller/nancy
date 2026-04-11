@@ -122,11 +122,17 @@ pub async fn run_agent<P: AsRef<Path>, Processor: AgentTaskProcessor>(
                 async move {
                     let requested_version = params.get("last_update").and_then(|v| v.parse::<u64>().ok());
                     let mut rx = state.receiver.clone();
-                    let current_version = *rx.borrow();
 
                     if let Some(req_ver) = requested_version {
-                        if current_version <= req_ver {
-                            let _ = rx.changed().await;
+                        loop {
+                            let current_version = *rx.borrow_and_update();
+                            if current_version > req_ver {
+                                break;
+                            }
+                            tokio::select! {
+                                _ = rx.changed() => {}
+                                _ = crate::agent::SHUTDOWN_NOTIFY.notified() => { break; }
+                            }
                         }
                     }
 

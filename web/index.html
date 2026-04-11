@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nancy UI</title>
+    <link data-trunk rel="css" href="../style/nancy.css" />
+    <link rel="icon" type="image/x-icon" href="public/favicon.ico" />
+    <link data-trunk rel="copy-file" href="../public/nancy-avatar.png" />
+    <link data-trunk rel="copy-dir" href="public/monaco" />
+    <script src="/monaco/vs/loader.js"></script>
+    <script>
+        window.mountMonaco = function(elementId) {
+            if (window.require) {
+                require.config({ paths: { 'vs': '/monaco/vs' } });
+                require(['vs/editor/editor.main'], function() {
+                    window.monacoEditor = monaco.editor.create(document.getElementById(elementId), {
+                        value: '',
+                        language: 'markdown',
+                        theme: 'vs-dark',
+                        minimap: { enabled: false },
+                        automaticLayout: true
+                    });
+                });
+            }
+        };
+        window.getMonacoValue = function() {
+            return window.monacoEditor ? window.monacoEditor.getValue() : "";
+        };
+    </script>
+</head>
+<body>
+    <div id="app"></div>
+</body>
+</html>

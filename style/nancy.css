@@ -98,6 +98,77 @@ a:hover, a.active {
   box-shadow: 0 0 10px var(--accent-glow);
 }
 
+/* Base button resets */
+button {
+  font-family: inherit;
+  transition: all 0.2s ease;
+  outline: none;
+}
+
+.btn-primary {
+  padding: 10px 24px;
+  background: var(--accent-cyan);
+  color: #000;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 0.95rem;
+  box-shadow: 0 0 15px rgba(6, 182, 212, 0.4);
+  letter-spacing: 0.5px;
+}
+
+.btn-primary:hover {
+  background: #08cbe0;
+  box-shadow: 0 0 25px rgba(6, 182, 212, 0.6);
+  transform: translateY(-1px);
+}
+
+.btn-secondary {
+  padding: 10px 24px;
+  border: 1px solid var(--panel-border);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-main);
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.btn-secondary:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255,255,255, 0.3);
+}
+
+.btn-glow {
+  padding: 12px 32px;
+  background: transparent;
+  color: var(--accent-purple);
+  border: 2px solid var(--accent-purple);
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 1rem;
+  box-shadow: 0 0 15px var(--accent-glow), inset 0 0 10px var(--accent-glow);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.btn-glow:hover {
+  background: rgba(168, 85, 247, 0.1);
+  box-shadow: 0 0 25px rgba(168, 85, 247, 0.4), inset 0 0 15px rgba(168, 85, 247, 0.2);
+  color: #c084fc;
+  border-color: #c084fc;
+}
+
+h3 {
+  margin-top: 0;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  border-bottom: 1px solid var(--panel-border);
+  padding-bottom: 12px;
+  margin-bottom: 20px;
+}
+
 /* Page Layouts */
 .main-content {
   padding: 24px;
@@ -277,4 +348,26 @@ details > summary::-webkit-details-marker {
 }
 .custom-details[open] > summary .chevron::after {
   content: "▼";
+}
+
+/* Monaco Editor Constraints */
+.task-editor {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  animation: fade-in 0.3s ease-out;
+}
+
+#monaco-container {
+  min-height: 400px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+}
+
+.monaco-editor {
+  border-radius: 8px;
+}
+
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
 }
