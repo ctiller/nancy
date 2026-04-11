@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use anyhow::Result;
-use futures_util::future::join_all;
+use futures_util::StreamExt;
 
 use crate::llm::client::LlmClient;
 use crate::llm::thinking_llm;
@@ -110,6 +110,7 @@ impl ReviewSession {
         prompt: &str,
     ) -> Result<Vec<(String, Result<T>)>> {
         let all_personas = get_all_personas();
+        let deadline_state = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
 
         for expert_id in experts {
             if !self.reviewers.contains_key(expert_id) {
@@ -122,6 +123,7 @@ impl ReviewSession {
 
                 let tools = crate::tools::AgentToolsBuilder::new()
                     .with_read_path(&self.workspace)
+                    .context(&format!("Reviewing: {}", persona.name), &client_name)
                     .build();
 
                 let new_client = thinking_llm(&client_name)
@@ -133,9 +135,12 @@ impl ReviewSession {
             }
         }
 
-        let mut futures = Vec::new();
+        let mut futures = futures_util::stream::FuturesUnordered::new();
+        let mut started_experts = Vec::new();
         for (id, client) in self.reviewers.iter_mut() {
             if experts.contains(id) {
+                started_experts.push(id.clone());
+                client.shared_deadline = Some(deadline_state.clone());
                 let prompt = prompt.to_string();
                 let expert_id = id.clone();
                 futures.push(async move {
@@ -144,7 +149,53 @@ impl ReviewSession {
             }
         }
 
-        Ok(join_all(futures).await)
+        let required_half = (experts.len() + 1) / 2;
+        let mut completed_count = 0;
+        let mut results = Vec::new();
+
+        use tokio::time::{timeout, Duration};
+        
+        loop {
+            let current_deadline = deadline_state.load(std::sync::atomic::Ordering::SeqCst);
+            let time_limit = if current_deadline > 0 {
+                let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+                let remain = current_deadline.saturating_sub(now);
+                Duration::from_secs(remain)
+            } else {
+                Duration::from_secs(u64::MAX)
+            };
+
+            match timeout(time_limit, futures.next()).await {
+                Ok(Some((expert_id, res))) => {
+                    completed_count += 1;
+                    results.push((expert_id, res));
+
+                    if completed_count >= required_half && deadline_state.load(std::sync::atomic::Ordering::SeqCst) == 0 {
+                        let timeout_epoch = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap()
+                            .as_secs() + 300;
+                        deadline_state.store(timeout_epoch, std::sync::atomic::Ordering::SeqCst);
+                        crate::introspection::log("50% agent quorum reached. Hard 5-minute maximum completion constraint triggered.");
+                    }
+                }
+                Ok(None) => break,
+                Err(_) => {
+                    crate::introspection::log("Evaluation timeout triggered! Dropping remaining reviewers aggressively.");
+                    break;
+                }
+            }
+        }
+        
+        // Add fake error results for those who didn't finish
+        let completed_ids: std::collections::HashSet<_> = results.iter().map(|(id, _)| id.clone()).collect();
+        for expert_id in started_experts {
+            if !completed_ids.contains(&expert_id) {
+                results.push((expert_id.clone(), Err(anyhow::anyhow!("Agent {} did not respond in a timely manner", expert_id))));
+            }
+        }
+
+        Ok(results)
     }
 }
 
@@ -188,9 +239,6 @@ mod tests {
         ("GEMINI_API_KEY", "mock")
     ])]
     async fn test_ask_reviewers_mock() {
-        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
-        crate::events::logger::init_global_writer(tx);
-        
         let mut mock_chat = crate::llm::mock::builder::MockChatBuilder::new();
         for _ in 0..6 {
             mock_chat = mock_chat.respond(r#"{"vote": "approve", "agree_notes": "Good", "disagree_notes": ""}"#);
@@ -233,6 +281,34 @@ mod tests {
         assert!(res.is_ok());
         let outputs = res.unwrap();
         assert_eq!(outputs.len(), 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    #[sealed_test(env = [
+        ("GEMINI_API_KEY", "mock"),
+        ("NANCY_NO_TRACE_EVENTS", "1")
+    ])]
+    async fn test_ask_reviewers_triggers_quorum_timeout() {
+        let mut session = ReviewSession::new(std::path::PathBuf::from("/tmp/nancy"));
+
+        crate::llm::mock::builder::MockChatBuilder::new()
+            .respond(r#"{"vote": "approve", "agree_notes": "Good", "disagree_notes": ""}"#)
+            .hang_on_exhaustion()
+            .commit();
+
+        let experts = vec!["The Pedant".to_string(), "The Team Player".to_string()];
+        
+        let res = session.ask_reviewers::<crate::pre_review::schema::ReviewOutput>(&experts, "Prompt test").await;
+        
+        assert!(res.is_ok());
+        let outputs = res.unwrap();
+        assert_eq!(outputs.len(), 2);
+
+        let successes = outputs.iter().filter(|(_, r)| r.is_ok()).count();
+        assert_eq!(successes, 1);
+
+        let failures = outputs.iter().filter(|(_, r)| r.is_err()).count();
+        assert_eq!(failures, 1);
     }
 
     #[test]

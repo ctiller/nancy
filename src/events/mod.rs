@@ -1,5 +1,4 @@
 pub mod index;
-pub mod logger;
 pub mod reader;
 pub mod writer;
 

@@ -95,9 +95,9 @@ mod tests {
 
         let log_content = std::str::from_utf8(log_blob.content())?;
         let event_lines: Vec<&str> = log_content.trim().split('\n').collect();
-        assert_eq!(event_lines.len(), 5);
+        assert_eq!(event_lines.len(), 6);
 
-        let task_event: Value = serde_json::from_str(event_lines[4])?;
+        let task_event: Value = serde_json::from_str(event_lines[5])?;
         assert_eq!(task_event["payload"]["$type"], "task_request");
         assert_eq!(task_event["payload"]["description"], "Test task 1");
         assert_eq!(
@@ -143,9 +143,9 @@ mod tests {
 
         let log_content = std::str::from_utf8(log_blob.content())?;
         let event_lines: Vec<&str> = log_content.trim().split('\n').collect();
-        assert_eq!(event_lines.len(), 5);
+        assert_eq!(event_lines.len(), 6);
 
-        let task_event: Value = serde_json::from_str(event_lines[4])?;
+        let task_event: Value = serde_json::from_str(event_lines[5])?;
         assert_eq!(task_event["payload"]["description"], "File task desc");
 
         Ok(())

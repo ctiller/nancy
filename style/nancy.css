@@ -312,6 +312,16 @@ h3 {
   100% { filter: drop-shadow(0 0 4px rgba(249, 115, 22, 0)); }
 }
 
+.pulsate-red {
+  animation: pulse-red 2.5s infinite ease-in-out;
+}
+
+@keyframes pulse-red {
+  0% { filter: drop-shadow(0 0 4px rgba(220, 38, 38, 0)); }
+  50% { filter: drop-shadow(0 0 12px rgba(220, 38, 38, 0.6)); }
+  100% { filter: drop-shadow(0 0 4px rgba(220, 38, 38, 0)); }
+}
+
 details > summary::-webkit-details-marker {
   display: none;
 }

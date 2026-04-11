@@ -14,6 +14,10 @@ fn get_coordinator_socket_path(workdir: &Path) -> std::path::PathBuf {
     }
 }
 
+pub fn get_human_did() -> Option<String> {
+    std::env::var("NANCY_HUMAN_DID").ok()
+}
+
 pub static SHUTDOWN: AtomicBool = AtomicBool::new(false);
 pub static SHUTDOWN_NOTIFY: tokio::sync::Notify = tokio::sync::Notify::const_new();
 
@@ -89,7 +93,6 @@ pub async fn run_agent<P: AsRef<Path>, Processor: AgentTaskProcessor>(
     );
 
     let global_writer = crate::events::writer::Writer::new(&repo, id_obj.clone())?;
-    crate::events::logger::init_global_writer(global_writer.tracer());
 
     use crate::introspection::{IntrospectionTreeRoot};
     let tree_root = std::sync::Arc::new(IntrospectionTreeRoot::new());

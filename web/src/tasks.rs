@@ -71,6 +71,7 @@ pub fn tasks_view() -> Html {
                 NodeType::Plan => ("rgba(147, 51, 234, 0.15)", "rgba(147, 51, 234, 0.5)"), // Purple
                 NodeType::TaskRequest => ("rgba(249, 115, 22, 0.15)", "rgba(249, 115, 22, 0.6)"), // Orange
                 NodeType::Task => ("rgba(6, 182, 212, 0.15)", "rgba(6, 182, 212, 0.5)"), // Cyan
+                NodeType::Ask => ("rgba(220, 38, 38, 0.15)", "rgba(220, 38, 38, 0.8)"), // Red
             }
         };
 
@@ -78,6 +79,7 @@ pub fn tasks_view() -> Html {
             match n.node_type {
                 NodeType::Task | NodeType::Plan => "pulsate-cyan",
                 NodeType::TaskRequest => "pulsate-orange",
+                NodeType::Ask => "pulsate-red",
             }
         } else {
             ""
@@ -87,6 +89,7 @@ pub fn tasks_view() -> Html {
             NodeType::Task => "TASK",
             NodeType::TaskRequest => "TASKREQUEST",
             NodeType::Plan => "PLAN",
+            NodeType::Ask => "HUMAN ASK",
         };
 
         let status_text = if n.is_completed {

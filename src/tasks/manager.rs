@@ -93,6 +93,7 @@ mod tests {
             },
             workers: vec![],
             dreamer: crate::schema::identity_config::DidOwner::generate(),
+            human: Some(crate::schema::identity_config::DidOwner::generate()),
         };
 
         let writer = Writer::new(&repo, identity)?;

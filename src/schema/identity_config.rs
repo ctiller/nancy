@@ -16,6 +16,7 @@ pub enum Identity {
         did: DidOwner,
         workers: Vec<DidOwner>,
         dreamer: DidOwner,
+        human: Option<DidOwner>,
     },
 }
 
@@ -38,30 +39,35 @@ impl Identity {
         
         let mut raw: serde_json::Value = serde_json::from_str(&content)?;
         
-        // Auto-patch missing `dreamer` configuration gracefully inside Coordinator schema backwards compatibly!
+        // Auto-patch missing `dreamer` and `human` configuration gracefully inside Coordinator schema backwards compatibly!
+        let mut patched_dreamer = None;
+
         if let Some(obj) = raw.as_object_mut() {
             if obj.get("type").and_then(|v| v.as_str()) == Some("Coordinator") {
                 if !obj.contains_key("dreamer") {
                     let new_dreamer = DidOwner::generate();
+                    patched_dreamer = Some(new_dreamer.clone());
                     obj.insert("dreamer".to_string(), serde_json::to_value(&new_dreamer)?);
-                    
-                    let patched_content = serde_json::to_string_pretty(&raw)?;
-                    tokio::fs::write(&identity_file, &patched_content).await?;
-                    
-                    // Natively emit the Event Payload mapping back to event ledger dynamically
-                    if let Ok(repo) = git2::Repository::discover(dir.as_ref()) {
-                        let identity_patched: Self = serde_json::from_value(raw.clone())?;
-                        if let Ok(writer) = crate::events::writer::Writer::new(&repo, identity_patched) {
-                            let payload = crate::schema::registry::EventPayload::Identity(
-                                crate::schema::identity::IdentityPayload {
-                                    did: new_dreamer.did.clone(),
-                                    public_key_hex: new_dreamer.public_key_hex.clone(),
-                                    timestamp: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs(),
-                                }
-                            );
-                            let _ = writer.log_event(payload);
+                }
+            }
+        }
+
+        if let Some(new_dreamer) = patched_dreamer {
+            let patched_content = serde_json::to_string_pretty(&raw)?;
+            tokio::fs::write(&identity_file, &patched_content).await?;
+            
+            // Natively emit the Event Payload mapping back to event ledger dynamically
+            if let Ok(repo) = git2::Repository::discover(dir.as_ref()) {
+                let identity_patched: Self = serde_json::from_value(raw.clone())?;
+                if let Ok(writer) = crate::events::writer::Writer::new(&repo, identity_patched) {
+                    let payload = crate::schema::registry::EventPayload::Identity(
+                        crate::schema::identity::IdentityPayload {
+                            did: new_dreamer.did.clone(),
+                            public_key_hex: new_dreamer.public_key_hex.clone(),
+                            timestamp: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs(),
                         }
-                    }
+                    );
+                    let _ = writer.log_event(payload);
                 }
             }
         }
@@ -83,6 +89,72 @@ impl Identity {
             Identity::Grinder(owner) => owner,
             Identity::Dreamer(owner) => owner,
             Identity::Coordinator { did, .. } => did,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[tokio::test]
+    async fn test_identity_auto_patching() {
+        let mut _tr = crate::debug::test_repo::TestRepo::new().unwrap();
+        let repo_path = _tr.td.path();
+        
+        let nancy_dir = repo_path.join(".nancy");
+        tokio::fs::create_dir_all(&nancy_dir).await.unwrap();
+        
+        let identity_file = nancy_dir.join("identity.json");
+        
+        // Write older schema
+        let older_schema = r#"{
+            "type": "Coordinator",
+            "did": {
+                "did": "zOldCoordinator",
+                "public_key_hex": "aa",
+                "private_key_hex": "bb"
+            },
+            "workers": []
+        }"#;
+        
+        tokio::fs::write(&identity_file, older_schema).await.unwrap();
+        
+        let loaded = Identity::load(repo_path).await.unwrap();
+        
+        if let Identity::Coordinator { did, dreamer, human, .. } = loaded {
+            assert_eq!(did.did, "zOldCoordinator");
+            assert!(!dreamer.did.is_empty(), "Dreamer should be auto-generated");
+            assert!(human.is_none(), "Human should be None for headless old schemas");
+        } else {
+            panic!("Expected Coordinator identity");
+        }
+        
+        let fully_populated_schema = r#"{
+            "type": "Coordinator",
+            "did": {
+                "did": "zFullCoordinator",
+                "public_key_hex": "aa",
+                "private_key_hex": "bb"
+            },
+            "workers": [],
+            "dreamer": {
+                "did": "zFullDreamer",
+                "public_key_hex": "cc",
+                "private_key_hex": "dd"
+            },
+            "human": null
+        }"#;
+        
+        tokio::fs::write(&identity_file, fully_populated_schema).await.unwrap();
+        let loaded2 = Identity::load(repo_path).await.unwrap();
+        if let Identity::Coordinator { did, dreamer, human, .. } = loaded2 {
+            assert_eq!(did.did, "zFullCoordinator");
+            assert_eq!(dreamer.did, "zFullDreamer");
+            assert!(human.is_none());
+        } else {
+            panic!("Expected Coordinator identity");
         }
     }
 }

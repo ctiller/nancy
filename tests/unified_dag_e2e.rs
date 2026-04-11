@@ -44,6 +44,7 @@ async fn test_coordinator_generates_plan_from_task_request() -> Result<()> {
             private_key_hex: "00".to_string(),
         }],
         dreamer: nancy::schema::identity_config::DidOwner::generate(),
+            human: Some(nancy::schema::identity_config::DidOwner::generate()),
     };
     fs::write(
         nancy_dir.join("identity.json"),
@@ -121,6 +122,7 @@ async fn test_coordinator_generates_review_plan_task_upon_plan_completion() -> R
             private_key_hex: "00".into(),
         }],
         dreamer: nancy::schema::identity_config::DidOwner::generate(),
+            human: Some(nancy::schema::identity_config::DidOwner::generate()),
     };
     fs::write(
         nancy_dir.join("identity.json"),
@@ -204,6 +206,7 @@ async fn test_coordinator_inherits_task_parent_from_feature_branch() -> Result<(
             private_key_hex: "00".into(),
         }],
         dreamer: nancy::schema::identity_config::DidOwner::generate(),
+            human: Some(nancy::schema::identity_config::DidOwner::generate()),
     };
     fs::write(
         nancy_dir.join("identity.json"),
@@ -350,6 +353,7 @@ async fn test_coordinator_generates_rework_implementation_upon_dissent() -> Resu
             private_key_hex: "00".into(),
         }],
         dreamer: nancy::schema::identity_config::DidOwner::generate(),
+            human: Some(nancy::schema::identity_config::DidOwner::generate()),
     };
     fs::write(
         nancy_dir.join("identity.json"),
@@ -470,6 +474,7 @@ async fn test_coordinator_applies_fast_forward_merge_to_feature_branch() -> Resu
             private_key_hex: "00".into(),
         }],
         dreamer: nancy::schema::identity_config::DidOwner::generate(),
+            human: Some(nancy::schema::identity_config::DidOwner::generate()),
     };
     fs::write(
         nancy_dir.join("identity.json"),

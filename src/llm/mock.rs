@@ -5,12 +5,17 @@ pub mod builder {
     use std::sync::LazyLock;
     use std::sync::Mutex;
 
+    pub struct MockQueue {
+        pub responses: Vec<Result<GeminiResponse, GeminiResponseError>>,
+        pub hang_on_exhaustion: bool,
+    }
+
     pub static MOCK_LLM_QUEUE: LazyLock<
-        Mutex<Option<Arc<Mutex<Vec<Result<GeminiResponse, GeminiResponseError>>>>>>,
+        Mutex<Option<Arc<Mutex<MockQueue>>>>,
     > = LazyLock::new(|| Mutex::new(None));
 
     pub struct MockChatBuilder {
-        responses: Vec<Result<GeminiResponse, GeminiResponseError>>,
+        queue: MockQueue,
     }
 
     impl MockChatBuilder {
@@ -20,8 +25,13 @@ pub mod builder {
                 panic!("MockChatBuilder::new() called, but MOCK_LLM_QUEUE is already set! This indicates test pollution/race conditions across test bounds! Ensure tests run in isolated processes via #[sealed_test].");
             }
             Self {
-                responses: Vec::new(),
+                queue: MockQueue { responses: Vec::new(), hang_on_exhaustion: false },
             }
+        }
+
+        pub fn hang_on_exhaustion(mut self) -> Self {
+            self.queue.hang_on_exhaustion = true;
+            self
         }
 
         pub fn respond(mut self, text: &str) -> Self {
@@ -39,7 +49,7 @@ pub mod builder {
             });
             
             let resp: GeminiResponse = serde_json::from_value(json).expect("Failed to build GeminiResponse from text");
-            self.responses.push(Ok(resp));
+            self.queue.responses.push(Ok(resp));
             self
         }
 
@@ -63,13 +73,13 @@ pub mod builder {
             });
             
             let resp: GeminiResponse = serde_json::from_value(json).expect("Failed to build GeminiResponse from functionCall");
-            self.responses.push(Ok(resp));
+            self.queue.responses.push(Ok(resp));
             self
         }
 
         pub fn commit(self) {
             let mut lock = MOCK_LLM_QUEUE.lock().unwrap();
-            *lock = Some(Arc::new(Mutex::new(self.responses)));
+            *lock = Some(Arc::new(Mutex::new(self.queue)));
         }
     }
 }

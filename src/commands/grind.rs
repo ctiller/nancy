@@ -172,6 +172,7 @@ mod tests {
             did: DidOwner { did: "mock1".into(), public_key_hex: "00".into(), private_key_hex: "00".into() },
             workers: vec![],
             dreamer: crate::schema::identity_config::DidOwner::generate(),
+            human: Some(crate::schema::identity_config::DidOwner::generate()),
         };
         fs::write(nancy_dir.join("identity.json"), serde_json::to_string(&identity)?).await?;
         
@@ -197,6 +198,7 @@ mod tests {
             did: DidOwner { did: "mock1".into(), public_key_hex: "00".into(), private_key_hex: "00".into() },
             workers: vec![],
             dreamer: crate::schema::identity_config::DidOwner::generate(),
+            human: Some(crate::schema::identity_config::DidOwner::generate()),
         };
         fs::write(nancy_dir.join("identity.json"), serde_json::to_string(&identity)?).await?;
         

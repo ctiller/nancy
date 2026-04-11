@@ -232,6 +232,7 @@ mod tests {
             did: DidOwner { did: "coord".into(), public_key_hex: "00".into(), private_key_hex: "00".into() },
             workers: vec![],
             dreamer: crate::schema::identity_config::DidOwner::generate(),
+            human: Some(crate::schema::identity_config::DidOwner::generate()),
         };
 
         // When no extra workers exist, extraction skips fast naturally securely.
@@ -276,6 +277,7 @@ mod tests {
             did: DidOwner { did: "mock_test_1".to_string(), public_key_hex: "00".to_string(), private_key_hex: "00".to_string() },
             workers: vec![],
             dreamer: crate::schema::identity_config::DidOwner::generate(),
+            human: Some(crate::schema::identity_config::DidOwner::generate()),
         };
 
         let writer = crate::events::writer::Writer::new(target_repo, coord_identity.clone())?;

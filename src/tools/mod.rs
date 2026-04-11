@@ -11,6 +11,8 @@ pub struct AgentToolsBuilder {
     read_paths: Vec<PathBuf>,
     write_paths: Vec<PathBuf>,
     inherited_perms: Option<std::sync::Arc<Permissions>>,
+    task_name: Option<String>,
+    agent_path: Option<String>,
 }
 
 impl AgentToolsBuilder {
@@ -19,6 +21,8 @@ impl AgentToolsBuilder {
             read_paths: Vec::new(),
             write_paths: Vec::new(),
             inherited_perms: None,
+            task_name: None,
+            agent_path: None,
         }
     }
 
@@ -34,6 +38,12 @@ impl AgentToolsBuilder {
 
     pub fn with_write_path(mut self, path: impl AsRef<Path>) -> Self {
         self.write_paths.push(path.as_ref().to_path_buf());
+        self
+    }
+
+    pub fn context(mut self, task_name: &str, agent_path: &str) -> Self {
+        self.task_name = Some(task_name.to_string());
+        self.agent_path = Some(agent_path.to_string());
         self
     }
 
@@ -56,7 +66,10 @@ impl AgentToolsBuilder {
         tools.extend(vec![
             Box::new(execution::RunCommand::new()) as Box<dyn LlmTool>,
         ]);
-        tools.extend(investigate::create_investigate_tools(perms));
+        
+        let tn = self.task_name.unwrap_or_else(|| "Unknown Task".to_string());
+        let ap = self.agent_path.unwrap_or_else(|| "Unknown Agent".to_string());
+        tools.extend(investigate::create_investigate_tools(perms, tn, ap));
 
         tools
     }

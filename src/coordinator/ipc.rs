@@ -150,6 +150,7 @@ mod tests {
                         did: crate::schema::identity_config::DidOwner::generate(), 
                         workers: vec![],
                         dreamer: crate::schema::identity_config::DidOwner::generate(),
+            human: Some(crate::schema::identity_config::DidOwner::generate()),
                     }
                 )),
             };

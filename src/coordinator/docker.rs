@@ -13,8 +13,11 @@ use std::path::{Path, PathBuf};
 use crate::coordinator::appview::AppView;
 use crate::schema::identity_config::Identity;
 
-fn build_worker_env_vars(coordinator_did: &str) -> Vec<String> {
+fn build_worker_env_vars(coordinator_did: &str, human_did: Option<&str>) -> Vec<String> {
     let mut env_vars = vec![format!("COORDINATOR_DID={}", coordinator_did)];
+    if let Some(did) = human_did {
+        env_vars.push(format!("NANCY_HUMAN_DID={}", did));
+    }
     if let Ok(api_key) = std::env::var("GEMINI_API_KEY") {
         env_vars.push(format!("GEMINI_API_KEY={}", api_key));
     }
@@ -141,8 +144,8 @@ impl DockerOrchestrator {
     pub async fn sync_deployments(&mut self, _appview: &AppView, identity: &Identity) -> Vec<(crate::schema::task::AgentCrashReportPayload, String)> {
         let root_did = identity.get_did_owner().did.clone();
 
-        let (workers, dreamer) = match identity {
-            Identity::Coordinator { workers, dreamer, .. } => (workers.clone(), dreamer.clone()),
+        let (workers, dreamer, human) = match identity {
+            Identity::Coordinator { workers, dreamer, human, .. } => (workers.clone(), dreamer.clone(), human.clone()),
             _ => return Vec::new(), // Grinders don't launch docker containers
         };
 
@@ -307,6 +310,7 @@ impl DockerOrchestrator {
             let agent_type = agent_type.to_string();
             let worker = worker.clone();
             let container_name_clone = container_name.clone();
+            let human_clone = human.clone();
 
             deployment_tasks.push(tokio::spawn(async move {
                 let nancy_worktrees = workdir.join(".nancy").join("worktrees");
@@ -370,7 +374,7 @@ impl DockerOrchestrator {
                 ).await;
 
                 // Run container
-                let env_vars = build_worker_env_vars(&root_did);
+                let env_vars = build_worker_env_vars(&root_did, human_clone.as_ref().map(|h| h.did.as_str()));
                 let config = build_container_config("rust:latest", &target_path, &workdir, &worker.did, env_vars, &agent_type).await;
 
                 match docker

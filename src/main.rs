@@ -185,9 +185,14 @@ mod tests {
             }
         }
 
+        // Give spawned coordinator bounds 1000ms to gracefully crash natively on drop under llvm-cov slowing execution
+        tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
+
         // Test Cleanup
         let args_cleanup = Args::try_parse_from(["nancy", "cleanup"]).unwrap();
         execute_command(&args_cleanup, grind_dir.clone()).await?;
+
+        // Ensure no stray files are magically created inside .nancy
         assert!(!grind_dir.join(".nancy").exists());
         
         Ok(())

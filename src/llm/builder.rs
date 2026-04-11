@@ -18,7 +18,7 @@ pub struct LlmBuilder {
     system_prompt: Vec<String>,
     tools: Vec<Box<dyn crate::llm::tool::LlmTool>>,
     subagent: String,
-    trace_tx: Option<tokio::sync::mpsc::UnboundedSender<crate::schema::registry::EventPayload>>,
+    shared_deadline: Option<std::sync::Arc<std::sync::atomic::AtomicU64>>,
 }
 
 pub fn fast_llm(name: &str) -> LlmBuilder {
@@ -44,12 +44,12 @@ impl LlmBuilder {
             system_prompt: Vec::new(),
             tools: Vec::new(),
             subagent,
-            trace_tx: None,
+            shared_deadline: None,
         }
     }
 
-    pub fn with_writer(mut self, writer: &crate::events::writer::Writer) -> Self {
-        self.trace_tx = Some(writer.tracer());
+    pub fn with_shared_deadline(mut self, deadline: std::sync::Arc<std::sync::atomic::AtomicU64>) -> Self {
+        self.shared_deadline = Some(deadline);
         self
     }
 
@@ -86,20 +86,7 @@ impl LlmBuilder {
 
         let session = gemini_client_api::gemini::types::sessions::Session::new(10000);
 
-        let tx = match self.trace_tx {
-            Some(t) => Some(t),
-            None => {
-                if std::env::var("NANCY_NO_TRACE_EVENTS").unwrap_or_default() == "1" {
-                    None
-                } else if cfg!(test) && crate::events::logger::global_tx().is_none() {
-                    bail!(
-                        "Test LLM clients must explicitly provide `.with_writer(&test_writer)` to ensure traced execution safely securely mapped!"
-                    );
-                } else {
-                    Some(crate::events::logger::global_tx().context("Global logger is not initialized for production LLM client trace dispatch.")?)
-                }
-            }
-        };
+        // Trace dependencies handled ad-hoc locally inside the LlmClient
 
         Ok(LlmClient {
             kind: self.kind,
@@ -108,7 +95,6 @@ impl LlmBuilder {
             system_prompt: self.system_prompt,
             tools: self.tools,
             subagent: self.subagent,
-            trace_tx: tx,
             session,
             mock_queue: {
                 let lock = crate::llm::mock::builder::MOCK_LLM_QUEUE.lock().unwrap();
@@ -119,6 +105,7 @@ impl LlmBuilder {
                 }
             },
             created_at: std::time::Instant::now(),
+            shared_deadline: self.shared_deadline,
         })
     }
 

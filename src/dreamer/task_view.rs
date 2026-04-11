@@ -26,14 +26,14 @@ impl TaskViewEvaluator {
         global_writer: &'a crate::events::writer::Writer<'_>,
     ) -> Result<()> {
         let workers_dids = match id_obj {
-            Identity::Coordinator { workers, did, dreamer } => {
+            Identity::Coordinator { workers, did, dreamer, .. } => {
                 let mut all = vec![did.did.clone(), dreamer.did.clone()];
                 all.extend(workers.iter().map(|w| w.did.clone()));
                 all
             }
             Identity::Dreamer(_) | Identity::Grinder(_) => {
                 if let Ok(coord_id) = Identity::load(repo.workdir().unwrap()).await {
-                     if let Identity::Coordinator { workers, did, dreamer } = coord_id {
+                     if let Identity::Coordinator { workers, did, dreamer, .. } = coord_id {
                          let mut all = vec![did.did.clone(), dreamer.did.clone()];
                          all.extend(workers.iter().map(|w| w.did.clone()));
                          all
@@ -121,22 +121,32 @@ impl TaskViewEvaluator {
     }
 
     async fn score_event(&self, event: &crate::events::EventEnvelope) -> Result<u64> {
+        let is_ask = matches!(event.payload, crate::schema::registry::EventPayload::Ask(_));
+        if !is_ask {
+            return Ok(0);
+        }
+
         // Fast LLM Grade Eval
         let dump = serde_json::to_string_pretty(&event).unwrap_or_default();
         let prompt = format!(
-            "Evaluate this event payload on a scale from 0 to 100 on how urgently it requires human intervention or awareness. 0 means completely uninteresting background task, 100 means critical immediate attention required. Output ONLY an integer.\n\nPayload:\n{}",
+            "Evaluate this Ask payload on how important it is to a human. Output ONLY an integer from 0 to 100. 0 means it's completely unimportant or spam, 100 means it's highly important and critical to the task.\n\nPayload:\n{}",
             dump
         );
 
         let mut llm = crate::llm::builder::fast_llm("dreamer-task-view")
-            .system_prompt("You are an analytical evaluator scoring log events. Ignore formatting errors and gracefully output only an integer 0-100.")
+            .system_prompt("You are an analytical evaluator scoring log events. Ignore formatting errors and gracefully output only an integer.")
             .temperature(0.0)
             .build()?;
 
         let mut val = 0;
         let response = llm.ask::<String>(&prompt).await?;
-        if let Ok(score) = response.trim().parse::<u64>() {
-            val = score.clamp(0, 100);
+        if let Ok(raw_score) = response.trim().parse::<u64>() {
+            let clamped = raw_score.clamp(0, 100);
+            if clamped == 0 {
+                val = 0;
+            } else {
+                val = (20.0 + ((clamped - 1) as f64 / 99.0) * 30.0).round() as u64;
+            }
         }
         
         Ok(val)
@@ -163,13 +173,15 @@ mod tests {
             id: "test".to_string(),
             did: "did:key:123".to_string(),
             signature: "sig".to_string(),
-            payload: EventPayload::TaskRequest(crate::schema::task::TaskRequestPayload {
-                requestor: "tester".to_string(),
-                description: "desc".to_string(),
+            payload: EventPayload::Ask(crate::schema::task::AskPayload {
+                ask_ref: "aref".to_string(),
+                question: "q".to_string(),
+                agent_path: "a".to_string(),
+                task_name: "t".to_string(),
             }),
         };
         let res = eval.score_event(&ev).await.unwrap();
-        assert_eq!(res, 95);
+        assert_eq!(res, 48); // Scaled from 95 to 48
     }
     
     #[tokio::test]
@@ -184,9 +196,11 @@ mod tests {
             id: "test2".to_string(),
             did: "did:key:123".to_string(),
             signature: "sig".to_string(),
-            payload: EventPayload::TaskRequest(crate::schema::task::TaskRequestPayload {
-                requestor: "tester".to_string(),
-                description: "desc".to_string(),
+            payload: EventPayload::Ask(crate::schema::task::AskPayload {
+                ask_ref: "aref".to_string(),
+                question: "q".to_string(),
+                agent_path: "a".to_string(),
+                task_name: "t".to_string(),
             }),
         };
         let res = eval.score_event(&ev).await.unwrap();
@@ -205,13 +219,15 @@ mod tests {
             id: "test3".to_string(),
             did: "did:key:123".to_string(),
             signature: "sig".to_string(),
-            payload: EventPayload::TaskRequest(crate::schema::task::TaskRequestPayload {
-                requestor: "tester".to_string(),
-                description: "desc".to_string(),
+            payload: EventPayload::Ask(crate::schema::task::AskPayload {
+                ask_ref: "aref".to_string(),
+                question: "q".to_string(),
+                agent_path: "a".to_string(),
+                task_name: "t".to_string(),
             }),
         };
         let res = eval.score_event(&ev).await.unwrap();
-        assert_eq!(res, 100);
+        assert_eq!(res, 50);
     }
 
     #[tokio::test]
@@ -225,8 +241,8 @@ mod tests {
         
         if let Identity::Coordinator { workers, .. } = &id_obj {
             let writer = crate::events::writer::Writer::new(&repo, Identity::Grinder(workers[0].clone())).unwrap();
-            writer.log_event(crate::schema::registry::EventPayload::TaskRequest(
-                crate::schema::task::TaskRequestPayload { requestor: "test".to_string(), description: "test".to_string() }
+            writer.log_event(crate::schema::registry::EventPayload::Ask(
+                crate::schema::task::AskPayload { ask_ref: "aref".to_string(), question: "test".to_string(), agent_path: "a".to_string(), task_name: "t".to_string() }
             )).unwrap();
             writer.commit_batch().unwrap();
         }
@@ -256,7 +272,7 @@ mod tests {
         let mut found = false;
         for ev in reader.iter_events().unwrap() {
             if let EventPayload::TaskEvaluation(te) = ev.unwrap().payload {
-                if te.score == 99 { found = true; }
+                if te.score == 50 { found = true; } // Clamped down from 99
             }
         }
         assert!(found);
@@ -276,8 +292,8 @@ mod tests {
         } else { unreachable!() };
         
         let writer = crate::events::writer::Writer::new(&repo, dreamer_id.clone()).unwrap();
-        writer.log_event(crate::schema::registry::EventPayload::TaskRequest(
-            crate::schema::task::TaskRequestPayload { requestor: "test".to_string(), description: "test".to_string() }
+        writer.log_event(crate::schema::registry::EventPayload::Ask(
+            crate::schema::task::AskPayload { ask_ref: "aref".to_string(), question: "test".to_string(), agent_path: "a".to_string(), task_name: "t".to_string() }
         )).unwrap();
         writer.commit_batch().unwrap();
         
@@ -306,7 +322,7 @@ mod tests {
         let mut found = false;
         for ev in reader.iter_events().unwrap() {
             if let EventPayload::TaskEvaluation(te) = ev.unwrap().payload {
-                if te.score == 42 { found = true; }
+                if te.score == 32 { found = true; }
             }
         }
         assert!(found);

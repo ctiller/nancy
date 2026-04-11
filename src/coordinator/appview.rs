@@ -15,6 +15,7 @@ pub struct AppView {
     pub assignment_targets: HashMap<String, String>, // assignment_ref -> task_ref
     pub agent_crashes: HashMap<String, crate::schema::task::AgentCrashReportPayload>,
     pub task_evaluations: HashMap<String, crate::schema::task::TaskEvaluationPayload>, // evaluated_event_id -> payload
+    pub active_asks: HashMap<String, crate::schema::task::AskPayload>,
 }
 
 impl AppView {
@@ -30,6 +31,7 @@ impl AppView {
             assignment_targets: HashMap::new(),
             agent_crashes: HashMap::new(),
             task_evaluations: HashMap::new(),
+            active_asks: HashMap::new(),
         }
     }
 
@@ -109,6 +111,15 @@ impl AppView {
             }
             EventPayload::TaskEvaluation(e) => {
                 self.task_evaluations.insert(e.evaluated_event_id.clone(), e.clone());
+            }
+            EventPayload::Ask(a) => {
+                self.active_asks.insert(a.ask_ref.clone(), a.clone());
+            }
+            EventPayload::CancelAsk(c) => {
+                self.active_asks.remove(&c.ask_ref);
+            }
+            EventPayload::HumanResponse(hr) => {
+                self.active_asks.remove(&hr.ask_ref);
             }
             _ => {}
         }
@@ -280,6 +291,18 @@ impl AppView {
                     points: Vec::new(),
                 });
             }
+        }
+
+        for (id, payload) in &self.active_asks {
+            nodes.push(crate::schema::web::TopologyNode {
+                id: id.clone(),
+                node_type: crate::schema::web::NodeType::Ask,
+                name: payload.question.clone(),
+                active_agent: Some(payload.agent_path.clone()),
+                is_completed: false,
+                x: 0.0,
+                y: 0.0,
+            });
         }
 
         // Layout evaluation

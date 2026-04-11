@@ -41,6 +41,7 @@ pub enum NodeType {
     Task,
     TaskRequest,
     Plan,
+    Ask,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

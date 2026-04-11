@@ -421,6 +421,7 @@ pub fn spawn_web_server(tcp_listener: tokio::net::TcpListener, ipc_state: crate:
 mod tests {
     use super::*;
     use axum::http::Uri;
+    use sealed_test::prelude::*;
 
     #[tokio::test]
     async fn test_static_asset_handler() {
@@ -454,5 +455,74 @@ mod tests {
         let path_nf = axum::extract::Path("does_not_exist_ever_123.txt".to_string());
         let resp_nf = fs_asset_handler(path_nf).await.into_response();
         assert_eq!(resp_nf.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn test_empty_api_endpoints() {
+        let q = axum::extract::Query(std::collections::HashMap::new());
+        let r1 = api_get_repo_tree(q).await.into_response();
+        assert_eq!(r1.status(), StatusCode::OK);
+        
+        let r2 = api_get_repo_branches().await.into_response();
+        assert!(r2.status() == StatusCode::OK || r2.status() == StatusCode::INTERNAL_SERVER_ERROR);
+        
+        let r3 = api_read_file_text().await.into_response();
+        assert_eq!(r3.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    #[sealed_test]
+    async fn test_get_api_incident_log_not_found() {
+        let (tx, _) = tokio::sync::watch::channel(0);
+        let (tx_updates, _) = tokio::sync::mpsc::unbounded_channel();
+        let id_owner = crate::schema::identity_config::DidOwner { did: "d".to_string(), public_key_hex: "k".to_string(), private_key_hex: "pk".to_string() };
+        let id = crate::schema::identity_config::Identity::Dreamer(id_owner);
+        let ipc = crate::coordinator::ipc::IpcState {
+            tx_ready: std::sync::Arc::new(tx),
+            tx_updates: std::sync::Arc::new(tx_updates),
+            shared_identity: std::sync::Arc::new(tokio::sync::RwLock::new(id)),
+        };
+        let ext = axum::extract::Extension(ipc);
+        
+        let td = tempfile::tempdir().unwrap();
+        std::env::set_current_dir(td.path()).unwrap();
+        
+        // Without repo
+        let resp = get_api_incident_log(ext.clone(), axum::extract::Path("dummy_log_ref".to_string())).await.into_response();
+        assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        
+        // With repo but no branch
+        git2::Repository::init(td.path()).unwrap();
+        let resp2 = get_api_incident_log(ext, axum::extract::Path("dummy_log_ref".to_string())).await.into_response();
+        assert_eq!(resp2.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn test_proxy_grinder_state_missing() {
+        let path = axum::extract::Path("missing_did".to_string());
+        let q = axum::extract::Query(std::collections::HashMap::new());
+        let resp = proxy_grinder_state(path, q).await.into_response();
+        assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+    }
+
+    #[tokio::test]
+    #[sealed_test]
+    async fn test_api_submit_task_error() {
+        let (tx, _) = tokio::sync::watch::channel(0);
+        let (tx_updates, _) = tokio::sync::mpsc::unbounded_channel();
+        let id_owner = crate::schema::identity_config::DidOwner { did: "d".to_string(), public_key_hex: "k".to_string(), private_key_hex: "pk".to_string() };
+        let id = crate::schema::identity_config::Identity::Dreamer(id_owner);
+        let ipc = crate::coordinator::ipc::IpcState {
+            tx_ready: std::sync::Arc::new(tx),
+            tx_updates: std::sync::Arc::new(tx_updates),
+            shared_identity: std::sync::Arc::new(tokio::sync::RwLock::new(id)),
+        };
+        let ext = axum::extract::Extension(ipc);
+        let json = axum::Json(crate::schema::task::TaskRequestPayload { description: "t".to_string(), requestor: "u".to_string() });
+        
+        let td = tempfile::tempdir().unwrap();
+        std::env::set_current_dir(td.path()).unwrap();
+        let resp = api_submit_task(ext, json).await.into_response();
+        assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
     }
 }

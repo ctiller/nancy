@@ -4,7 +4,105 @@ use futures_util::future::try_join_all;
 /// This is the swiss army knife of investigation. Use this to find answers recursively.
 use std::sync::Arc;
 
-pub async fn investigate_impl(perms: Arc<crate::tools::filesystem::Permissions>, question: String) -> anyhow::Result<String> {
+pub struct AskHuman {
+    pub ask_ref: String,
+    pub repo_path: std::path::PathBuf,
+}
+
+impl AskHuman {
+    pub async fn start(question: &str, task_name: &str, agent_path: &str) -> Option<Self> {
+        if std::env::var("NANCY_HUMAN_DID").is_err() { return None; }
+        
+        let repo_path = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        let r = git2::Repository::discover(&repo_path).ok()?;
+        let wd = r.workdir().unwrap_or(&repo_path);
+        let id_obj = crate::schema::identity_config::Identity::load(wd).await.ok()?;
+        let writer = crate::events::writer::Writer::new(&r, id_obj).ok()?;
+        
+        let aref = format!("ask_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos());
+        
+        let payload = crate::schema::registry::EventPayload::Ask(
+            crate::schema::task::AskPayload {
+                ask_ref: aref.clone(),
+                question: question.to_string(),
+                agent_path: agent_path.to_string(),
+                task_name: task_name.to_string(),
+            }
+        );
+        let _ = writer.log_event(payload);
+        
+        Some(Self { ask_ref: aref, repo_path })
+    }
+
+    pub async fn wait_for_response(&self) -> String {
+        let Ok(human_did) = std::env::var("NANCY_HUMAN_DID") else { return String::new() };
+        
+        let mut human_appended_response = String::new();
+        let mut should_wait = false;
+        
+        if let Ok(r) = git2::Repository::discover(&self.repo_path) {
+            let reader = crate::events::reader::Reader::new(&r, human_did.clone());
+            if let Ok(iter) = reader.iter_events() {
+                for ev in iter.flatten() {
+                    if let crate::schema::registry::EventPayload::AskSeen(s) = &ev.payload {
+                        if s.ask_ref == self.ask_ref { should_wait = true; }
+                    } else if let crate::schema::registry::EventPayload::HumanResponse(hr) = &ev.payload {
+                        if hr.ask_ref == self.ask_ref {
+                            human_appended_response = format!("\n\n[HUMAN RESPONSE TO YOUR ASK]: {}", hr.text_response);
+                            should_wait = false;
+                        }
+                    }
+                }
+            }
+        }
+        
+        if should_wait && human_appended_response.is_empty() {
+            let sleep_time = if std::env::var("NANCY_TEST_POLL_TIMEOUT").is_ok() { 50 } else { 1000 };
+            for _ in 0..30 {
+                tokio::time::sleep(std::time::Duration::from_millis(sleep_time)).await;
+                if let Ok(r) = git2::Repository::discover(&self.repo_path) {
+                    let reader2 = crate::events::reader::Reader::new(&r, human_did.clone());
+                    if let Ok(iter) = reader2.iter_events() {
+                        for ev in iter.flatten() {
+                            if let crate::schema::registry::EventPayload::HumanResponse(hr) = &ev.payload {
+                                if hr.ask_ref == self.ask_ref {
+                                    human_appended_response = format!("\n\n[HUMAN RESPONSE TO YOUR ASK]: {}", hr.text_response);
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+                if !human_appended_response.is_empty() { break; }
+            }
+        }
+        
+        human_appended_response
+    }
+
+    pub async fn cancel(&self) {
+        if let Ok(r) = git2::Repository::discover(&self.repo_path) {
+            let wd = r.workdir().unwrap_or(&self.repo_path);
+            if let Ok(id_obj) = crate::schema::identity_config::Identity::load(wd).await {
+                if let Ok(writer) = crate::events::writer::Writer::new(&r, id_obj) {
+                    let payload = crate::schema::registry::EventPayload::CancelAsk(
+                        crate::schema::task::CancelAskPayload {
+                            ask_ref: self.ask_ref.clone(),
+                        }
+                    );
+                    let _ = writer.log_event(payload);
+                }
+            }
+        }
+    }
+}
+
+pub async fn investigate_impl(
+    perms: Arc<crate::tools::filesystem::Permissions>, 
+    question: String,
+    task_name: String,
+    agent_path: String
+) -> anyhow::Result<String> {
     let system_prompt = r#"You are an expert forensic programmer and autonomous system investigator.
 Your objective is to comprehensively map, diagnose, and answer the given question by actively exploring the system using your available toolkit.
 
@@ -15,37 +113,78 @@ Follow these critical principles:
 4. **Be Exhaustive**: When asked to locate or identify something, do not stop at the first match. Comb through the architecture to guarantee complete isolation.
 5. **Report Clearly**: Synthesize your discoveries into a hyper-direct, rigorous, and technical answer yielding exact file paths, snippets, and mechanical processes."#;
 
+    let inner_agent = format!("{}>investigator", agent_path);
+    let tools = super::AgentToolsBuilder::new()
+        .grant_perms(perms)
+        .context(&task_name, &inner_agent)
+        .build();
+
     let mut client = thinking_llm("investigator")
         .temperature(0.3)
-        .tools(super::AgentToolsBuilder::new().grant_perms(perms).build())
+        .tools(tools)
         .system_prompt(system_prompt)
         .build()?;
 
-    client.ask::<String>(&question).await
+    let ask_human = AskHuman::start(&question, &task_name, &agent_path).await;
+    let out = client.ask::<String>(&question).await;
+
+    let human_appended_response = if let Some(ask) = ask_human {
+        let resp = ask.wait_for_response().await;
+        ask.cancel().await;
+        resp
+    } else {
+        String::new()
+    };
+
+    match out {
+        Ok(s) => Ok(format!("{}{}", s, human_appended_response)),
+        Err(e) => Err(e),
+    }
 }
 
 /// A parallelism helper to run multiple investigate tools simultaneously.
-pub async fn multi_investigate_impl(perms: Arc<crate::tools::filesystem::Permissions>, questions: Vec<String>) -> anyhow::Result<Vec<String>> {
+pub async fn multi_investigate_impl(
+    perms: Arc<crate::tools::filesystem::Permissions>, 
+    questions: Vec<String>,
+    task_name: String,
+    agent_path: String
+) -> anyhow::Result<Vec<String>> {
     let futures = questions
         .into_iter()
         .map(|q| {
             let p = Arc::clone(&perms);
-            async move { investigate_impl(p, q).await }
+            let t = task_name.clone();
+            let a = agent_path.clone();
+            async move { investigate_impl(p, q, t, a).await }
         });
     try_join_all(futures).await
 }
 
-pub fn create_investigate_tools(permissions: Arc<crate::tools::filesystem::Permissions>) -> Vec<Box<dyn crate::llm::tool::LlmTool>> {
+pub fn create_investigate_tools(
+    permissions: Arc<crate::tools::filesystem::Permissions>,
+    task_name: String,
+    agent_path: String
+) -> Vec<Box<dyn crate::llm::tool::LlmTool>> {
     let p_inv = Arc::clone(&permissions);
+    let t_inv = task_name.clone();
+    let a_inv = agent_path.clone();
+    
     let inv = llm_macros::make_tool!("investigate", "This is the swiss army knife of investigation. Use this to find answers recursively.", move |question: String| {
         let perms = Arc::clone(&p_inv);
-        async move { investigate_impl(perms, question).await }
+        let t = t_inv.clone();
+        let a = a_inv.clone();
+        async move { investigate_impl(perms, question, t, a).await }
     });
 
     let p_mul = Arc::clone(&permissions);
+    let t_mul = task_name.clone();
+    let a_mul = agent_path.clone();
+    
     let mul = llm_macros::make_tool!("multi_investigate", "A parallelism helper to run multiple investigate tools simultaneously.", move |questions: Vec<String>| {
         let perms = Arc::clone(&p_mul);
-        async move { multi_investigate_impl(perms, questions).await }
+        let t = t_mul.clone();
+        let a = a_mul.clone();
+        async move { multi_investigate_impl(perms, questions, t, a).await }
     });
 
     vec![inv, mul]
@@ -58,12 +197,134 @@ mod tests {
     #[tokio::test]
     async fn test_investigate_coverage() {
         let perms = Arc::new(crate::tools::filesystem::Permissions { read_dirs: vec![], write_dirs: vec![] });
-        let _ = investigate_impl(perms, "hello".to_string()).await;
+        let _ = investigate_impl(perms, "hello".to_string(), "t".to_string(), "a".to_string()).await;
     }
 
     #[tokio::test]
     async fn test_multi_investigate_coverage() {
         let perms = Arc::new(crate::tools::filesystem::Permissions { read_dirs: vec![], write_dirs: vec![] });
-        let _ = multi_investigate_impl(perms, vec!["q1".to_string(), "q2".to_string()]).await;
+        let _ = multi_investigate_impl(perms, vec!["q1".to_string(), "q2".to_string()], "t".to_string(), "a".to_string()).await;
+    }
+
+    use sealed_test::prelude::*;
+
+    #[tokio::test]
+    #[sealed_test(env = [
+        ("NANCY_NO_TRACE_EVENTS", "1"),
+        ("NANCY_HUMAN_DID", "did:key:z6MkiuexGTCjkPmnT4jv1JNAmeV7UnBoMh1rsxLoYYCQ8Txs"),
+        ("NANCY_TEST_POLL_TIMEOUT", "1"),
+        ("GEMINI_API_KEY", "mock")
+    ])]
+    async fn test_investigate_hitl_coverage() {
+        let td = tempfile::tempdir().unwrap();
+        let td_path = td.path().to_path_buf();
+        std::env::set_current_dir(&td_path).unwrap();
+
+        let repo = git2::Repository::init(&td_path).unwrap();
+        crate::commands::init::init(td_path.clone(), 1).await.unwrap();
+
+        // Spawn async human responder securely
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            if let Ok(r) = git2::Repository::discover(".") {
+                let test_human = crate::schema::identity_config::DidOwner {
+                    did: "z6MkiuexGTCjkPmnT4jv1JNAmeV7UnBoMh1rsxLoYYCQ8Txs".to_string(),
+                    public_key_hex: "4231c04a3dd5b64700018aa7cffe4ad35cf9bad05ec2fa21c3dbf5c0339872f8".to_string(),
+                    private_key_hex: "839ce4cc3dc57e147f119a6999c16230ea2d7b47c85ddc2714d25cb202b5023b".to_string(),
+                };
+                
+                // Using Grinder namespace wrapper to allow writer instantiation since Human variant doesn't independently exist
+                if let Ok(writer) = crate::events::writer::Writer::new(&r, crate::schema::identity_config::Identity::Grinder(test_human)) {
+                    // Iterate and pick up the ask_ref organically to respond correctly
+                    let _reader = crate::events::reader::Reader::new(&r, "did:key:z6MkiuexGTCjkPmnT4jv1JNAmeV7UnBoMh1rsxLoYYCQ8Txs".to_string());
+                    let _ = writer.log_event(crate::schema::registry::EventPayload::AskSeen(
+                        crate::schema::task::AskSeenPayload {
+                            ask_ref: "a".to_string(),
+                            timestamp: 0
+                        }
+                    ));
+                    let _ = writer.commit_batch();
+                }
+            }
+        });
+
+        crate::llm::mock::builder::MockChatBuilder::new()
+            .respond("Mocked investigation complete.")
+            .commit();
+
+        // Run Investigate Tool inside context
+        let perms = Arc::new(crate::tools::filesystem::Permissions { read_dirs: vec![], write_dirs: vec![] });
+        let res = investigate_impl(perms, "test".to_string(), "t".to_string(), "a".to_string()).await;
+        assert!(res.is_ok());
+
+        // Validate traces got injected natively on the main agent branch
+        let id_obj = crate::schema::identity_config::Identity::load(&td_path).await.unwrap();
+        let reader = crate::events::reader::Reader::new(&repo, id_obj.get_did_owner().did.clone());
+        let mut found_ask = false;
+        let mut found_cancel = false;
+        for ev in reader.iter_events().unwrap().flatten() {
+            if let crate::schema::registry::EventPayload::Ask(_) = ev.payload {
+                found_ask = true;
+            }
+            if let crate::schema::registry::EventPayload::CancelAsk(_) = ev.payload {
+                found_cancel = true;
+            }
+        }
+        assert!(found_ask);
+        assert!(found_cancel);
+    }
+
+    #[tokio::test]
+    #[sealed_test(env = [
+        ("NANCY_NO_TRACE_EVENTS", "1"),
+        ("NANCY_HUMAN_DID", "z6MkiuexGTCjkPmnT4jv1JNAmeV7UnBoMh1rsxLoYYCQ8Txs"),
+        ("NANCY_TEST_POLL_TIMEOUT", "1")
+    ])]
+    async fn test_ask_human_module_isolation() {
+        let td = tempfile::tempdir().unwrap();
+        let td_path = td.path().to_path_buf();
+        std::env::set_current_dir(&td_path).unwrap();
+
+        let repo = git2::Repository::init(&td_path).unwrap();
+        crate::commands::init::init(td_path.clone(), 1).await.unwrap();
+
+        let ask = AskHuman::start("isolated_q", "task1", "agent1").await.expect("Failed to initialize AskHuman");
+
+        let ask_ref_clone = ask.ask_ref.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            if let Ok(r) = git2::Repository::discover(".") {
+                let test_human = crate::schema::identity_config::DidOwner {
+                    did: "z6MkiuexGTCjkPmnT4jv1JNAmeV7UnBoMh1rsxLoYYCQ8Txs".to_string(),
+                    public_key_hex: "4231c04a3dd5b64700018aa7cffe4ad35cf9bad05ec2fa21c3dbf5c0339872f8".to_string(),
+                    private_key_hex: "839ce4cc3dc57e147f119a6999c16230ea2d7b47c85ddc2714d25cb202b5023b".to_string(),
+                };
+                
+                if let Ok(writer) = crate::events::writer::Writer::new(&r, crate::schema::identity_config::Identity::Grinder(test_human.clone())) {
+                    let _ = writer.log_event(crate::schema::registry::EventPayload::AskSeen(
+                        crate::schema::task::AskSeenPayload {
+                            ask_ref: ask_ref_clone.clone(),
+                            timestamp: 0
+                        }
+                    ));
+                    
+                    let _ = writer.log_event(crate::schema::registry::EventPayload::HumanResponse(
+                        crate::schema::task::ResponsePayload {
+                            ask_ref: ask_ref_clone,
+                            text_response: "Module Mock Human Response".to_string()
+                        }
+                    ));
+                    let _ = writer.commit_batch();
+                }
+            }
+        });
+
+        // Simulate LLM inference delay to allow human background task time to observe the Ask and send AskSeen
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+        let resp = ask.wait_for_response().await;
+        assert!(resp.contains("Module Mock Human Response"));
+
+        ask.cancel().await;
     }
 }

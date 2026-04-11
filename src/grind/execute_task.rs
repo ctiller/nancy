@@ -112,7 +112,6 @@ async fn handle_plan_task(
         let mod_prompt = crate::grind::prompts::ModeratorPromptTemplate { personas: &all_personas }.render()?;
 
         let mut coord_client = crate::llm::thinking_llm("planning_moderator")
-            .with_writer(writer)
             .system_prompt(&mod_prompt)
             .build()?;
 
@@ -148,7 +147,6 @@ async fn handle_plan_task(
     let mut iteration = 0;
     
     let mut synthesizer = crate::llm::thinking_llm("moderator_synthesizer")
-        .with_writer(writer)
         .system_prompt(&format!("You are the Nancy Moderator. Synthesize the final execution plan and its DAG task mapping purely into the requested strict JSON format.\n\n{}", crate::grind::prompts::TDD_GUIDELINES))
         .build()?;
 
@@ -267,15 +265,15 @@ async fn handle_plan_task(
 async fn handle_implement_task(
     target_path: &std::path::Path,
     task_payload: &TaskPayload,
-    writer: &Writer<'_>,
+    _writer: &Writer<'_>,
 ) -> Result<String> {
     let tools = crate::tools::AgentToolsBuilder::new()
         .with_read_path(target_path)
         .with_write_path(target_path)
+        .context(&task_payload.description, "implementer")
         .build();
 
     let mut client = crate::llm::thinking_llm("implementer")
-        .with_writer(writer)
         .tools(tools)
         .system_prompt(&crate::grind::prompts::implementer_system_prompt(&target_path))
         .build()?;
@@ -298,7 +296,6 @@ async fn handle_review_task(
     let mut session = crate::pre_review::session::ReviewSession::new(target_path.to_path_buf());
 
     let mut coordinator_client = crate::llm::thinking_llm("review_coordinator")
-        .with_writer(writer)
         .system_prompt(crate::grind::prompts::review_team_selection_prompt())
         .build()?;
 
@@ -336,7 +333,6 @@ async fn handle_review_task(
         .await?;
 
     let mut synthesis_client = crate::llm::thinking_llm("review_synthesis")
-        .with_writer(writer)
         .system_prompt(&crate::grind::prompts::review_synthesis_prompt(&target_path))
         .build()?;
 
@@ -567,9 +563,6 @@ mod tests {
             private_key_hex: "00".into(),
         });
 
-        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
-        crate::events::logger::init_global_writer(tx);
-
         let payload = TaskPayload {
             description: "fake".into(),
             preconditions: "fake".into(),
@@ -659,9 +652,6 @@ mod tests {
             private_key_hex: "00".into(),
         });
 
-        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
-        crate::events::logger::init_global_writer(tx);
-
         let payload = TaskPayload {
             description: "fake review".into(),
             preconditions: "fake".into(),
@@ -718,9 +708,6 @@ mod tests {
             public_key_hex: "00".into(),
             private_key_hex: "00".into(),
         });
-
-        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
-        crate::events::logger::init_global_writer(tx);
 
         let payload = TaskPayload {
             description: "fake impl".into(),
@@ -803,8 +790,7 @@ mod tests {
             private_key_hex: "00".into(),
         });
 
-        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
-        crate::events::logger::init_global_writer(tx);
+
 
         let payload = TaskPayload {
             description: "fake".into(),
@@ -890,8 +876,7 @@ mod tests {
             private_key_hex: "00".into(),
         });
 
-        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
-        crate::events::logger::init_global_writer(tx);
+
 
         let payload = TaskPayload {
             description: "fake".into(),

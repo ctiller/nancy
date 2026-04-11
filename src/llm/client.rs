@@ -1,12 +1,29 @@
 use anyhow::{Context, bail};
+use askama::Template;
 use gemini_client_api::gemini::ask::Gemini;
 use gemini_client_api::gemini::types::request::Chat;
 use gemini_client_api::gemini::types::response::GeminiResponse;
 use gemini_client_api::gemini::types::sessions::Session;
 use schemars::JsonSchema;
 use serde::de::DeserializeOwned;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 use tokio::time::sleep;
+
+#[derive(Template)]
+#[template(
+    source = r#"[SYSTEM]
+Time:{{ time }}
+{% if remaining_secs > 0 %}RemainingTime:{{ remaining_secs }}s
+{% endif %}Runtime:{{ runtime }}s
+[/SYSTEM]"#,
+    ext = "txt"
+)]
+struct SystemHeaderTemplate<'a> {
+    time: &'a str,
+    remaining_secs: u64,
+    runtime: u64,
+}
 
 #[cfg(test)]
 use std::sync::{Arc, Mutex};
@@ -18,16 +35,16 @@ pub struct LlmClient {
     pub system_prompt: Vec<String>,
     pub tools: Vec<Box<dyn crate::llm::tool::LlmTool>>,
     pub subagent: String,
-    pub trace_tx: Option<tokio::sync::mpsc::UnboundedSender<crate::schema::registry::EventPayload>>,
     pub session: Session,
     pub mock_queue: Option<
         std::sync::Arc<
             std::sync::Mutex<
-                Vec<Result<GeminiResponse, gemini_client_api::gemini::error::GeminiResponseError>>,
+                crate::llm::mock::builder::MockQueue
             >,
         >,
     >,
     pub created_at: std::time::Instant,
+    pub shared_deadline: Option<std::sync::Arc<AtomicU64>>,
 }
 
 fn should_retry(err: &gemini_client_api::gemini::error::GeminiResponseError) -> Option<Duration> {
@@ -95,6 +112,21 @@ pub(crate) fn parse_response<T: DeserializeOwned + 'static>(text: &str) -> anyho
 }
 
 impl LlmClient {
+    async fn emit_trace_event(&self, payload: crate::schema::registry::EventPayload) {
+        if std::env::var("NANCY_NO_TRACE_EVENTS").unwrap_or_default() == "1" {
+            return;
+        }
+        if let Ok(repo) = git2::Repository::discover(".") {
+            if let Some(wd) = repo.workdir() {
+                if let Ok(id_obj) = crate::schema::identity_config::Identity::load(wd).await {
+                    if let Ok(writer) = crate::events::writer::Writer::new(&repo, id_obj) {
+                        let _ = writer.log_event(payload);
+                    }
+                }
+            }
+        }
+    }
+
     pub(crate) async fn handle_tool_calls(&self, chat: &Chat) -> Vec<(String, serde_json::Value)> {
         let mut responses = Vec::new();
         for fc in chat.get_function_calls() {
@@ -110,17 +142,15 @@ impl LlmClient {
                     .unwrap()
                     .as_secs();
 
-                if let Some(tx) = &self.trace_tx {
-                    let _ = tx.send(crate::schema::registry::EventPayload::LlmToolCall(
-                        crate::schema::llm::LlmToolCallPayload {
-                            subagent: self.subagent.clone(),
-                            timestamp,
-                            call_id: call_id.clone(),
-                            function_name: tool_name.clone(),
-                            args: args.clone(),
-                        },
-                    ));
-                }
+                self.emit_trace_event(crate::schema::registry::EventPayload::LlmToolCall(
+                    crate::schema::llm::LlmToolCallPayload {
+                        subagent: self.subagent.clone(),
+                        timestamp,
+                        call_id: call_id.clone(),
+                        function_name: tool_name.clone(),
+                        args: args.clone(),
+                    },
+                )).await;
 
                 crate::introspection::data_log("args", args.clone());
 
@@ -145,20 +175,51 @@ impl LlmClient {
                     .unwrap()
                     .as_secs();
                     
-                if let Some(tx) = &self.trace_tx {
-                    let _ = tx.send(crate::schema::registry::EventPayload::LlmToolResponse(
-                        crate::schema::llm::LlmToolResponsePayload {
-                            subagent: self.subagent.clone(),
-                            timestamp: response_timestamp,
-                            call_id: call_id.clone(),
-                            response: serde_json::to_string(&response_payload)
-                                .unwrap_or_else(|_| "{}".to_string()),
-                        },
-                    ));
-                }
+                self.emit_trace_event(crate::schema::registry::EventPayload::LlmToolResponse(
+                    crate::schema::llm::LlmToolResponsePayload {
+                        subagent: self.subagent.clone(),
+                        timestamp: response_timestamp,
+                        call_id: call_id.clone(),
+                        response: serde_json::to_string(&response_payload)
+                            .unwrap_or_else(|_| "{}".to_string()),
+                    },
+                )).await;
 
                 crate::introspection::data_log("output", response_payload.clone());
-                response_payload
+                
+                let mut modified_payload = response_payload;
+                
+                let runtime = self.created_at.elapsed().as_secs();
+                let dt: time::OffsetDateTime = std::time::SystemTime::now().into();
+                let time_str = dt.format(&time::format_description::well_known::Rfc3339).unwrap_or_else(|_| "Unknown".to_string());
+                let mut remaining_secs = 0;
+                
+                if let Some(deadline) = &self.shared_deadline {
+                    let d = deadline.load(Ordering::SeqCst);
+                    if d > 0 {
+                        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+                        remaining_secs = d.saturating_sub(now);
+                    }
+                }
+                
+                let tmpl = SystemHeaderTemplate {
+                    time: &time_str,
+                    remaining_secs,
+                    runtime,
+                };
+                if let Ok(header) = tmpl.render() {
+                    if let serde_json::Value::Object(mut map) = modified_payload {
+                        map.insert("__system_notice__".to_string(), serde_json::Value::String(header));
+                        modified_payload = serde_json::Value::Object(map);
+                    } else {
+                        modified_payload = serde_json::json!({
+                            "output": modified_payload,
+                            "__system_notice__": header
+                        });
+                    }
+                }
+                
+                modified_payload
             }).await;
 
             responses.push((tool_name, response_payload));
@@ -184,7 +245,22 @@ impl LlmClient {
         let dt: time::OffsetDateTime = std::time::SystemTime::now().into();
         let time_str = dt.format(&time::format_description::well_known::Rfc3339).unwrap_or_else(|_| "Unknown".to_string());
         
-        let final_question = format!("[SYSTEM]\nTime:{}\nRuntime:{}s\n[/SYSTEM]\n\n{}", time_str, runtime, question);
+        let mut remaining_secs = 0;
+        if let Some(deadline) = &self.shared_deadline {
+            let d = deadline.load(Ordering::SeqCst);
+            if d > 0 {
+                let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+                remaining_secs = d.saturating_sub(now);
+            }
+        }
+        
+        let tmpl = SystemHeaderTemplate {
+            time: &time_str,
+            remaining_secs,
+            runtime,
+        };
+        let header = tmpl.render().context("Failed to render system notice template")?;
+        let final_question = format!("{}\n\n{}", header, question);
 
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -194,15 +270,13 @@ impl LlmClient {
         let peek = if final_question.len() > 100 { format!("{}...", &final_question[..100]) } else { final_question.to_string() };
         crate::introspection::log(&format!("LLM Ask ({}): {}", self.subagent, peek.replace("\n", " ")));
             
-        if let Some(tx) = &self.trace_tx {
-            let _ = tx.send(crate::schema::registry::EventPayload::LlmPrompt(
-                crate::schema::llm::LlmPromptPayload {
-                    subagent: self.subagent.clone(),
-                    timestamp,
-                    prompt: final_question.clone(),
-                },
-            ));
-        }
+        self.emit_trace_event(crate::schema::registry::EventPayload::LlmPrompt(
+            crate::schema::llm::LlmPromptPayload {
+                subagent: self.subagent.clone(),
+                timestamp,
+                prompt: final_question.clone(),
+            },
+        )).await;
         self.session.ask(final_question.clone());
         
         let is_string = std::any::TypeId::of::<T>() == std::any::TypeId::of::<String>();
@@ -253,14 +327,23 @@ impl LlmClient {
             let mut retry_count = 0;
             let resp: GeminiResponse = loop {
                 let ask_res = if let Some(queue) = &self.mock_queue {
-                    let mock_resp = {
+                    let (should_hang, mock_resp) = {
                         let mut lock = queue.lock().unwrap();
-                        if lock.is_empty() {
-                            panic!("Mock queue exhausted during test");
+                        if lock.responses.is_empty() {
+                            if lock.hang_on_exhaustion {
+                                (true, None)
+                            } else {
+                                panic!("Mock queue exhausted during test");
+                            }
+                        } else {
+                            (false, Some(lock.responses.remove(0)))
                         }
-                        lock.remove(0)
                     };
-                    mock_resp
+                    if should_hang {
+                        std::future::pending::<()>().await;
+                        unreachable!()
+                    }
+                    mock_resp.unwrap()
                 } else {
                     tracing::info!("==== [LLM Client] Sending request to Gemini API. Waiting... ====");
                     let timeout_res = tokio::time::timeout(
@@ -305,15 +388,13 @@ impl LlmClient {
                     .unwrap()
                     .as_secs();
                     
-                if let Some(tx) = &self.trace_tx {
-                    let _ = tx.send(crate::schema::registry::EventPayload::LlmResponse(
-                        crate::schema::llm::LlmResponsePayload {
-                            subagent: self.subagent.clone(),
-                            timestamp,
-                            response: text.clone(),
-                        },
-                    ));
-                }
+                self.emit_trace_event(crate::schema::registry::EventPayload::LlmResponse(
+                    crate::schema::llm::LlmResponsePayload {
+                        subagent: self.subagent.clone(),
+                        timestamp,
+                        response: text.clone(),
+                    },
+                )).await;
                 crate::introspection::data_log("response", serde_json::json!(text.clone()));
                 crate::introspection::set_frame_status("Done ✓");
                 return parse_response(&text);
@@ -330,6 +411,72 @@ mod tests {
     };
     use reqwest::StatusCode;
     use serde::{Deserialize, Serialize};
+    use sealed_test::prelude::*;
+    use std::sync::Arc;
+    
+    #[tokio::test]
+    #[sealed_test(env = [("NANCY_NO_TRACE_EVENTS", "")])]
+    async fn test_emit_trace_event_success() {
+        let td = tempfile::tempdir().unwrap();
+        let td_path = td.path().to_path_buf();
+        // Change working directory to tempdir for the test so discover(".") finds it
+        std::env::set_current_dir(&td_path).unwrap();
+
+        let repo = git2::Repository::init(&td_path).unwrap();
+        crate::commands::init::init(td_path.clone(), 1).await.unwrap();
+
+        let mut gemini = Gemini::new("xxx", "test_model", None);
+        
+        let json_resp = serde_json::json!({
+            "candidates": [{
+                "content": {
+                    "parts": [{"text": "mocked trace"}],
+                    "role": "model"
+                },
+                "finishReason": "STOP",
+                "index": 0
+            }],
+            "usageMetadata": {
+                "promptTokenCount": 5,
+                "candidatesTokenCount": 5,
+                "totalTokenCount": 10
+            },
+            "modelVersion": "gemini-1.5-flash"
+        });
+        let resp: GeminiResponse = serde_json::from_value(json_resp).unwrap();
+
+        let mut client = LlmClient {
+            kind: crate::llm::builder::Kind::Fast,
+            api_key: "xxx".to_string(),
+            temperature: None,
+            system_prompt: vec![],
+            subagent: "test".to_string(),
+            tools: vec![],
+            session: Session::new(10),
+            mock_queue: Some(Arc::new(std::sync::Mutex::new(crate::llm::mock::builder::MockQueue {
+                responses: vec![Ok(resp)],
+                hang_on_exhaustion: false,
+            }))),
+            created_at: std::time::Instant::now(),
+            shared_deadline: None,
+        };
+
+        // This should trigger `emit_trace_event` recursively securely
+        let _ = client.ask::<String>("test trace emit").await.unwrap();
+        
+        // Verify event was appended
+        let id_obj = crate::schema::identity_config::Identity::load(&td_path).await.unwrap();
+        let reader = crate::events::reader::Reader::new(&repo, id_obj.get_did_owner().did.clone());
+        let mut found = false;
+        for ev in reader.iter_events().unwrap().flatten() {
+            if let crate::schema::registry::EventPayload::LlmResponse(resp) = ev.payload {
+                if resp.response == "mocked trace" {
+                    found = true;
+                }
+            }
+        }
+        assert!(found);
+    }
 
     #[test]
     fn test_get_closest_matches() {
@@ -433,18 +580,17 @@ mod tests {
         let resp: GeminiResponse = serde_json::from_value(json_resp).unwrap();
         let chat = resp.get_chat();
 
-        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
         let client = LlmClient {
             kind: crate::llm::builder::Kind::Fast,
             api_key: "xxx".to_string(),
             temperature: None,
             system_prompt: vec![],
             subagent: "test".to_string(),
-            trace_tx: Some(tx),
             tools: vec![Box::new(MockTool)],
             session: Session::new(10),
             mock_queue: None,
             created_at: std::time::Instant::now(),
+            shared_deadline: None,
         };
 
         let responses = client.handle_tool_calls(chat).await;
@@ -452,14 +598,16 @@ mod tests {
 
         // test_tool success
         assert_eq!(responses[0].0, "test_tool");
-        assert_eq!(responses[0].1, serde_json::json!({ "success": true }));
+        assert_eq!(responses[0].1.get("success").unwrap().as_bool().unwrap(), true);
+        assert!(responses[0].1.get("__system_notice__").is_some());
 
         // test_tool failure
         assert_eq!(responses[1].0, "test_tool");
         assert_eq!(
-            responses[1].1,
-            serde_json::json!({ "error": "Simulated failure" })
+            responses[1].1.get("error").unwrap().as_str().unwrap(),
+            "Simulated failure"
         );
+        assert!(responses[1].1.get("__system_notice__").is_some());
 
         // unknown_tool failure
         assert_eq!(responses[2].0, "unknown_tool");
@@ -488,18 +636,20 @@ mod tests {
         });
         let resp: GeminiResponse = serde_json::from_value(json_resp).unwrap();
 
-        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
         let mut client = LlmClient {
             kind: crate::llm::builder::Kind::Fast,
             api_key: "xxx".to_string(),
             temperature: None,
             system_prompt: vec![],
             subagent: "test".to_string(),
-            trace_tx: Some(tx),
             tools: vec![],
             session: Session::new(10),
-            mock_queue: Some(Arc::new(Mutex::new(vec![Ok(resp)]))),
+            mock_queue: Some(Arc::new(Mutex::new(crate::llm::mock::builder::MockQueue {
+                responses: vec![Ok(resp)],
+                hang_on_exhaustion: false,
+            }))),
             created_at: std::time::Instant::now(),
+            shared_deadline: None,
         };
 
         let result = client.ask::<String>("question").await.unwrap();
@@ -524,18 +674,20 @@ mod tests {
             responses.push(make_err());
         }
 
-        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
         let mut client = LlmClient {
             kind: crate::llm::builder::Kind::Fast,
             api_key: "xxx".to_string(),
             temperature: None,
             system_prompt: vec![],
             subagent: "test".to_string(),
-            trace_tx: Some(tx),
             tools: vec![],
             session: Session::new(10),
-            mock_queue: Some(Arc::new(Mutex::new(responses))),
+            mock_queue: Some(Arc::new(Mutex::new(crate::llm::mock::builder::MockQueue {
+                responses,
+                hang_on_exhaustion: false,
+            }))),
             created_at: std::time::Instant::now(),
+            shared_deadline: None,
         };
 
         let mut gemini = Gemini::new("xxx", "test_model", None);
@@ -561,18 +713,20 @@ mod tests {
                 .unwrap_err(),
         ));
 
-        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
         let mut client = LlmClient {
             kind: crate::llm::builder::Kind::Fast,
             api_key: "xxx".to_string(),
             temperature: None,
             system_prompt: vec![],
             subagent: "test".to_string(),
-            trace_tx: Some(tx),
             tools: vec![],
             session: Session::new(10),
-            mock_queue: Some(Arc::new(Mutex::new(vec![err]))),
+            mock_queue: Some(Arc::new(Mutex::new(crate::llm::mock::builder::MockQueue {
+                responses: vec![err],
+                hang_on_exhaustion: false,
+            }))),
             created_at: std::time::Instant::now(),
+            shared_deadline: None,
         };
 
         let mut gemini = Gemini::new("xxx", "test", None);
@@ -608,18 +762,20 @@ mod tests {
         let resp1: GeminiResponse = serde_json::from_value(json_fc).unwrap();
         let resp2: GeminiResponse = serde_json::from_value(json_text).unwrap();
 
-        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
         let mut client = LlmClient {
             kind: crate::llm::builder::Kind::Fast,
             api_key: "xxx".to_string(),
             temperature: None,
             system_prompt: vec![],
             subagent: "test".to_string(),
-            trace_tx: Some(tx),
             tools: vec![Box::new(MockTool)],
             session: Session::new(10),
-            mock_queue: Some(Arc::new(Mutex::new(vec![Ok(resp1), Ok(resp2)]))),
+            mock_queue: Some(Arc::new(Mutex::new(crate::llm::mock::builder::MockQueue {
+                responses: vec![Ok(resp1), Ok(resp2)],
+                hang_on_exhaustion: false,
+            }))),
             created_at: std::time::Instant::now(),
+            shared_deadline: None,
         };
 
         let result = client.ask::<String>("dummy question").await.unwrap();
