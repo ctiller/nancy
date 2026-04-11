@@ -4,3 +4,4 @@
 .env
 eval_out.yaml
 node_modules
+/src/web/site

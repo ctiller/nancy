@@ -277,6 +277,8 @@ impl DockerOrchestrator {
             self.active_containers.remove(&name);
         }
 
+        let mut deployment_tasks = Vec::new();
+
         for (worker, agent_type) in agents_to_launch {
             if crate::commands::coordinator::SHUTDOWN.load(std::sync::atomic::Ordering::SeqCst) {
                 break;
@@ -298,110 +300,127 @@ impl DockerOrchestrator {
 
             tracing::info!("Deploying native Hot Grinder {}...", worker.did);
 
-            let nancy_worktrees = self.workdir.join(".nancy").join("worktrees");
-            fs::create_dir_all(&nancy_worktrees).await.unwrap_or_default();
-            let target_path = nancy_worktrees.join(format!("worker-{}", worker.did));
+            let docker = self.docker.clone();
+            let workdir = self.workdir.clone();
+            let cached_tar_payload = cached_tar_payload.clone();
+            let root_did = root_did.clone();
+            let agent_type = agent_type.to_string();
+            let worker = worker.clone();
+            let container_name_clone = container_name.clone();
 
-            if !target_path.exists() {
-                let branch_name = format!("refs/heads/nancy/workers/{}", worker.did);
-                
-                // Natively ensure the target branch exists organically resolving empty repository crashes gracefully!
-                if let Ok(repo) = git2::Repository::open(&self.workdir) {
-                    if repo.find_reference(&branch_name).is_err() {
-                        if let Ok(sig) = git2::Signature::now("Nancy Coordinator", "coordinator@local") {
-                            if let Ok(tree_id) = repo.treebuilder(None).and_then(|tb| tb.write()) {
-                                if let Ok(tree) = repo.find_tree(tree_id) {
-                                    let _ = repo.commit(Some(&branch_name), &sig, &sig, "Init Worker Bounds", &tree, &[]);
+            deployment_tasks.push(tokio::spawn(async move {
+                let nancy_worktrees = workdir.join(".nancy").join("worktrees");
+                fs::create_dir_all(&nancy_worktrees).await.unwrap_or_default();
+                let target_path = nancy_worktrees.join(format!("worker-{}", worker.did));
+
+                if !target_path.exists() {
+                    let branch_name = format!("refs/heads/nancy/workers/{}", worker.did);
+                    
+                    // Natively ensure the target branch exists organically resolving empty repository crashes gracefully!
+                    if let Ok(repo) = git2::Repository::open(&workdir) {
+                        if repo.find_reference(&branch_name).is_err() {
+                            if let Ok(sig) = git2::Signature::now("Nancy Coordinator", "coordinator@local") {
+                                if let Ok(tree_id) = repo.treebuilder(None).and_then(|tb| tb.write()) {
+                                    if let Ok(tree) = repo.find_tree(tree_id) {
+                                        let _ = repo.commit(Some(&branch_name), &sig, &sig, "Init Worker Bounds", &tree, &[]);
+                                    }
                                 }
                             }
                         }
                     }
+
+                    let shell_cmd = format!(
+                        "git worktree prune && git worktree add -f {} {}",
+                        target_path.display(), branch_name
+                    );
+
+                    let status = tokio::process::Command::new("sh")
+                        .arg("-c")
+                        .arg(&shell_cmd)
+                        .current_dir(&workdir)
+                        .status()
+                        .await
+                        .unwrap_or_else(|e| panic!("Failed executing sh worktree bounds: {}", e));
+
+                    if !status.success() {
+                        tracing::error!("Failed applying git worktree command natively");
+                        return None;
+                    }
                 }
 
-                let shell_cmd = format!(
-                    "git worktree prune && git worktree add -f {} {}",
-                    target_path.display(), branch_name
-                );
+                // Provision socket directory boundaries perfectly natively avoiding Docker Daemon ROOT ownership mapping escalations natively
+                let worker_socket_dir = workdir.join(".nancy").join("sockets").join(&worker.did);
+                fs::create_dir_all(&worker_socket_dir).await.unwrap_or_default();
+                let _ = fs::remove_file(worker_socket_dir.join("grinder.sock")).await;
+                
+                let coordinator_socket_dir = workdir.join(".nancy").join("sockets").join("coordinator");
+                fs::create_dir_all(&coordinator_socket_dir).await.unwrap_or_default();
 
-                let status = tokio::process::Command::new("sh")
-                    .arg("-c")
-                    .arg(&shell_cmd)
-                    .current_dir(&self.workdir)
-                    .status()
+                // Provision identity.json explicitly mapping the grinder subset into its context
+                let worker_nancy_dir = target_path.join(".nancy");
+                fs::create_dir_all(&worker_nancy_dir).await.unwrap_or_default();
+                let worker_identity = if agent_type == "dreamer" {
+                    Identity::Dreamer(worker.clone())
+                } else {
+                    Identity::Grinder(worker.clone())
+                };
+                let _ = fs::write(
+                    worker_nancy_dir.join("identity.json"),
+                    serde_json::to_string_pretty(&worker_identity).unwrap(),
+                ).await;
+
+                // Run container
+                let env_vars = build_worker_env_vars(&root_did);
+                let config = build_container_config("rust:latest", &target_path, &workdir, &worker.did, env_vars, &agent_type).await;
+
+                match docker
+                    .create_container(
+                        Some(CreateContainerOptions {
+                            name: Some(container_name_clone.clone()),
+                            platform: "".to_string(),
+                        }),
+                        config,
+                    )
                     .await
-                    .unwrap_or_else(|e| panic!("Failed executing sh worktree bounds: {}", e));
+                {
+                    Ok(response) => {
+                        if let Some(ref tar_payload) = cached_tar_payload {
+                            let upload_opts = bollard::query_parameters::UploadToContainerOptions {
+                                path: "/".to_string(),
+                                ..Default::default()
+                            };
+                            let stream = futures_util::stream::iter(vec![bytes::Bytes::from(tar_payload.clone())]);
+                            #[allow(deprecated)]
+                            let _ = docker.upload_to_container_streaming(&response.id, Some(upload_opts), stream).await;
+                        }
 
-                if !status.success() {
-                    tracing::error!("Failed applying git worktree command natively");
-                    continue;
-                }
-            }
-
-            // Provision socket directory boundaries perfectly natively avoiding Docker Daemon ROOT ownership mapping escalations natively
-            let worker_socket_dir = self.workdir.join(".nancy").join("sockets").join(&worker.did);
-            fs::create_dir_all(&worker_socket_dir).await.unwrap_or_default();
-            let _ = fs::remove_file(worker_socket_dir.join("grinder.sock")).await;
-            
-            let coordinator_socket_dir = self.workdir.join(".nancy").join("sockets").join("coordinator");
-            fs::create_dir_all(&coordinator_socket_dir).await.unwrap_or_default();
-
-            // Provision identity.json explicitly mapping the grinder subset into its context
-            let worker_nancy_dir = target_path.join(".nancy");
-            fs::create_dir_all(&worker_nancy_dir).await.unwrap_or_default();
-            let worker_identity = if agent_type == "dreamer" {
-                Identity::Dreamer(worker.clone())
-            } else {
-                Identity::Grinder(worker.clone())
-            };
-            let _ = fs::write(
-                worker_nancy_dir.join("identity.json"),
-                serde_json::to_string_pretty(&worker_identity).unwrap(),
-            ).await;
-
-            // Run container
-            let env_vars = build_worker_env_vars(&root_did);
-            let config = build_container_config(rt_image, &target_path, &self.workdir, &worker.did, env_vars, agent_type).await;
-
-            match self.docker
-                .create_container(
-                    Some(CreateContainerOptions {
-                        name: Some(container_name.clone()),
-                        platform: "".to_string(),
-                    }),
-                    config,
-                )
-                .await
-            {
-                Ok(response) => {
-                    if let Some(ref tar_payload) = cached_tar_payload {
-                        let upload_opts = bollard::query_parameters::UploadToContainerOptions {
-                            path: "/".to_string(),
-                            ..Default::default()
-                        };
-                        let stream = futures_util::stream::iter(vec![bytes::Bytes::from(tar_payload.clone())]);
-                        #[allow(deprecated)]
-                        let _ = self.docker.upload_to_container_streaming(&response.id, Some(upload_opts), stream).await;
+                        if let Err(e) = docker.start_container(&response.id, None::<StartContainerOptions>).await {
+                            tracing::error!("Failed to start container {}: {}", response.id, e);
+                            None
+                        } else {
+                            tracing::info!("Container worker {} physically launched.", response.id);
+                            // Record running natively to avoid dupes across loop
+                            Some(container_name_clone)
+                        }
                     }
-
-                    if let Err(e) = self.docker.start_container(&response.id, None::<StartContainerOptions>).await {
-                        tracing::error!("Failed to start container {}: {}", response.id, e);
-                    } else {
-                        tracing::info!("Container worker {} physically launched.", response.id);
-                        // Record running natively to avoid dupes across loop
-                        self.active_containers.insert(container_name.clone());
+                    Err(e) => {
+                        if e.to_string().contains("409") {
+                            // Conflict gracefully drops previously orphaned executing boundaries before recreating them
+                            tracing::warn!("Container {} orphaned, pruning and re-evaluating gracefully.", container_name_clone);
+                            let _ = docker.remove_container(&container_name_clone, Some(bollard::query_parameters::RemoveContainerOptions { force: true, ..Default::default() })).await;
+                            None
+                        } else {
+                            tracing::error!("Failed to build container node natively: {}", e);
+                            None
+                        }
                     }
                 }
-                Err(e) => {
-                    if e.to_string().contains("409") {
-                        // Conflict gracefully drops previously orphaned executing boundaries before recreating them
-                        tracing::warn!("Container {} orphaned, pruning and re-evaluating gracefully.", container_name);
-                        let _ = self.docker.remove_container(&container_name, Some(bollard::query_parameters::RemoveContainerOptions { force: true, ..Default::default() })).await;
-                        
-                        // We do not silently re-insert if we failed. Usually we'd retry recursively but this loop resets state cleanly on next poll.
-                    } else {
-                        tracing::error!("Failed to build container node natively: {}", e);
-                    }
-                }
+            }));
+        }
+        
+        for task in deployment_tasks {
+            if let Ok(Some(name)) = task.await {
+                self.active_containers.insert(name);
             }
         }
         

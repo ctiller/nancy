@@ -15,19 +15,15 @@ pub fn AgentsView() -> impl IntoView {
             let mut last_version: Option<u64> = None;
             loop {
                 reload_trigger.track();
-                let url = if let Some(lv) = last_version {
-                    format!("/api/grinders?last_version={}", lv)
-                } else {
-                    "/api/grinders".to_string()
-                };
                 
-                if let Ok(resp) = gloo_net::http::Request::get(&url).send().await {
+                if let Ok(resp) = gloo_net::http::Request::get("/api/grinders").send().await {
                     if resp.status() == 200 {
                         if let Ok(text) = resp.text().await {
                             if let Ok(data) = serde_json::from_str::<crate::schema::GrindersResponse>(&text) {
-                                last_version = Some(data.version);
-                                set_list.set(Some(data.grinders));
-                                continue;
+                                if Some(data.version) != last_version {
+                                    last_version = Some(data.version);
+                                    set_list.set(Some(data.grinders));
+                                }
                             }
                         }
                     }
@@ -109,11 +105,7 @@ fn AgentCard(status: GrinderStatus, reload_trigger: Trigger) -> impl IntoView {
         leptos::task::spawn_local(async move {
             let mut last_update: Option<u64> = None;
             loop {
-                let url = if let Some(lu) = last_update {
-                    format!("/api/grinders/{}/state?last_update={}", did_clone, lu)
-                } else {
-                    format!("/api/grinders/{}/state", did_clone)
-                };
+                let url = format!("/api/grinders/{}/state", did_clone);
                 if let Ok(resp) = gloo_net::http::Request::get(&url).send().await {
                     if resp.status() == 200 {
                         if let Ok(text) = resp.text().await {
@@ -122,13 +114,14 @@ fn AgentCard(status: GrinderStatus, reload_trigger: Trigger) -> impl IntoView {
                                     json.get("update_number").and_then(|v| v.as_u64()),
                                     json.get("tree")
                                 ) {
-                                    if let Ok(frame) = serde_json::from_value::<SerializedFrame>(frame_val.clone()) {
-                                        last_update = Some(new_update);
-                                        set_state.set(Some(frame));
-                                        set_is_online.set(true); // Agent successfully synced actively
-
-                                        // The backend correctly long-polls 30s. We instantly loop back to block on the next long-poll.
-                                        continue;
+                                    if Some(new_update) != last_update {
+                                        if let Ok(frame) = serde_json::from_value::<SerializedFrame>(frame_val.clone()) {
+                                            last_update = Some(new_update);
+                                            set_state.set(Some(frame));
+                                            set_is_online.set(true); // Agent successfully synced actively
+                                        }
+                                    } else {
+                                        set_is_online.set(true); // Agent is still online even if no new state
                                     }
                                 }
                             }
@@ -140,7 +133,6 @@ fn AgentCard(status: GrinderStatus, reload_trigger: Trigger) -> impl IntoView {
                     set_is_online.set(false);
                 }
                 
-                // Delay gracefully only upon structural or protocol errors
                 gloo_timers::future::sleep(std::time::Duration::from_secs(2)).await;
             }
         });

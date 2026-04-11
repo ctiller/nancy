@@ -1,5 +1,6 @@
 #!/bin/bash
+set -ex
 
-cargo leptos build
+./build.sh
 cd .scratch
-../target/debug/nancy coordinator --port 3000
+RUST_LOG=info,tower_http=debug ../target/release/nancy coordinator --port 3000

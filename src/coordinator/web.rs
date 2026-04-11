@@ -10,8 +10,12 @@ use tower_http::trace::TraceLayer;
 use web::App;
 
 #[derive(rust_embed::RustEmbed, Clone)]
-#[folder = "target/site/"]
+#[folder = "src/web/site/"]
 struct WebAssets;
+
+// Discarded const forces a compile-time fetch error if missing
+#[cfg(not(debug_assertions))]
+const _: &[u8] = include_bytes!("../web/site/pkg/nancy.js");
 
 async fn static_asset_handler(uri: Uri) -> impl IntoResponse {
     let path = uri.path().trim_start_matches('/').to_string();
@@ -319,6 +323,11 @@ async fn get_api_tasks_evaluations(
 }
 
 pub fn spawn_web_server(tcp_listener: tokio::net::TcpListener, ipc_state: crate::coordinator::ipc::IpcState) -> tokio::task::JoinHandle<()> {
+    assert!(
+        WebAssets::get("pkg/nancy.js").is_some(),
+        "FATAL: Frontend WASM bundle /pkg/nancy.js was not explicitly embedded in WebAssets. Did the frontend compile logic fail?"
+    );
+
     let conf = leptos::prelude::get_configuration(None).unwrap();
     let leptos_options = conf.leptos_options;
     let options_clone = leptos_options.clone();
