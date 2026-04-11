@@ -125,9 +125,16 @@ impl DockerOrchestrator {
 
     pub async fn shutdown(&mut self) {
         let containers: Vec<String> = self.active_containers.drain().collect();
+        let mut futures = Vec::new();
         for name in containers {
             tracing::info!("Cleaning up container {} gracefully...", name);
-            let _ = self.docker.remove_container(&name, Some(bollard::query_parameters::RemoveContainerOptions { force: true, ..Default::default() })).await;
+            let docker = self.docker.clone();
+            futures.push(tokio::spawn(async move {
+                let _ = docker.remove_container(&name, Some(bollard::query_parameters::RemoveContainerOptions { force: true, ..Default::default() })).await;
+            }));
+        }
+        for f in futures {
+            let _ = f.await;
         }
     }
 
@@ -198,6 +205,10 @@ impl DockerOrchestrator {
         let mut crash_reports = Vec::new();
         let mut to_remove = Vec::new();
         for container_name in &self.active_containers {
+            if crate::commands::coordinator::SHUTDOWN.load(std::sync::atomic::Ordering::SeqCst) {
+                break;
+            }
+
             let did = if container_name.starts_with("nancy-grinder-") {
                 container_name.replace("nancy-grinder-", "")
             } else if container_name.starts_with("nancy-dreamer-") {
@@ -267,6 +278,10 @@ impl DockerOrchestrator {
         }
 
         for (worker, agent_type) in agents_to_launch {
+            if crate::commands::coordinator::SHUTDOWN.load(std::sync::atomic::Ordering::SeqCst) {
+                break;
+            }
+
             let container_name = format!("nancy-{}-{}", agent_type, worker.did);
 
             if self.active_containers.contains(&container_name) {
