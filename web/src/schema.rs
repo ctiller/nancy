@@ -69,3 +69,11 @@ pub struct TopologyResponse {
     pub nodes: Vec<TopologyNode>,
     pub edges: Vec<TopologyEdge>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct TaskEvaluation {
+    pub id: String,
+    pub event_type: String,
+    pub score: u64,
+    pub timestamp: u64,
+}

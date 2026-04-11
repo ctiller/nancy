@@ -283,6 +283,41 @@ async fn get_api_tasks_topology(
     axum::Json(topology).into_response()
 }
 
+async fn get_api_tasks_evaluations(
+    axum::extract::Extension(state): axum::extract::Extension<crate::coordinator::ipc::IpcState>,
+) -> impl IntoResponse {
+    let root = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let identity = { state.shared_identity.read().await.clone() };
+    
+    let appview_opt = tokio::task::spawn_blocking({
+        let root = root.clone();
+        let identity = identity.clone();
+        move || {
+            let repo = match git2::Repository::discover(&root) {
+                Ok(r) => r,
+                Err(_) => return None,
+            };
+            Some(crate::coordinator::appview::AppView::hydrate(&repo, &identity, None))
+        }
+    }).await.unwrap_or(None);
+    
+    let mut evals = Vec::new();
+    if let Some(av) = appview_opt {
+        for (_, payload) in av.task_evaluations {
+            evals.push(web::schema::TaskEvaluation {
+                id: payload.evaluated_event_id,
+                event_type: payload.event_type,
+                score: payload.score,
+                timestamp: payload.timestamp,
+            });
+        }
+    }
+    
+    evals.sort_by(|a, b| b.score.cmp(&a.score));
+    
+    axum::Json(evals).into_response()
+}
+
 pub fn spawn_web_server(tcp_listener: tokio::net::TcpListener, ipc_state: crate::coordinator::ipc::IpcState) -> tokio::task::JoinHandle<()> {
     let conf = leptos::prelude::get_configuration(None).unwrap();
     let leptos_options = conf.leptos_options;
@@ -296,6 +331,7 @@ pub fn spawn_web_server(tcp_listener: tokio::net::TcpListener, ipc_state: crate:
     let web_app = Router::new()
         .route("/api/grinders", get(get_api_grinders))
         .route("/api/tasks/topology", get(get_api_tasks_topology))
+        .route("/api/tasks/evaluations", get(get_api_tasks_evaluations))
         .route("/api/{*fn_name}", axum::routing::post(leptos_axum::handle_server_fns))
         .route("/api/fs/{*path}", get(fs_asset_handler))
         .route("/api/incidents/{log_ref}", get(get_api_incident_log))

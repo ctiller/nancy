@@ -78,6 +78,14 @@ pub struct AgentCrashReportPayload {
     pub failures: Option<u32>,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct TaskEvaluationPayload {
+    pub evaluated_event_id: String,
+    pub event_type: String,
+    pub score: u64,
+    pub timestamp: u64,
+}
+
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, JsonSchema)]
 #[serde(rename_all = "snake_case")]

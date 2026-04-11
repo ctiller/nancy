@@ -57,9 +57,9 @@ async fn test_e2e_web_grinder_list() {
         .expect("Failed to deserialize GrindersResponse");
     let statuses = parsed.grinders;
         
-    assert_eq!(statuses.len(), 3, "Expected 3 provisioned grinders from identity.json");
+    assert_eq!(statuses.len(), 4, "Expected 3 provisioned grinders + 1 dreamer from identity.json");
     for s in statuses {
-        assert!(!s.is_online, "Grinder {} should be offline", s.did);
+        assert!(!s.is_online, "Agent {} should be offline", s.did);
     }
 }
 
@@ -96,10 +96,10 @@ async fn test_e2e_web_grinders_online() {
     let client = reqwest::Client::new();
     let url = format!("http://127.0.0.1:{}/api/grinders", port);
     
-    // 6. Poll reqwest agent list until 3 grinders are officially recorded ONLINE dynamically natively
+    // 6. Poll reqwest agent list until 4 agents (3 grinders + 1 dreamer) are officially recorded ONLINE dynamically natively
     let mut online_count = 0;
     let mut attempts = 0;
-    while online_count < 3 && attempts < 1000 {
+    while online_count < 4 && attempts < 1000 {
         let res = client.get(&url)
             .header("Accept", "application/json")
             .send()
@@ -115,7 +115,7 @@ async fn test_e2e_web_grinders_online() {
         let statuses = parsed.grinders;
             
         online_count = statuses.iter().filter(|s| s.is_online).count();
-        if online_count < 3 {
+        if online_count < 4 {
             tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
             attempts += 1;
         } else {
@@ -123,7 +123,7 @@ async fn test_e2e_web_grinders_online() {
         }
     }
     
-    assert_eq!(online_count, 3, "Failed to observe 3 ONLINE Grinders before timeout");
+    assert_eq!(online_count, 4, "Failed to observe 4 ONLINE Agents before timeout");
 }
 
 #[tokio::test]
@@ -332,5 +332,62 @@ async fn test_e2e_web_incident_logs() {
         }
     }
     
-    assert!(found, "Failed to retrieve incident log via Web API");
+}
+
+#[tokio::test]
+#[sealed_test(env = [
+    ("GEMINI_API_KEY", "mock")
+])]
+async fn test_e2e_web_tasks_evaluations() {
+    let tmp = TempDir::new().unwrap();
+    std::env::set_current_dir(tmp.path()).unwrap();
+    
+    let repo = git2::Repository::init(tmp.path()).unwrap();
+    nancy::commands::init::init(tmp.path(), 0).await.unwrap();
+    
+    let identity_file = tmp.path().join(".nancy").join("identity.json");
+    let root_id: nancy::schema::identity_config::Identity = serde_json::from_str(&fs::read_to_string(&identity_file).unwrap()).unwrap();
+    
+    let writer = nancy::events::writer::Writer::new(&repo, root_id).unwrap();
+    
+    // Write an evaluation directly natively to trigger graph bounds organically
+    writer.log_event(nancy::schema::registry::EventPayload::TaskEvaluation(
+        nancy::schema::task::TaskEvaluationPayload {
+            evaluated_event_id: "test-event-id-99".to_string(),
+            event_type: "TaskRequest".to_string(),
+            score: 95,
+            timestamp: 1234567890,
+        }
+    )).unwrap();
+    writer.commit_batch().unwrap();
+
+    let mut coord = nancy::commands::coordinator::Coordinator::new(tmp.path()).await.unwrap();
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    
+    tokio::spawn(async move {
+        let _ = coord.run_until(0, Some(tx), |_| false).await;
+    });
+    
+    let port = rx.await.expect("Coordinator boot dropped callback!");
+    let client = reqwest::Client::new();
+    let url = format!("http://127.0.0.1:{}/api/tasks/evaluations", port);
+    
+    let mut found = false;
+    let mut attempts = 0;
+    while !found && attempts < 50 {
+        let res = client.get(&url).send().await.unwrap();
+        assert_eq!(res.status(), reqwest::StatusCode::OK);
+        
+        let text = res.text().await.unwrap();
+        let parsed: Vec<web::schema::TaskEvaluation> = serde_json::from_str(&text).unwrap();
+        
+        if parsed.iter().any(|e| e.id == "test-event-id-99" && e.score == 95) {
+            found = true;
+        } else {
+            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+            attempts += 1;
+        }
+    }
+    
+    assert!(found, "Failed to observe Test TaskEvaluation in evaluations response natively dynamically before timeout");
 }

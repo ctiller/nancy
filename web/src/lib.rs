@@ -90,11 +90,67 @@ fn Navbar() -> impl IntoView {
 
 #[component]
 fn CommandView() -> impl IntoView {
+    let (evals, set_evals) = signal::<Vec<crate::schema::TaskEvaluation>>(vec![]);
+
+    #[cfg(feature = "hydrate")]
+    {
+        leptos::task::spawn_local(async move {
+            loop {
+                if let Ok(resp) = gloo_net::http::Request::get("/api/tasks/evaluations").send().await {
+                    if resp.status() == 200 {
+                        if let Ok(text) = resp.text().await {
+                            if let Ok(data) = serde_json::from_str::<Vec<crate::schema::TaskEvaluation>>(&text) {
+                                set_evals.set(data);
+                            }
+                        }
+                    }
+                }
+                gloo_timers::future::sleep(std::time::Duration::from_secs(2)).await;
+            }
+        });
+    }
+
     view! {
         <div class="grid-2">
-            <div class="glass-panel" style="padding: 20px;">
-                <h3>"Pending Inquiries"</h3>
-                <p class="text-muted">"No active agent questions at this time."</p>
+            <div class="glass-panel" style="padding: 20px; position: relative; overflow-y: auto; display: flex; flex-direction: column;">
+                <h3>"Evaluated Agent Events"</h3>
+                <div style="flex: 1; overflow-y: auto;">
+                    {move || {
+                        let current_evals = evals.get();
+                        if current_evals.is_empty() {
+                            leptos::either::Either::Left(view! {
+                                <p class="text-muted">"Waiting for Dreamer evaluation events..."</p>
+                            })
+                        } else {
+                            leptos::either::Either::Right(view! {
+                                <div style="display: flex; flex-direction: column; gap: 12px; margin-bottom: 60px;">
+                                    <For
+                                        each=move || current_evals.clone()
+                                        key=|eval| eval.id.clone()
+                                        children=move |eval| {
+                                            let intensity = eval.score as f64 / 100.0;
+                                            // Red/Orange for high scores, Green/Blue for low
+                                            let r = (255.0 * intensity) as u8;
+                                            let g = (255.0 * (1.0 - intensity).max(0.4)) as u8;
+                                            let color_style = format!("color: rgb({}, {}, 100); border-left: 4px solid rgb({}, {}, 100);", r, g, r, g);
+                                            view! {
+                                                <div style=format!("padding: 12px; background: rgba(0,0,0,0.3); border-radius: 4px; {}", color_style)>
+                                                    <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 4px;">
+                                                        <span style="font-weight: bold; font-family: monospace;">{eval.event_type.clone()}</span>
+                                                        <span style="font-size: 1.2rem; font-weight: bold;">{eval.score}"/100"</span>
+                                                    </div>
+                                                    <div style="font-size: 0.8rem; color: var(--text-muted); font-family: monospace;">
+                                                        "ID: " {eval.id.clone()}
+                                                    </div>
+                                                </div>
+                                            }
+                                        }
+                                    />
+                                </div>
+                            })
+                        }
+                    }}
+                </div>
                 <button style="position: absolute; bottom: 24px; left: 24px;" class="glass-panel">"+ New Task"</button>
             </div>
             <div class="glass-panel" style="padding: 20px;">

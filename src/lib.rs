@@ -12,6 +12,7 @@ pub mod pre_review;
 pub mod schema;
 pub mod tasks;
 pub mod tools;
+pub mod dreamer;
 
 #[cfg(test)]
 pub mod debug;
