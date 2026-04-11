@@ -66,15 +66,27 @@ fn command_view() -> Html {
         let evals = evals.clone();
         use_effect_with((), move |_| {
             let mut last_version: Option<u64> = None;
+            let cancelled = std::rc::Rc::new(std::cell::Cell::new(false));
+            let cancel_clone = cancelled.clone();
+            let abort_controller = web_sys::AbortController::new().ok();
+            let signal = abort_controller.as_ref().map(|ac| ac.signal());
+
             wasm_bindgen_futures::spawn_local(async move {
                 loop {
+                    if cancel_clone.get() { break; }
                     let url = if let Some(lv) = last_version {
                         format!("/api/tasks/evaluations?last_version={}", lv)
                     } else {
                         "/api/tasks/evaluations".to_string()
                     };
 
-                    if let Ok(resp) = gloo_net::http::Request::get(&url).send().await {
+                    let mut req = gloo_net::http::Request::get(&url);
+                    if let Some(sig) = &signal {
+                        req = req.abort_signal(Some(sig));
+                    }
+
+                    if let Ok(resp) = req.send().await {
+                        if cancel_clone.get() { break; }
                         if resp.ok() {
                             if let Ok(data) = resp.json::<serde_json::Value>().await {
                                 if let (Some(ver), Some(eval_array)) = (
@@ -91,10 +103,16 @@ fn command_view() -> Html {
                             }
                         }
                     }
+                    if cancel_clone.get() { break; }
                     gloo_timers::future::sleep(std::time::Duration::from_millis(500)).await;
                 }
             });
-            || ()
+            move || {
+                cancelled.set(true);
+                if let Some(ac) = abort_controller {
+                    ac.abort();
+                }
+            }
         });
     }
 

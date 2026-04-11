@@ -33,13 +33,20 @@ pub fn agents_view() -> Html {
                     if let Ok(resp) = req.send().await {
                         if cancel_clone.get() { break; }
                         if resp.ok() {
-                            if let Ok(data) = resp.json::<GrindersResponse>().await {
+                            let parse_res = resp.json::<GrindersResponse>().await;
+                            if let Ok(data) = parse_res {
                                 if Some(data.version) != last_version {
                                     last_version = Some(data.version);
                                     list.set(Some(data.grinders));
                                 }
+                            } else if let Err(e) = parse_res {
+                                web_sys::console::error_1(&format!("Failed to parse GrindersResponse: {:?}", e).into());
                             }
+                        } else {
+                            web_sys::console::error_1(&format!("Agents fetch failed with status: {}", resp.status()).into());
                         }
+                    } else {
+                        web_sys::console::error_1(&"Network error in Agents fetch".into());
                     }
                     if cancel_clone.get() { break; }
                     gloo_timers::future::sleep(std::time::Duration::from_secs(2)).await;
@@ -167,12 +174,19 @@ fn agent_card(props: &AgentCardProps) -> Html {
                                     } else {
                                         is_online.set(true);
                                     }
+                                } else {
+                                    web_sys::console::error_1(&"AgentCard missing update_number or tree in payload".into());
+                                    is_online.set(true);
                                 }
+                            } else if let Err(e) = resp.json::<serde_json::Value>().await {
+                                web_sys::console::error_1(&format!("AgentCard failed to parse JSON: {:?}", e).into());
                             }
                         } else {
+                            web_sys::console::error_1(&format!("AgentCard fetch failed with status: {}", resp.status()).into());
                             is_online.set(false);
                         }
                     } else {
+                        web_sys::console::error_1(&"Network error in AgentCard fetch".into());
                         is_online.set(false);
                     }
                     if cancel_clone.get() { break; }
@@ -296,7 +310,7 @@ fn highlight_json(value: &serde_json::Value) -> String {
     while i < chars.len() {
         let ch = chars[i];
         if ch == '"' {
-             let mut start = i;
+             let start = i;
              i += 1;
              while i < chars.len() {
                  if chars[i] == '"' && chars[i-1] != '\\' {
