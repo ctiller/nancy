@@ -31,6 +31,7 @@ async fn test_e2e_web_grinder_list() {
         tx_ready: std::sync::Arc::new(tx_ready),
         tx_updates: std::sync::Arc::new(tx_updates),
         shared_identity: std::sync::Arc::new(tokio::sync::RwLock::new(loaded_identity)),
+        token_market: nancy::coordinator::market::ArbitrationMarket::new(nancy::schema::coordinator_config::CoordinatorConfig::default()),
     };
     let _handle = spawn_web_server(listener, ipc_state);
     
@@ -513,4 +514,43 @@ async fn test_e2e_web_human_pending_standalone_grinder_hydration() {
     let payload = &plan_reviews[0];
     assert_eq!(payload["plan_ref"], "standalone_plan_xyz123");
     assert_eq!(payload["task_name"], "Standalone Hydration Test");
+}
+
+#[tokio::test]
+#[sealed_test(env = [
+    ("GEMINI_API_KEY", "mock")
+])]
+async fn test_e2e_web_market_state() {
+    let tmp = TempDir::new().unwrap();
+    std::env::set_current_dir(tmp.path()).unwrap();
+    
+    // 1. git init
+    let _repo = git2::Repository::init(tmp.path()).unwrap();
+    
+    // 2. nancy init 
+    nancy::commands::init::init(tmp.path(), 1).await.unwrap();
+    
+    // 3. Boot coordinator
+    unsafe { std::env::set_var("NANCY_E2E_EXECUTABLE", env!("CARGO_BIN_EXE_nancy")); }
+    let mut coord = nancy::commands::coordinator::Coordinator::new(tmp.path()).await.unwrap();
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    
+    tokio::spawn(async move {
+        let _ = coord.run_until(0, Some(tx), |_| false).await;
+    });
+    
+    let port = rx.await.expect("Coordinator boot dropped callback!");
+    let client = reqwest::Client::new();
+    let base_url = format!("http://127.0.0.1:{}", port);
+    
+    // Request market state
+    let res = client.get(&format!("{}/api/market/state", base_url))
+        .send().await.unwrap();
+        
+    assert_eq!(res.status(), reqwest::StatusCode::OK);
+    
+    // Spot Market should have active quotas hydrated organically natively.
+    let market_state: serde_json::Value = res.json().await.unwrap();
+    let per_model_stats = market_state["per_model_stats"].as_object().expect("Expected per_model_stats map in deserialized payload structurally");
+    assert!(!per_model_stats.is_empty(), "Spot Market should have initially hydrated limits recorded defensively");
 }
