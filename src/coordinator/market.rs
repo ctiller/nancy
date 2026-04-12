@@ -120,7 +120,7 @@ impl ArbitrationMarket {
             lease_history: HashMap::new(),
             historical_rates,
             active_quotas,
-            budget_pool_usd: 0.0,
+            budget_pool_usd: 1.0,
             config,
         }));
 
@@ -202,6 +202,36 @@ impl ArbitrationMarket {
         target.cost_usd += rec.cost_usd;
     }
 
+    pub fn expected_lease_metrics_for(
+        market: &ArbitrationMarket,
+        model: &schema::LlmModel,
+    ) -> (f64, f64, f64) {
+        let leases_count = market.lease_history.get(model).map(|l| l.len()).unwrap_or(0);
+        let default_cost = if model.to_string().contains("pro") { 0.02 } else { 0.001 };
+        
+        if leases_count > 0 {
+            if let Some(records) = market.consumption_history.get(model) {
+                let total_cost: f64 = records.iter().map(|r| r.metrics.cost_usd).sum();
+                let total_tokens: f64 = records.iter().map(|r| r.metrics.input_tokens as f64 + r.metrics.output_tokens as f64).sum();
+                let total_requests: f64 = records.iter().map(|r| r.metrics.requests as f64).sum();
+                let leases_f64 = leases_count as f64;
+                (
+                    total_cost / leases_f64,
+                    total_tokens / leases_f64,
+                    f64::max(1.0, total_requests / leases_f64)
+                )
+            } else if let Some(rates) = market.historical_rates.get(model) {
+                (rates.expected_cost, rates.expected_tokens, rates.expected_requests)
+            } else {
+                (default_cost, 2000.0, 1.0)
+            }
+        } else if let Some(rates) = market.historical_rates.get(model) {
+            (rates.expected_cost, rates.expected_tokens, rates.expected_requests)
+        } else {
+            (default_cost, 2000.0, 1.0)
+        }
+    }
+
     pub async fn get_market_state(market: &SharedArbitrationMarket) -> MarketStateResponse {
         let lock = market.read().await;
         let now = SystemTime::now()
@@ -212,6 +242,7 @@ impl ArbitrationMarket {
         let mut per_model_stats = std::collections::BTreeMap::new();
 
         for (model, records) in &lock.consumption_history {
+            let (expected_lease_cost, expected_lease_tokens, expected_lease_requests) = Self::expected_lease_metrics_for(&lock, model);
             let mut stat = ModelUsageStats {
                 total: UsageMetrics::default(),
                 active_quotas: lock.active_quotas.get(model).cloned().map(|q| crate::schema::ipc::Quotas { rpm: q.rpm, tpm: q.tpm, rpd: q.rpd }).unwrap_or_default(),
@@ -220,6 +251,9 @@ impl ArbitrationMarket {
                 trailing_10m: UsageMetrics::default(),
                 trailing_30m: UsageMetrics::default(),
                 trailing_100m: UsageMetrics::default(),
+                expected_lease_cost,
+                expected_lease_tokens,
+                expected_lease_requests,
             };
 
             for r in records {
@@ -237,6 +271,7 @@ impl ArbitrationMarket {
         // Fill in bounds for models with NO historical usage yet
         for (model, quota) in &lock.active_quotas {
             if !per_model_stats.contains_key(model) {
+                let (expected_lease_cost, expected_lease_tokens, expected_lease_requests) = Self::expected_lease_metrics_for(&lock, model);
                 per_model_stats.insert(model.clone(), ModelUsageStats {
                     total: UsageMetrics::default(),
                     active_quotas: crate::schema::ipc::Quotas { rpm: quota.rpm, tpm: quota.tpm, rpd: quota.rpd },
@@ -245,6 +280,9 @@ impl ArbitrationMarket {
                     trailing_10m: UsageMetrics::default(),
                     trailing_30m: UsageMetrics::default(),
                     trailing_100m: UsageMetrics::default(),
+                    expected_lease_cost,
+                    expected_lease_tokens,
+                    expected_lease_requests,
                 });
             }
         }
@@ -261,6 +299,7 @@ impl ArbitrationMarket {
             per_model_stats: per_model_stats_vec,
             pending_bids,
             active_leases: lock.active_leases.clone(),
+            budget_pool_usd: lock.budget_pool_usd,
         }
     }
 
@@ -339,30 +378,7 @@ impl ArbitrationMarket {
                     continue; // Reached if another choice from this same request previously satisfied it!
                 };
 
-                let leases_count = lock.lease_history.get(&choice.name).map(|l| l.len()).unwrap_or(0);
-                let default_cost = if choice.name.to_string().contains("pro") { 0.02 } else { 0.001 };
-                
-                let (expected_cost, expected_tokens, expected_requests) = if leases_count > 0 {
-                    if let Some(records) = lock.consumption_history.get(&choice.name) {
-                        let total_cost: f64 = records.iter().map(|r| r.metrics.cost_usd).sum();
-                        let total_tokens: f64 = records.iter().map(|r| r.metrics.input_tokens as f64 + r.metrics.output_tokens as f64).sum();
-                        let total_requests: f64 = records.iter().map(|r| r.metrics.requests as f64).sum();
-                        let leases_f64 = leases_count as f64;
-                        (
-                            total_cost / leases_f64,
-                            total_tokens / leases_f64,
-                            f64::max(1.0, total_requests / leases_f64)
-                        )
-                    } else if let Some(rates) = lock.historical_rates.get(&choice.name) {
-                        (rates.expected_cost, rates.expected_tokens, rates.expected_requests)
-                    } else {
-                        (default_cost, 2000.0, 1.0)
-                    }
-                } else if let Some(rates) = lock.historical_rates.get(&choice.name) {
-                    (rates.expected_cost, rates.expected_tokens, rates.expected_requests)
-                } else {
-                    (default_cost, 2000.0, 1.0)
-                };
+                let (expected_cost, expected_tokens, expected_requests) = Self::expected_lease_metrics_for(&lock, &choice.name);
                 
                 let mut granted_choice = false;
                 if available_tick_budget >= expected_cost {

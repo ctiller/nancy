@@ -51,12 +51,18 @@ pub fn logs_view() -> Html {
                     html! {
                         <div style="display: flex; flex-direction: column; gap: 24px;">
                             <div class="glass-panel" style="padding: 20px;">
-                                <h3>{"Model Consumption Metrics"}</h3>
+                                <div style="display: flex; justify-content: space-between; align-items: center;">
+                                    <h3>{"Model Consumption Metrics"}</h3>
+                                    <div style="font-size: 1.1em; color: var(--accent-light); font-weight: bold;">
+                                        { format!("Available Tick Budget: ${:.5}", state.budget_pool_usd) }
+                                    </div>
+                                </div>
                                 <table style="width: 100%; border-collapse: collapse; text-align: left;">
                                     <thead>
                                         <tr style="border-bottom: 1px solid rgba(255,255,255,0.2);">
                                             <th style="padding: 10px;">{"Model"}</th>
                                             <th style="padding: 10px;">{"Quotas (RPM/TPM/RPD)"}</th>
+                                            <th style="padding: 10px;">{"Expected Lease (Req/Tok/Cost)"}</th>
                                             <th style="padding: 10px;">{"1m (Tok/Req/$)"}</th>
                                             <th style="padding: 10px;">{"3m (Tok/Req/$)"}</th>
                                             <th style="padding: 10px;">{"10m (Tok/Req/$)"}</th>
@@ -81,6 +87,13 @@ pub fn logs_view() -> Html {
                                                         stats.active_quotas.tpm.map(|v| if v >= 1_000_000.0 { format!("{:.1}M", v/1_000_000.0) } else if v >= 1000.0 { format!("{:.0}k", v/1000.0) } else { format!("{:.0}", v) }).unwrap_or_else(|| "Inf".to_string()),
                                                         stats.active_quotas.rpd.map(|v| if v >= 1_000_000.0 { format!("{:.1}M", v/1_000_000.0) } else if v >= 1000.0 { format!("{:.0}k", v/1000.0) } else { format!("{:.0}", v) }).unwrap_or_else(|| "Inf".to_string())
                                                     ) }
+                                                </td>
+                                                <td style="padding: 10px;">
+                                                    { format!("{:.1} / {} / ${:.4}",
+                                                        stats.expected_lease_requests,
+                                                        fmt_tok(stats.expected_lease_tokens as u64),
+                                                        stats.expected_lease_cost) 
+                                                    }
                                                 </td>
                                                 <td style="padding: 10px;">{ format!("{} / {} / ${:.4}", fmt_tok(stats.trailing_1m.input_tokens + stats.trailing_1m.output_tokens), stats.trailing_1m.requests, stats.trailing_1m.cost_usd) }</td>
                                                 <td style="padding: 10px;">{ format!("{} / {} / ${:.4}", fmt_tok(stats.trailing_3m.input_tokens + stats.trailing_3m.output_tokens), stats.trailing_3m.requests, stats.trailing_3m.cost_usd) }</td>

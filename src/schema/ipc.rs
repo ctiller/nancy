@@ -81,6 +81,9 @@ pub struct ModelUsageStats {
     pub trailing_10m: UsageMetrics,
     pub trailing_30m: UsageMetrics,
     pub trailing_100m: UsageMetrics,
+    pub expected_lease_cost: f64,
+    pub expected_lease_tokens: f64,
+    pub expected_lease_requests: f64,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -88,4 +91,5 @@ pub struct MarketStateResponse {
     pub per_model_stats: Vec<(schema::LlmModel, ModelUsageStats)>,
     pub pending_bids: Vec<PendingBidInfo>,
     pub active_leases: Vec<RequestModelResponse>,
+    pub budget_pool_usd: f64,
 }
