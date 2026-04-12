@@ -401,7 +401,6 @@ async fn test_coordinator_generates_rework_implementation_upon_dissent() -> Resu
         vote: nancy::pre_review::schema::ReviewVote::ChangesRequired, // Force reject!
         agree_notes: "".into(),
         disagree_notes: "Failed structural".into(),
-        overridden_vetoes: vec![],
         task_feedback: vec![],
         tdd_feedback: None,
     };

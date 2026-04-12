@@ -16,6 +16,7 @@ pub struct AppView {
     pub agent_crashes: HashMap<String, crate::schema::task::AgentCrashReportPayload>,
     pub task_evaluations: HashMap<String, crate::schema::task::TaskEvaluationPayload>, // evaluated_event_id -> payload
     pub active_asks: HashMap<String, crate::schema::task::AskPayload>,
+    pub active_plan_reviews: HashMap<String, crate::schema::task::ReviewPlanPayload>,
 }
 
 impl AppView {
@@ -32,6 +33,7 @@ impl AppView {
             agent_crashes: HashMap::new(),
             task_evaluations: HashMap::new(),
             active_asks: HashMap::new(),
+            active_plan_reviews: HashMap::new(),
         }
     }
 
@@ -40,7 +42,7 @@ impl AppView {
         let did = identity.get_did_owner().did.clone();
 
         // Poll our own ledger to hydrate AppView structurally
-        let reader = Reader::new(repo, did);
+        let reader = Reader::new(repo, did.clone());
         if let Ok(iter) = reader.iter_events() {
             for ev_res in iter {
                 if let Ok(env) = ev_res {
@@ -49,15 +51,32 @@ impl AppView {
             }
         }
 
-        // Sync with grinders to receive their AssignmentCompletes
-        if let Identity::Coordinator { workers, .. } = identity {
-            for worker in workers {
+        // Dynamically aggregate all nancy/* branches directly from the underlying ledger to automatically capture all Grinders securely,
+        // side-stepping strict Identity IPC routing mechanisms that standalone execution can miss.
+        if let Ok(branches) = repo.branches(Some(git2::BranchType::Local)) {
+            let mut dynamic_dids = HashSet::new();
+            for branch_res in branches {
+                if let Ok((branch, _)) = branch_res {
+                    if let Ok(Some(name)) = branch.name() {
+                        if name.starts_with("nancy/") {
+                            let branch_did = name.trim_start_matches("nancy/");
+                            dynamic_dids.insert(branch_did.to_string());
+                        }
+                    }
+                }
+            }
+
+            for branch_did in dynamic_dids {
+                // Skip the coordinator/own did since it was already identically hydrated above
+                if branch_did == did { continue; }
+                
                 if let Some(r_did) = restricted_grinder_did {
-                    if worker.did != r_did {
+                    if branch_did != r_did {
                         continue;
                     }
                 }
-                let local_reader = Reader::new(repo, worker.did.clone());
+                
+                let local_reader = Reader::new(repo, branch_did);
                 if let Ok(iter) = local_reader.iter_events() {
                     for ev_res in iter {
                         if let Ok(env) = ev_res {
@@ -113,13 +132,18 @@ impl AppView {
                 self.task_evaluations.insert(e.evaluated_event_id.clone(), e.clone());
             }
             EventPayload::Ask(a) => {
-                self.active_asks.insert(a.ask_ref.clone(), a.clone());
+                self.active_asks.insert(a.item_ref.clone(), a.clone());
             }
-            EventPayload::CancelAsk(c) => {
-                self.active_asks.remove(&c.ask_ref);
+            EventPayload::ReviewPlan(p) => {
+                self.active_plan_reviews.insert(p.plan_ref.clone(), p.clone());
+            }
+            EventPayload::CancelItem(c) => {
+                self.active_asks.remove(&c.item_ref);
+                self.active_plan_reviews.remove(&c.item_ref);
             }
             EventPayload::HumanResponse(hr) => {
-                self.active_asks.remove(&hr.ask_ref);
+                self.active_asks.remove(&hr.item_ref);
+                self.active_plan_reviews.remove(&hr.item_ref);
             }
             _ => {}
         }
@@ -298,6 +322,18 @@ impl AppView {
                 id: id.clone(),
                 node_type: schema::NodeType::Ask,
                 name: payload.question.clone(),
+                active_agent: Some(payload.agent_path.clone()),
+                is_completed: false,
+                x: 0.0,
+                y: 0.0,
+            });
+        }
+        
+        for (id, payload) in &self.active_plan_reviews {
+            nodes.push(schema::TopologyNode {
+                id: id.clone(),
+                node_type: schema::NodeType::Plan, // mapping to Plan type for Topology viewing
+                name: payload.task_name.clone(),
                 active_agent: Some(payload.agent_path.clone()),
                 is_completed: false,
                 x: 0.0,

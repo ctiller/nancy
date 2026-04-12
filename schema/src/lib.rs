@@ -86,3 +86,33 @@ pub struct TaskRequestPayload {
     pub requestor: String,
     pub description: String,
 }
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+pub struct TddDocument {
+    pub title: String,
+    pub summary: String,
+    pub background_context: String,
+    pub goals: Vec<String>,
+    pub non_goals: Vec<String>,
+    pub proposed_design: Vec<String>,
+    pub risks_and_tradeoffs: Vec<String>,
+    pub alternatives_considered: Vec<String>,
+    #[serde(default)]
+    pub recorded_dissents: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+pub struct AskPayload {
+    pub item_ref: String,
+    pub question: String,
+    pub agent_path: String,
+    pub task_name: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+pub struct ReviewPlanPayload {
+    pub plan_ref: String,
+    pub agent_path: String,
+    pub task_name: String,
+    pub document: TddDocument,
+}

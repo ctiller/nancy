@@ -1,5 +1,8 @@
 # ADR 0029: Pre-Review System Architecture
 
+## Status
+**DEPRECATED** superseded by ADR 0035 and explicit expungement of Veto constraints.
+
 ## Context
 When an autonomous agent generates a complex architectural plan or codebase diff, single-shot LLM evaluations frequently fail to catch systemic issues, domain-specific violations, or security surface errors. We need an asynchronous review system capable of modeling a real engineering panel. The system must prevent the coordinating entity from manipulating the panel for an "easy pass" and must handle disagreements intelligently without exploding execution token costs.
 

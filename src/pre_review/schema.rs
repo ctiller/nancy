@@ -1,4 +1,4 @@
-use crate::personas::PersonaCategory;
+
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 

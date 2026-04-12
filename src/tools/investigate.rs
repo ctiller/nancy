@@ -5,7 +5,7 @@ use futures_util::future::try_join_all;
 use std::sync::Arc;
 
 pub struct AskHuman {
-    pub ask_ref: String,
+    pub item_ref: String,
     pub repo_path: std::path::PathBuf,
 }
 
@@ -23,15 +23,16 @@ impl AskHuman {
         
         let payload = crate::schema::registry::EventPayload::Ask(
             crate::schema::task::AskPayload {
-                ask_ref: aref.clone(),
+                item_ref: aref.clone(),
                 question: question.to_string(),
                 agent_path: agent_path.to_string(),
                 task_name: task_name.to_string(),
             }
         );
         let _ = writer.log_event(payload);
+        let _ = writer.commit_batch();
         
-        Some(Self { ask_ref: aref, repo_path })
+        Some(Self { item_ref: aref, repo_path })
     }
 
     pub async fn wait_for_response(&self) -> String {
@@ -44,10 +45,10 @@ impl AskHuman {
             let reader = crate::events::reader::Reader::new(&r, human_did.clone());
             if let Ok(iter) = reader.iter_events() {
                 for ev in iter.flatten() {
-                    if let crate::schema::registry::EventPayload::AskSeen(s) = &ev.payload {
-                        if s.ask_ref == self.ask_ref { should_wait = true; }
+                    if let crate::schema::registry::EventPayload::Seen(s) = &ev.payload {
+                        if s.item_ref == self.item_ref { should_wait = true; }
                     } else if let crate::schema::registry::EventPayload::HumanResponse(hr) = &ev.payload {
-                        if hr.ask_ref == self.ask_ref {
+                        if hr.item_ref == self.item_ref {
                             human_appended_response = format!("\n\n[HUMAN RESPONSE TO YOUR ASK]: {}", hr.text_response);
                             should_wait = false;
                         }
@@ -65,7 +66,7 @@ impl AskHuman {
                     if let Ok(iter) = reader2.iter_events() {
                         for ev in iter.flatten() {
                             if let crate::schema::registry::EventPayload::HumanResponse(hr) = &ev.payload {
-                                if hr.ask_ref == self.ask_ref {
+                                if hr.item_ref == self.item_ref {
                                     human_appended_response = format!("\n\n[HUMAN RESPONSE TO YOUR ASK]: {}", hr.text_response);
                                     break;
                                 }
@@ -85,9 +86,9 @@ impl AskHuman {
             let wd = r.workdir().unwrap_or(&self.repo_path);
             if let Ok(id_obj) = crate::schema::identity_config::Identity::load(wd).await {
                 if let Ok(writer) = crate::events::writer::Writer::new(&r, id_obj) {
-                    let payload = crate::schema::registry::EventPayload::CancelAsk(
-                        crate::schema::task::CancelAskPayload {
-                            ask_ref: self.ask_ref.clone(),
+                    let payload = crate::schema::registry::EventPayload::CancelItem(
+                        crate::schema::task::CancelItemPayload {
+                            item_ref: self.item_ref.clone(),
                         }
                     );
                     let _ = writer.log_event(payload);
@@ -235,11 +236,11 @@ mod tests {
                 
                 // Using Grinder namespace wrapper to allow writer instantiation since Human variant doesn't independently exist
                 if let Ok(writer) = crate::events::writer::Writer::new(&r, crate::schema::identity_config::Identity::Grinder(test_human)) {
-                    // Iterate and pick up the ask_ref organically to respond correctly
+                    // Iterate and pick up the item_ref organically to respond correctly
                     let _reader = crate::events::reader::Reader::new(&r, "did:key:z6MkiuexGTCjkPmnT4jv1JNAmeV7UnBoMh1rsxLoYYCQ8Txs".to_string());
-                    let _ = writer.log_event(crate::schema::registry::EventPayload::AskSeen(
-                        crate::schema::task::AskSeenPayload {
-                            ask_ref: "a".to_string(),
+                    let _ = writer.log_event(crate::schema::registry::EventPayload::Seen(
+                        crate::schema::task::SeenPayload {
+                            item_ref: "a".to_string(),
                             timestamp: 0
                         }
                     ));
@@ -266,7 +267,7 @@ mod tests {
             if let crate::schema::registry::EventPayload::Ask(_) = ev.payload {
                 found_ask = true;
             }
-            if let crate::schema::registry::EventPayload::CancelAsk(_) = ev.payload {
+            if let crate::schema::registry::EventPayload::CancelItem(_) = ev.payload {
                 found_cancel = true;
             }
         }
@@ -290,7 +291,7 @@ mod tests {
 
         let ask = AskHuman::start("isolated_q", "task1", "agent1").await.expect("Failed to initialize AskHuman");
 
-        let ask_ref_clone = ask.ask_ref.clone();
+        let item_ref_clone = ask.item_ref.clone();
         tokio::spawn(async move {
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
             if let Ok(r) = git2::Repository::discover(".") {
@@ -301,16 +302,16 @@ mod tests {
                 };
                 
                 if let Ok(writer) = crate::events::writer::Writer::new(&r, crate::schema::identity_config::Identity::Grinder(test_human.clone())) {
-                    let _ = writer.log_event(crate::schema::registry::EventPayload::AskSeen(
-                        crate::schema::task::AskSeenPayload {
-                            ask_ref: ask_ref_clone.clone(),
+                    let _ = writer.log_event(crate::schema::registry::EventPayload::Seen(
+                        crate::schema::task::SeenPayload {
+                            item_ref: item_ref_clone.clone(),
                             timestamp: 0
                         }
                     ));
                     
                     let _ = writer.log_event(crate::schema::registry::EventPayload::HumanResponse(
                         crate::schema::task::ResponsePayload {
-                            ask_ref: ask_ref_clone,
+                            item_ref: item_ref_clone,
                             text_response: "Module Mock Human Response".to_string()
                         }
                     ));

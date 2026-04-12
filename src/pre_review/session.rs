@@ -130,6 +130,7 @@ impl ReviewSession {
                 let new_client = thinking_llm(&client_name)
                     .system_prompt(&sys_prompt)
                     .tools(tools)
+                    .with_loop_detection()
                     .build()?;
                     
                 self.reviewers.insert(expert_id.clone(), new_client);

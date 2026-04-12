@@ -1,6 +1,9 @@
 use anyhow::{Context, bail};
 use askama::Template;
-use crate::llm::api::{Gemini, GeminiResponse, GeminiError, Tool, SystemInstruction, Session};
+use gemini_client_api::gemini::ask::Gemini;
+use gemini_client_api::gemini::types::request::Chat;
+use gemini_client_api::gemini::types::response::GeminiResponse;
+use gemini_client_api::gemini::types::sessions::Session;
 use schemars::JsonSchema;
 use serde::de::DeserializeOwned;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -13,23 +16,13 @@ use tokio::time::sleep;
 Time:{{ time }}
 {% if remaining_secs > 0 %}RemainingTime:{{ remaining_secs }}s
 {% endif %}Runtime:{{ runtime }}s
-{% if loop_warning.is_some() %}WARNING: {{ loop_warning.unwrap() }}
-{% endif %}[/SYSTEM]"#,
+[/SYSTEM]"#,
     ext = "txt"
 )]
 struct SystemHeaderTemplate<'a> {
     time: &'a str,
     remaining_secs: u64,
     runtime: u64,
-    loop_warning: Option<&'a str>,
-}
-
-#[derive(Debug)]
-pub enum LoopEvent {
-    Prompt(String),
-    Response(String),
-    ToolCall { name: String, args: String },
-    ToolResponse { name: String, response: String },
 }
 
 #[cfg(test)]
@@ -52,24 +45,21 @@ pub struct LlmClient {
     >,
     pub created_at: std::time::Instant,
     pub shared_deadline: Option<std::sync::Arc<AtomicU64>>,
-    pub loop_event_tx: Option<tokio::sync::mpsc::UnboundedSender<LoopEvent>>,
-    pub is_looping: Option<std::sync::Arc<std::sync::Mutex<Option<String>>>>,
 }
 
-fn should_retry(err: &crate::llm::api::GeminiError) -> Option<Duration> {
+fn should_retry(err: &gemini_client_api::gemini::error::GeminiResponseError) -> Option<Duration> {
     match err {
-        crate::llm::api::GeminiError::ResourceExhausted => {
-            Some(Duration::from_secs(10))
-        }
-        crate::llm::api::GeminiError::ApiStatus { status, .. } => {
-            if status.contains("429") {
-                Some(Duration::from_secs(10))
-            } else {
-                None
+        gemini_client_api::gemini::error::GeminiResponseError::StatusNotOk(e) => {
+            if e.error.code.as_u16() == 429 {
+                return Some(Duration::from_secs(10));
             }
+            if e.error.status == gemini_client_api::gemini::error::Status::ResourceExhausted {
+                return Some(Duration::from_secs(10));
+            }
+            None
         }
-        crate::llm::api::GeminiError::Reqwest(re) => {
-            if re.is_timeout() || re.is_connect() {
+        gemini_client_api::gemini::error::GeminiResponseError::ReqwestError(re) => {
+            if re.is_timeout() {
                 Some(Duration::from_secs(5))
             } else {
                 None
@@ -137,21 +127,13 @@ impl LlmClient {
         }
     }
 
-    pub(crate) async fn handle_tool_calls(&self, resp: &GeminiResponse) -> Vec<(String, serde_json::Value)> {
+    pub(crate) async fn handle_tool_calls(&self, chat: &Chat) -> Vec<(String, serde_json::Value)> {
         let mut responses = Vec::new();
-
-        for fc in resp.get_function_calls() {
-            let tool_name = fc.name.to_string();
-            let args = fc.args.clone();
+        for fc in chat.get_function_calls() {
+            let tool_name = fc.name().to_string();
+            let args = fc.args().clone().unwrap_or(serde_json::Value::Null);
 
             crate::introspection::set_frame_status(&format!("Executing tool: {} ⚙️", tool_name));
-
-            if let Some(tx) = &self.loop_event_tx {
-                let _ = tx.send(LoopEvent::ToolCall {
-                    name: tool_name.clone(),
-                    args: args.to_string(),
-                });
-            }
 
             let response_payload = crate::introspection::frame(&format!("Tool: {}", tool_name), async {
                 let call_id = uuid::Uuid::new_v4().to_string();
@@ -205,13 +187,6 @@ impl LlmClient {
 
                 crate::introspection::data_log("output", response_payload.clone());
                 
-                if let Some(tx) = &self.loop_event_tx {
-                    let _ = tx.send(LoopEvent::ToolResponse {
-                        name: tool_name.clone(),
-                        response: serde_json::to_string(&response_payload).unwrap_or_else(|_| "{}".to_string()),
-                    });
-                }
-                
                 let mut modified_payload = response_payload;
                 
                 let runtime = self.created_at.elapsed().as_secs();
@@ -227,20 +202,10 @@ impl LlmClient {
                     }
                 }
                 
-                let mut loop_warning_owned = None;
-                if let Some(is_looping_mutex) = &self.is_looping {
-                    if let Ok(mut lock) = is_looping_mutex.lock() {
-                        if let Some(desc) = lock.take() {
-                            loop_warning_owned = Some(format!("LOOP DETECTED: TRY DOING SOMETHING ELSE. Detected pattern: {}", desc));
-                        }
-                    }
-                }
-                
                 let tmpl = SystemHeaderTemplate {
                     time: &time_str,
                     remaining_secs,
                     runtime,
-                    loop_warning: loop_warning_owned.as_deref(),
                 };
                 if let Ok(header) = tmpl.render() {
                     if let serde_json::Value::Object(mut map) = modified_payload {
@@ -289,38 +254,13 @@ impl LlmClient {
             }
         }
         
-        let mut loop_warning_text = None;
-        if let Some(is_looping_mutex) = &self.is_looping {
-            let mut extracted_desc = None;
-            if let Ok(mut lock) = is_looping_mutex.lock() {
-                if let Some(desc) = lock.take() {
-                    extracted_desc = Some(desc);
-                }
-            }
-            if let Some(desc) = extracted_desc {
-                let warning = format!("LOOP DETECTED: TRY DOING SOMETHING ELSE. Detected pattern: {}", desc);
-                self.system_prompt.push(warning);
-            }
-            for line in self.system_prompt.iter().rev() {
-                if line.starts_with("LOOP DETECTED:") {
-                    loop_warning_text = Some(line.as_str());
-                    break;
-                }
-            }
-        }
-        
         let tmpl = SystemHeaderTemplate {
             time: &time_str,
             remaining_secs,
             runtime,
-            loop_warning: loop_warning_text,
         };
         let header = tmpl.render().context("Failed to render system notice template")?;
         let final_question = format!("{}\n\n{}", header, question);
-
-        if let Some(tx) = &self.loop_event_tx {
-            let _ = tx.send(LoopEvent::Prompt(final_question.clone()));
-        }
 
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -349,12 +289,12 @@ impl LlmClient {
 
         let joined_sys = self.system_prompt.join("\n\n");
         let sys_prompt = if !joined_sys.is_empty() {
-            Some(SystemInstruction::from(joined_sys))
+            Some(gemini_client_api::gemini::types::request::SystemInstruction::from(joined_sys))
         } else {
             None
         };
 
-        let mut gemini = Gemini::new(&self.api_key, model.to_string(), sys_prompt);
+        let mut gemini = Gemini::new(&self.api_key, model, sys_prompt);
         if let Some(temp) = self.temperature {
             gemini.set_generation_config()["temperature"] = serde_json::json!(temp);
         }
@@ -368,12 +308,11 @@ impl LlmClient {
 
         let mut function_decls = Vec::new();
         for tool in &self.tools {
-            let decl: crate::llm::api::FunctionDeclaration = serde_json::from_value(tool.declaration())?;
-            function_decls.push(decl);
+            function_decls.push(tool.declaration());
         }
         if !function_decls.is_empty() {
             gemini = gemini.set_tools(vec![
-                Tool::FunctionDeclarations(
+                gemini_client_api::gemini::types::request::Tool::FunctionDeclarations(
                     function_decls,
                 ),
             ]);
@@ -409,7 +348,7 @@ impl LlmClient {
                     tracing::info!("==== [LLM Client] Sending request to Gemini API. Waiting... ====");
                     let timeout_res = tokio::time::timeout(
                         std::time::Duration::from_secs(120),
-                        gemini.ask(self.session.get_history())
+                        Gemini::ask(gemini, &mut self.session)
                     ).await;
                     
                     tracing::info!("==== [LLM Client] Received response successfully! ====");
@@ -436,19 +375,14 @@ impl LlmClient {
                 }
             };
 
-            let chat = resp;
+            let chat = resp.get_chat();
             if chat.has_function_call() {
-                let tool_responses = self.handle_tool_calls(&chat).await;
+                let tool_responses = self.handle_tool_calls(chat).await;
                 for (name, payload) in tool_responses {
                     let _ = self.session.add_function_response(&name, payload);
                 }
             } else {
                 let text = chat.get_text_no_think("\n");
-                
-                if let Some(tx) = &self.loop_event_tx {
-                    let _ = tx.send(LoopEvent::Response(text.clone()));
-                }
-
                 let timestamp = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap()
@@ -472,7 +406,9 @@ impl LlmClient {
 #[cfg(test)]
 mod tests {
     use super::*;
-
+    use gemini_client_api::gemini::error::{
+        Error as InnerError, GeminiError, GeminiResponseError, Status,
+    };
     use reqwest::StatusCode;
     use serde::{Deserialize, Serialize};
     use sealed_test::prelude::*;
@@ -489,7 +425,7 @@ mod tests {
         let repo = git2::Repository::init(&td_path).unwrap();
         crate::commands::init::init(td_path.clone(), 1).await.unwrap();
 
-        let mut gemini = Gemini::new("xxx", "test_model".to_string(), None);
+        let mut gemini = Gemini::new("xxx", "test_model", None);
         
         let json_resp = serde_json::json!({
             "candidates": [{
@@ -523,8 +459,6 @@ mod tests {
             }))),
             created_at: std::time::Instant::now(),
             shared_deadline: None,
-            loop_event_tx: None,
-            is_looping: None,
         };
 
         // This should trigger `emit_trace_event` recursively securely
@@ -592,7 +526,14 @@ mod tests {
 
     #[test]
     fn test_should_retry_429() {
-        let err = crate::llm::api::GeminiError::ResourceExhausted;
+        let err = GeminiResponseError::StatusNotOk(GeminiError {
+            error: InnerError {
+                code: StatusCode::TOO_MANY_REQUESTS,
+                message: "Too Many Requests".to_string(),
+                status: Status::ResourceExhausted,
+                details: None,
+            },
+        });
 
         let duration = should_retry(&err);
         assert_eq!(duration, Some(Duration::from_secs(10)));
@@ -637,7 +578,7 @@ mod tests {
             "modelVersion": "test"
         });
         let resp: GeminiResponse = serde_json::from_value(json_resp).unwrap();
-        let chat = resp;
+        let chat = resp.get_chat();
 
         let client = LlmClient {
             kind: crate::llm::builder::Kind::Fast,
@@ -650,11 +591,9 @@ mod tests {
             mock_queue: None,
             created_at: std::time::Instant::now(),
             shared_deadline: None,
-            loop_event_tx: None,
-            is_looping: None,
         };
 
-        let responses = client.handle_tool_calls(&chat).await;
+        let responses = client.handle_tool_calls(chat).await;
         assert_eq!(responses.len(), 3);
 
         // test_tool success
@@ -711,8 +650,6 @@ mod tests {
             }))),
             created_at: std::time::Instant::now(),
             shared_deadline: None,
-            loop_event_tx: None,
-            is_looping: None,
         };
 
         let result = client.ask::<String>("question").await.unwrap();
@@ -722,7 +659,14 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn test_run_loop_max_retries() {
         let make_err = || {
-            Err(crate::llm::api::GeminiError::ResourceExhausted)
+            Err(GeminiResponseError::StatusNotOk(GeminiError {
+                error: InnerError {
+                    code: StatusCode::TOO_MANY_REQUESTS,
+                    message: "Too Many Requests".to_string(),
+                    status: Status::ResourceExhausted,
+                    details: None,
+                },
+            }))
         };
 
         let mut responses = Vec::new();
@@ -744,11 +688,9 @@ mod tests {
             }))),
             created_at: std::time::Instant::now(),
             shared_deadline: None,
-            loop_event_tx: None,
-            is_looping: None,
         };
 
-        let mut gemini = Gemini::new("xxx", "test_model".to_string(), None);
+        let mut gemini = Gemini::new("xxx", "test_model", None);
         let result = client.run_loop::<String>(&mut gemini).await;
         assert!(result.is_err());
         assert!(
@@ -761,7 +703,15 @@ mod tests {
 
     #[tokio::test]
     async fn test_run_loop_fatal_gemini_error() {
-        let err = Err(crate::llm::api::GeminiError::MalformedResponse);
+        let err = Err(GeminiResponseError::ReqwestError(
+            reqwest::Client::builder()
+                .build()
+                .unwrap()
+                .get("http://localhost")
+                .send()
+                .await
+                .unwrap_err(),
+        ));
 
         let mut client = LlmClient {
             kind: crate::llm::builder::Kind::Fast,
@@ -777,11 +727,9 @@ mod tests {
             }))),
             created_at: std::time::Instant::now(),
             shared_deadline: None,
-            loop_event_tx: None,
-            is_looping: None,
         };
 
-        let mut gemini = Gemini::new("xxx", "test".to_string(), None);
+        let mut gemini = Gemini::new("xxx", "test", None);
         let result = client.run_loop::<String>(&mut gemini).await;
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("Gemini API error"));
@@ -828,8 +776,6 @@ mod tests {
             }))),
             created_at: std::time::Instant::now(),
             shared_deadline: None,
-            loop_event_tx: None,
-            is_looping: None,
         };
 
         let result = client.ask::<String>("dummy question").await.unwrap();

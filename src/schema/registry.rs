@@ -7,7 +7,7 @@ use super::llm::{
 use super::task::{
     AssignmentCompletePayload, BlockedByPayload, CoordinatorAssignmentPayload,
     ReviewFeedbackPayload, TaskPayload, TaskRequestPayload,
-    AskPayload, CancelAskPayload, AskSeenPayload, ResponsePayload,
+    AskPayload, CancelItemPayload, SeenPayload, ResponsePayload, ReviewPlanPayload,
 };
 
 /// Enum describing all understood schema payloads in the event log.
@@ -43,10 +43,12 @@ pub enum EventPayload {
     TaskEvaluation(crate::schema::task::TaskEvaluationPayload),
     #[serde(rename = "ask")]
     Ask(AskPayload),
-    #[serde(rename = "ask_seen")]
-    AskSeen(AskSeenPayload),
-    #[serde(rename = "cancel_ask")]
-    CancelAsk(CancelAskPayload),
+    #[serde(rename = "seen")]
+    Seen(SeenPayload),
+    #[serde(rename = "cancel_item")]
+    CancelItem(CancelItemPayload),
+    #[serde(rename = "review_plan")]
+    ReviewPlan(ReviewPlanPayload),
     #[serde(rename = "human_response")]
     HumanResponse(ResponsePayload),
 }

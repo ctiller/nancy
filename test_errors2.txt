@@ -1,0 +1,175 @@
+warning: nancy v0.1.0 (/home/craig/nancy) ignoring invalid dependency `web` which is missing a lib target
+warning: unused imports: `Context` and `bail`
+ --> src/commands/grind.rs:1:14
+  |
+1 | use anyhow::{Context, Result, bail};
+  |              ^^^^^^^          ^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `git2::Repository`
+ --> src/commands/grind.rs:2:5
+  |
+2 | use git2::Repository;
+  |     ^^^^^^^^^^^^^^^^
+
+warning: unused import: `tokio::fs`
+ --> src/commands/grind.rs:3:5
+  |
+3 | use tokio::fs;
+  |     ^^^^^^^^^
+
+warning: unused imports: `AtomicBool` and `Ordering`
+ --> src/commands/grind.rs:5:25
+  |
+5 | ...atomic::{AtomicBool, Ordering};
+  |             ^^^^^^^^^^  ^^^^^^^^
+
+warning: unused import: `std::cell::RefCell`
+ --> src/events/writer.rs:4:5
+  |
+4 | use std::cell::RefCell;
+  |     ^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `bail`
+ --> src/llm/builder.rs:2:23
+  |
+2 | use anyhow::{Context, bail};
+  |                       ^^^^
+
+warning: unused import: `GeminiError`
+ --> src/llm/client.rs:3:47
+  |
+3 | ...iniResponse, GeminiError, Tool, System...
+  |                 ^^^^^^^^^^^
+
+warning: unused import: `Context`
+ --> src/dreamer/task_view.rs:1:14
+  |
+1 | use anyhow::{Context, Result};
+  |              ^^^^^^^
+
+warning: unused import: `VecDeque`
+ --> src/dreamer/task_view.rs:2:33
+  |
+2 | use std::collections::{HashSet, VecDeque};
+  |                                 ^^^^^^^^
+
+warning: unused imports: `data_log` and `log`
+ --> src/dreamer/task_view.rs:5:58
+  |
+5 | ...oot, frame, data_log, log};
+  |                ^^^^^^^^  ^^^
+
+warning: value assigned to `human_last_seen` is never read
+   --> src/grind/execute_task.rs:244:39
+    |
+244 | ...   let mut human_last_seen = 0u64;
+    |                                 ^^^^
+    |
+    = help: maybe it is overwritten before being read?
+    = note: `#[warn(unused_assignments)]` (part of `#[warn(unused)]`) on by default
+
+warning: variable `logged_any` is assigned to, but never used
+  --> src/dreamer/task_view.rs:72:25
+   |
+72 | ...   let mut logged_any = false;
+   |           ^^^^^^^^^^^^^^
+   |
+   = note: consider using `_logged_any` instead
+   = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: value assigned to `logged_any` is never read
+   --> src/dreamer/task_view.rs:101:49
+    |
+101 | ...                   logged_any = true;
+    |                       ^^^^^^^^^^^^^^^^^
+    |
+    = help: maybe it is overwritten before being read?
+
+   Compiling nancy v0.1.0 (/home/craig/nancy)
+warning: `nancy` (lib) generated 13 warnings (run `cargo fix --lib -p nancy` to apply 10 suggestions)
+warning: unused variable: `crash_res`
+  --> tests/e2e_crash_recovery.rs:61:9
+   |
+61 |     let crash_res = uds_client.post("htt...
+   |         ^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_crash_res`
+   |
+   = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: `nancy` (test "e2e_crash_recovery") generated 1 warning (run `cargo fix --test "e2e_crash_recovery" -p nancy` to apply 1 suggestion)
+error[E0433]: failed to resolve: use of undeclared type `GeminiResponseError`
+   --> src/llm/client.rs:764:23
+    |
+764 | ... = Err(GeminiResponseError::ReqwestE...
+    |           ^^^^^^^^^^^^^^^^^^^ use of undeclared type `GeminiResponseError`
+    |
+help: a struct with a similar name exists
+    |
+764 -         let err = Err(GeminiResponseError::ReqwestError(
+764 +         let err = Err(GeminiResponse::ReqwestError(
+    |
+help: consider importing this enum
+    |
+474 +     use gemini_client_api::gemini::error::GeminiResponseError;
+    |
+
+warning: unused import: `AtomicBool`
+ --> src/commands/grind.rs:5:25
+  |
+5 | use std::sync::atomic::{AtomicBool, Order...
+  |                         ^^^^^^^^^^
+
+warning: unused import: `Arc`
+  --> src/llm/client.rs:36:17
+   |
+36 | use std::sync::{Arc, Mutex};
+   |                 ^^^
+
+warning: unused import: `reqwest::StatusCode`
+   --> src/llm/client.rs:476:9
+    |
+476 |     use reqwest::StatusCode;
+    |         ^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `tempfile::tempdir`
+  --> src/schema/identity_config.rs:99:9
+   |
+99 |     use tempfile::tempdir;
+   |         ^^^^^^^^^^^^^^^^^
+
+warning: variable does not need to be mutable
+   --> src/llm/client.rs:492:13
+    |
+492 | ...let mut gemini = Gemini::new("xxx", ...
+    |        ----^^^^^^
+    |        |
+    |        help: remove this `mut`
+    |
+    = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `gemini`
+   --> src/llm/client.rs:492:13
+    |
+492 |         let mut gemini = Gemini::new("x...
+    |             ^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_gemini`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `repo`
+   --> src/tools/investigate.rs:289:13
+    |
+289 |         let repo = git2::Repository::in...
+    |             ^^^^ help: if this is intentional, prefix it with an underscore: `_repo`
+
+warning: variable `logged_any` is assigned to, but never used
+  --> src/dreamer/task_view.rs:72:25
+   |
+72 | ...   let mut logged_any = false;
+   |           ^^^^^^^^^^^^^^
+   |
+   = note: consider using `_logged_any` instead
+
+For more information about this error, try `rustc --explain E0433`.
+warning: `nancy` (lib test) generated 18 warnings (10 duplicates)
+error: could not compile `nancy` (lib test) due to 1 previous error; 18 warnings emitted

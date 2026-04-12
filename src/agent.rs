@@ -1,7 +1,7 @@
 use anyhow::{Context, Result, bail};
 use git2::Repository;
 use tokio::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::schema::identity_config::Identity;

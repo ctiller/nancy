@@ -1,0 +1,41 @@
+--- src/llm/api.rs
++++ src/llm/api.rs
+@@ -107,6 +107,37 @@
+     fn from(e: serde_json::Error) -> Self { Self::Json(e) }
+ }
+ 
++impl GeminiResponse {
++    pub fn has_function_call(&self) -> bool {
++        self.get_function_calls().len() > 0
++    }
++
++    pub fn get_function_calls(&self) -> Vec<FunctionCall> {
++        let mut res = Vec::new();
++        if let Some(cands) = &self.candidates {
++            for cand in cands {
++                for part in &cand.content.parts {
++                    if let Some(fc) = &part.function_call {
++                        res.push(fc.clone());
++                    }
++                }
++            }
++        }
++        res
++    }
++
++    pub fn get_text_no_think(&self, _sep: &str) -> String {
++        let mut res = String::new();
++        if let Some(cands) = &self.candidates {
++            for cand in cands {
++                for part in &cand.content.parts {
++                    if let Some(txt) = &part.text {
++                        res.push_str(txt);
++                    }
++                }
++            }
++        }
++        res
++    }
++}
++
+ pub struct Gemini {

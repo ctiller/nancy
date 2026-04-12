@@ -21,11 +21,16 @@ fn build_worker_env_vars(coordinator_did: &str, human_did: Option<&str>) -> Vec<
     if let Ok(api_key) = std::env::var("GEMINI_API_KEY") {
         env_vars.push(format!("GEMINI_API_KEY={}", api_key));
     }
+    if let Ok(base_url) = std::env::var("GEMINI_API_BASE_URL") {
+        let parsed = base_url.replace("127.0.0.1", "host.docker.internal").replace("0.0.0.0", "host.docker.internal");
+        env_vars.push(format!("GEMINI_API_BASE_URL={}", parsed));
+    }
     if let Ok(rust_log) = std::env::var("RUST_LOG") {
         env_vars.push(format!("RUST_LOG={}", rust_log));
     }
     env_vars
 }
+
 
 pub async fn build_container_config(
     rt_image: &str,
@@ -76,6 +81,7 @@ pub async fn build_container_config(
     let host_config = HostConfig {
         binds: Some(binds),
         auto_remove: Some(true),
+        extra_hosts: Some(vec!["host.docker.internal:host-gateway".to_string()]),
         ..Default::default()
     };
 

@@ -1,8 +1,8 @@
 use axum::{
     http::{header::CONTENT_TYPE, StatusCode, Uri},
     response::IntoResponse,
-    Router,
     routing::{get, post},
+    Router,
 };
 use std::sync::atomic::Ordering;
 use tower_http::trace::TraceLayer;
@@ -347,8 +347,8 @@ async fn get_api_tasks_evaluations(
     })).into_response()
 }
 
-async fn api_get_repo_tree(axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>) -> impl IntoResponse {
-    let branch = params.get("branch").cloned().unwrap_or_else(|| "main".to_string());
+async fn api_get_repo_tree(axum::extract::Query(_params): axum::extract::Query<std::collections::HashMap<String, String>>) -> impl IntoResponse {
+    // let _branch = _params.get("branch").cloned().unwrap_or_else(|| "main".to_string());
     axum::Json(serde_json::json!([]))
 }
 
@@ -384,6 +384,77 @@ async fn api_submit_task(
     }
 }
 
+async fn api_human_pending(
+    axum::extract::Extension(state): axum::extract::Extension<crate::coordinator::ipc::IpcState>,
+) -> impl IntoResponse {
+    let identity = { state.shared_identity.read().await.clone() };
+    let root = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    
+    let appview_opt = tokio::task::spawn_blocking({
+        let root = root.clone();
+        let identity = identity.clone();
+        move || {
+            let repo = match git2::Repository::discover(&root) {
+                Ok(r) => r,
+                Err(_) => return None,
+            };
+            Some(crate::coordinator::appview::AppView::hydrate(&repo, &identity, None))
+        }
+    }).await.unwrap_or(None);
+    
+    if let Some(av) = appview_opt {
+        let asks: Vec<_> = av.active_asks.values().cloned().collect();
+        let plan_reviews: Vec<_> = av.active_plan_reviews.values().cloned().collect();
+        axum::Json(serde_json::json!({
+            "asks": asks,
+            "plan_reviews": plan_reviews
+        })).into_response()
+    } else {
+        (StatusCode::INTERNAL_SERVER_ERROR, "No repo found").into_response()
+    }
+}
+
+#[derive(serde::Deserialize)]
+pub struct HumanActionPayload {
+    pub item_ref: String,
+    pub text_response: Option<String>,
+}
+
+async fn api_human_action(
+    axum::extract::Extension(state): axum::extract::Extension<crate::coordinator::ipc::IpcState>,
+    axum::Json(payload): axum::Json<HumanActionPayload>,
+) -> impl IntoResponse {
+    let identity = { state.shared_identity.read().await.clone() };
+    let root = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    
+    let res = tokio::task::spawn_blocking(move || {
+        let repo = git2::Repository::discover(&root).map_err(|e| e.to_string())?;
+        let writer = crate::events::writer::Writer::new(&repo, identity).map_err(|e| e.to_string())?;
+        
+        if let Some(text) = payload.text_response {
+            writer.log_event(crate::schema::registry::EventPayload::HumanResponse(
+                crate::schema::task::ResponsePayload {
+                    item_ref: payload.item_ref.clone(),
+                    text_response: text,
+                }
+            )).map_err(|e| e.to_string())?;
+        } else {
+            writer.log_event(crate::schema::registry::EventPayload::Seen(
+                crate::schema::task::SeenPayload {
+                    item_ref: payload.item_ref.clone(),
+                    timestamp: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs(),
+                }
+            )).map_err(|e| e.to_string())?;
+        }
+        writer.commit_batch().map_err(|e| e.to_string())
+    }).await.unwrap_or_else(|e| Err(e.to_string()));
+
+    match res {
+        Ok(_) => StatusCode::OK.into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e).into_response()
+    }
+}
+
 pub fn spawn_web_server(tcp_listener: tokio::net::TcpListener, ipc_state: crate::coordinator::ipc::IpcState) -> tokio::task::JoinHandle<()> {
     assert!(
         WebAssets::get("index.html").is_some(),
@@ -403,6 +474,8 @@ pub fn spawn_web_server(tcp_listener: tokio::net::TcpListener, ipc_state: crate:
         .route("/api/grinders/{did}/state", get(proxy_grinder_state))
         .route("/api/add-grinder", post(crate::coordinator::ipc::add_grinder_handler))
         .route("/api/remove-grinder", post(crate::coordinator::ipc::remove_grinder_handler))
+        .route("/api/human/pending", get(api_human_pending))
+        .route("/api/human/action", post(api_human_action))
         .fallback(static_asset_handler)
         .layer(TraceLayer::new_for_http())
         .layer(axum::Extension(ipc_state));

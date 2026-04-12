@@ -99,25 +99,33 @@ pub struct ReviewReportPayload {
 
 #[derive(Debug, Serialize, Deserialize, Clone, JsonSchema)]
 pub struct AskPayload {
-    pub ask_ref: String,
+    pub item_ref: String,
     pub question: String,
     pub agent_path: String,
     pub task_name: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, JsonSchema)]
-pub struct AskSeenPayload {
-    pub ask_ref: String,
+pub struct SeenPayload {
+    pub item_ref: String,
     pub timestamp: u64,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, JsonSchema)]
-pub struct CancelAskPayload {
-    pub ask_ref: String,
+pub struct CancelItemPayload {
+    pub item_ref: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, JsonSchema)]
 pub struct ResponsePayload {
-    pub ask_ref: String,
+    pub item_ref: String,
     pub text_response: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, JsonSchema)]
+pub struct ReviewPlanPayload {
+    pub plan_ref: String,
+    pub agent_path: String,
+    pub task_name: String,
+    pub document: TddDocument,
 }

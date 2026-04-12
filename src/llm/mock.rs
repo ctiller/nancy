@@ -1,12 +1,11 @@
 pub mod builder {
-    use gemini_client_api::gemini::error::GeminiResponseError;
-    use gemini_client_api::gemini::types::response::GeminiResponse;
+    use crate::llm::api::{GeminiResponse, GeminiError};
     use std::sync::Arc;
     use std::sync::LazyLock;
     use std::sync::Mutex;
 
     pub struct MockQueue {
-        pub responses: Vec<Result<GeminiResponse, GeminiResponseError>>,
+        pub responses: Vec<Result<GeminiResponse, GeminiError>>,
         pub hang_on_exhaustion: bool,
     }
 

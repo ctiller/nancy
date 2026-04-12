@@ -1,5 +1,8 @@
 # ADR 0016: Schema Cleanup for Query and Plan Payloads
 
+## Status
+**DEPRECATED** permanently superseded by universal `TaskPayload` in ADR 0030.
+
 ## Context
 During the recent refinement of the `CoordinatorAssignmentPayload` execution tracking, we identified lagging payloads in the registry that required cleanup to ensure strict schema adherence and eliminate dead code. Specifically, a legacy `QueryRequest` existed and there was a conceptual flip on maintaining `PlanPayload` in the schema mapping.
 

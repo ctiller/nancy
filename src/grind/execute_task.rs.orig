@@ -214,9 +214,7 @@ async fn handle_plan_task(
                 document: output.tdd.clone(),
             }
         ));
-        if let Err(e) = writer.commit_batch() {
-            tracing::error!("FATAL COMMIT BATCH ERROR: {}", e);
-        }
+        let _ = writer.commit_batch(); // Flush to ledger so UI can immediately render the Needs Action element during formal AI review!
 
         let formal_panel = session.enforce_quorum(&team_selection.experts, crate::personas::PersonaRole::PlanReview);
         let review_outputs = session.ask_reviewers::<crate::pre_review::schema::ReviewOutput>(&formal_panel, &review_prompt, &format!("review round {}", iteration)).await?;
@@ -372,7 +370,7 @@ async fn handle_review_task(
     _repo: &Repository,
     _task_ref: &str,
     task_payload: &TaskPayload,
-    _writer: &Writer<'_>,
+    writer: &Writer<'_>,
 ) -> Result<String> {
     let target_repo = Repository::open(target_path)?;
     let head_minus_one = target_repo.revparse_single("HEAD~1")

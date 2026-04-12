@@ -1,5 +1,8 @@
 # ADR 0017: Orphaned Branch Plan Architecture
 
+## Status
+**DEPRECATED** globally superseded by ADR 0035 (Planning Redux).
+
 ## Context
 As the agentic orchestration architecture evolves, the `PlanPayload` schema inherently requires managing multi-document collections such as Markdown files, architectural specifications, and visual drawings. Storing arbitrarily large text blocks within the event registry via the `description` field restricts our ability to leverage standard Git operations for code review, iteration, and IDE tooling.
 

@@ -1,7 +1,7 @@
 # ADR 0013: Hot Grinder Architecture & Binary Provisioning
 
 ## Status
-Accepted
+**DEPRECATED** globally superseded by ADR 0040.
 
 ## Context
 When engineering the initial Orchestrator mechanisms spanning `nancy run` (Coordinator) and `nancy grind` (Grinder worker) logic, we instantiated stateless ephemeral executions per task block. The initial architecture bound `TASK_ID` to native Unix shell environment variables spanning into Docker container launches, forcing isolated container instantiations dropping dynamically upon matching completion.

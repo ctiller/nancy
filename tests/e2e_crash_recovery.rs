@@ -42,7 +42,7 @@ async fn test_e2e_crash_recovery() {
     while target_grinder_did.is_empty() && attempts < 200 {
         let res = client.get(&url).header("Accept", "application/json").send().await.unwrap();
         let text = res.text().await.unwrap();
-        let parsed: nancy::schema::web::GrindersResponse = serde_json::from_str(&text).unwrap();
+        let parsed: schema::GrindersResponse = serde_json::from_str(&text).unwrap();
         
         if let Some(target) = parsed.grinders.into_iter().find(|s| s.is_online && s.agent_type == "grinder") {
             target_grinder_did = target.did;
@@ -99,7 +99,7 @@ async fn test_e2e_crash_recovery() {
     while !online_again && attempts < 200 {
         let res = client.get(&url).header("Accept", "application/json").send().await.unwrap();
         let text = res.text().await.unwrap();
-        let parsed: nancy::schema::web::GrindersResponse = serde_json::from_str(&text).unwrap();
+        let parsed: schema::GrindersResponse = serde_json::from_str(&text).unwrap();
         
         if let Some(target) = parsed.grinders.into_iter().find(|s| s.did == target_grinder_did) {
             if target.is_online {

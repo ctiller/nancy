@@ -119,7 +119,6 @@ impl<'a> Writer<'a> {
         let safe_did = self.identity.get_did_owner().did.replace(":", "_");
         let branch_name = format!("refs/heads/nancy/{}", safe_did);
         let branch_ref = self.repo.find_reference(&branch_name);
-        let sig = self.repo.signature()?;
 
         let mut max_log_idx = 0;
         let mut log_blobs = std::collections::BTreeMap::new();
@@ -256,6 +255,8 @@ impl<'a> Writer<'a> {
 
         let new_root_tree = self.repo.find_tree(root_tree_id)?;
         let parents_refs: Vec<&git2::Commit> = parents.iter().collect();
+
+        let sig = self.repo.signature().unwrap_or_else(|_| git2::Signature::now("Nancy Orchestrator", "nancy@localhost").unwrap());
 
         self.repo.commit(
             Some(&format!("refs/heads/nancy/{}", safe_did)),

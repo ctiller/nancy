@@ -25,26 +25,22 @@ impl TaskViewEvaluator {
         tree_root: &'a Arc<IntrospectionTreeRoot>,
         global_writer: &'a crate::events::writer::Writer<'_>,
     ) -> Result<()> {
-        let workers_dids = match id_obj {
-            Identity::Coordinator { workers, did, dreamer, .. } => {
-                let mut all = vec![did.did.clone(), dreamer.did.clone()];
-                all.extend(workers.iter().map(|w| w.did.clone()));
-                all
-            }
-            Identity::Dreamer(_) | Identity::Grinder(_) => {
-                if let Ok(coord_id) = Identity::load(repo.workdir().unwrap()).await {
-                     if let Identity::Coordinator { workers, did, dreamer, .. } = coord_id {
-                         let mut all = vec![did.did.clone(), dreamer.did.clone()];
-                         all.extend(workers.iter().map(|w| w.did.clone()));
-                         all
-                     } else {
-                         vec![id_obj.get_did_owner().did.clone()]
-                     }
-                } else {
-                    vec![id_obj.get_did_owner().did.clone()]
+        let mut workers_dids = HashSet::new();
+        if let Ok(branches) = repo.branches(Some(git2::BranchType::Local)) {
+            for branch_res in branches {
+                if let Ok((branch, _)) = branch_res {
+                    if let Ok(Some(name)) = branch.name() {
+                        if name.starts_with("nancy/") && name != "nancy/workers" {
+                            let extracted_did = name.replace("nancy/workers/", "").replace("nancy/", "");
+                            workers_dids.insert(extracted_did);
+                        }
+                    }
                 }
             }
-        };
+        }
+        
+        // Ensure our own identity is covered even if branch doesn't cleanly resolve via iterator early on
+        workers_dids.insert(id_obj.get_did_owner().did.clone());
 
         if !self.hydrated {
             let dreamer_did = match id_obj {
@@ -110,9 +106,7 @@ impl TaskViewEvaluator {
                             }
                         }
                     }
-                    if logged_any {
-                        let _ = global_writer.commit_batch();
-                    }
+                    // Deferred to run_agent outer loop so that it can trigger /updates-ready correctly
                 }).await;
             }
         ).await;
@@ -122,14 +116,16 @@ impl TaskViewEvaluator {
 
     async fn score_event(&self, event: &crate::events::EventEnvelope) -> Result<u64> {
         let is_ask = matches!(event.payload, crate::schema::registry::EventPayload::Ask(_));
-        if !is_ask {
+        let is_review = matches!(event.payload, crate::schema::registry::EventPayload::ReviewPlan(_));
+
+        if !is_ask && !is_review {
             return Ok(0);
         }
 
         // Fast LLM Grade Eval
         let dump = serde_json::to_string_pretty(&event).unwrap_or_default();
         let prompt = format!(
-            "Evaluate this Ask payload on how important it is to a human. Output ONLY an integer from 0 to 100. 0 means it's completely unimportant or spam, 100 means it's highly important and critical to the task.\n\nPayload:\n{}",
+            "Evaluate this payload on how important it is to a human. Output ONLY an integer from 0 to 100. 0 means it's completely unimportant or spam, 100 means it's highly important and critical to the task.\n\nPayload:\n{}",
             dump
         );
 
@@ -144,8 +140,10 @@ impl TaskViewEvaluator {
             let clamped = raw_score.clamp(0, 100);
             if clamped == 0 {
                 val = 0;
-            } else {
+            } else if is_ask {
                 val = (20.0 + ((clamped - 1) as f64 / 99.0) * 30.0).round() as u64;
+            } else if is_review {
+                val = (40.0 + ((clamped - 1) as f64 / 99.0) * 60.0).round() as u64;
             }
         }
         
@@ -174,7 +172,7 @@ mod tests {
             did: "did:key:123".to_string(),
             signature: "sig".to_string(),
             payload: EventPayload::Ask(crate::schema::task::AskPayload {
-                ask_ref: "aref".to_string(),
+                item_ref: "aref".to_string(),
                 question: "q".to_string(),
                 agent_path: "a".to_string(),
                 task_name: "t".to_string(),
@@ -197,7 +195,7 @@ mod tests {
             did: "did:key:123".to_string(),
             signature: "sig".to_string(),
             payload: EventPayload::Ask(crate::schema::task::AskPayload {
-                ask_ref: "aref".to_string(),
+                item_ref: "aref".to_string(),
                 question: "q".to_string(),
                 agent_path: "a".to_string(),
                 task_name: "t".to_string(),
@@ -220,7 +218,7 @@ mod tests {
             did: "did:key:123".to_string(),
             signature: "sig".to_string(),
             payload: EventPayload::Ask(crate::schema::task::AskPayload {
-                ask_ref: "aref".to_string(),
+                item_ref: "aref".to_string(),
                 question: "q".to_string(),
                 agent_path: "a".to_string(),
                 task_name: "t".to_string(),
@@ -242,7 +240,7 @@ mod tests {
         if let Identity::Coordinator { workers, .. } = &id_obj {
             let writer = crate::events::writer::Writer::new(&repo, Identity::Grinder(workers[0].clone())).unwrap();
             writer.log_event(crate::schema::registry::EventPayload::Ask(
-                crate::schema::task::AskPayload { ask_ref: "aref".to_string(), question: "test".to_string(), agent_path: "a".to_string(), task_name: "t".to_string() }
+                crate::schema::task::AskPayload { item_ref: "aref".to_string(), question: "test".to_string(), agent_path: "a".to_string(), task_name: "t".to_string() }
             )).unwrap();
             writer.commit_batch().unwrap();
         }
@@ -265,6 +263,7 @@ mod tests {
         
         let mut eval = TaskViewEvaluator::new();
         eval.evaluate_events(&repo, &id_obj, &tree_root, &global_writer).await.unwrap();
+        global_writer.commit_batch().unwrap();
         
         assert!(eval.evaluated_event_ids.len() >= 1);
         
@@ -293,7 +292,7 @@ mod tests {
         
         let writer = crate::events::writer::Writer::new(&repo, dreamer_id.clone()).unwrap();
         writer.log_event(crate::schema::registry::EventPayload::Ask(
-            crate::schema::task::AskPayload { ask_ref: "aref".to_string(), question: "test".to_string(), agent_path: "a".to_string(), task_name: "t".to_string() }
+            crate::schema::task::AskPayload { item_ref: "aref".to_string(), question: "test".to_string(), agent_path: "a".to_string(), task_name: "t".to_string() }
         )).unwrap();
         writer.commit_batch().unwrap();
         
@@ -315,6 +314,7 @@ mod tests {
         
         let mut eval = TaskViewEvaluator::new();
         eval.evaluate_events(&repo, &dreamer_id, &tree_root, &global_writer).await.unwrap();
+        global_writer.commit_batch().unwrap();
         
         assert!(eval.evaluated_event_ids.len() >= 1);
         

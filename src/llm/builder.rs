@@ -12,6 +12,12 @@ pub enum Version {
     V3_1,
 }
 
+#[derive(serde::Deserialize, schemars::JsonSchema)]
+struct LoopDetectionStatus {
+    is_looping: bool,
+    loop_description: Option<String>,
+}
+
 pub struct LlmBuilder {
     kind: Kind,
     temperature: Option<f32>,
@@ -19,6 +25,7 @@ pub struct LlmBuilder {
     tools: Vec<Box<dyn crate::llm::tool::LlmTool>>,
     subagent: String,
     shared_deadline: Option<std::sync::Arc<std::sync::atomic::AtomicU64>>,
+    loop_detection: bool,
 }
 
 pub fn fast_llm(name: &str) -> LlmBuilder {
@@ -45,7 +52,13 @@ impl LlmBuilder {
             tools: Vec::new(),
             subagent,
             shared_deadline: None,
+            loop_detection: false,
         }
+    }
+
+    pub fn with_loop_detection(mut self) -> Self {
+        self.loop_detection = true;
+        self
     }
 
     pub fn with_shared_deadline(mut self, deadline: std::sync::Arc<std::sync::atomic::AtomicU64>) -> Self {
@@ -84,9 +97,50 @@ impl LlmBuilder {
         let api_key = std::env::var("GEMINI_API_KEY")
             .context("GEMINI_API_KEY environment variable is not set")?;
 
-        let session = gemini_client_api::gemini::types::sessions::Session::new(10000);
+        let session = crate::llm::api::Session::new(10000);
 
-        // Trace dependencies handled ad-hoc locally inside the LlmClient
+        let mut loop_event_tx = None;
+        let is_looping = std::sync::Arc::new(std::sync::Mutex::new(None::<String>));
+
+        if self.loop_detection {
+            let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<crate::llm::client::LoopEvent>();
+            loop_event_tx = Some(tx);
+            let is_looping_clone = is_looping.clone();
+            let subagent_name = self.subagent.clone();
+
+            tokio::spawn(async move {
+                let mut history = String::new();
+                while let Some(event) = rx.recv().await {
+                    match event {
+                        crate::llm::client::LoopEvent::Prompt(p) => history.push_str(&format!("Prompt: {}\n", p)),
+                        crate::llm::client::LoopEvent::Response(r) => history.push_str(&format!("Response: {}\n", r)),
+                        crate::llm::client::LoopEvent::ToolCall { name, args } => history.push_str(&format!("ToolCall: {} args: {}\n", name, args)),
+                        crate::llm::client::LoopEvent::ToolResponse { name, response } => history.push_str(&format!("ToolResponse: {} resp: {}\n", name, response)),
+                    }
+
+                    let history_len = history.len();
+                    let trimmed_history = if history_len > 15000 {
+                        &history[history_len - 15000..]
+                    } else {
+                        &history
+                    };
+
+                    let prompt_text = format!("SYSTEM PROMPT: Analyze the trace to determine if the agent is stuck in a repetitive loop doing the exact same thing without making progress. If it is looping, provide a short description of the specific loop pattern detected. Return your answer as a JSON object matching the requested schema.\n\nTRACE:\n{}", trimmed_history);
+                    
+                    if let Ok(mut checker) = fast_llm(&format!("{}_loop_detector", subagent_name)).system_prompt("You are a loop detector. Extract the loop details structurally.").build() {
+                        if let Ok(status) = checker.ask::<LoopDetectionStatus>(&prompt_text).await {
+                            if status.is_looping {
+                                if let Some(desc) = status.loop_description {
+                                    if let Ok(mut lock) = is_looping_clone.lock() {
+                                        *lock = Some(desc);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
 
         Ok(LlmClient {
             kind: self.kind,
@@ -106,6 +160,8 @@ impl LlmBuilder {
             },
             created_at: std::time::Instant::now(),
             shared_deadline: self.shared_deadline,
+            loop_event_tx,
+            is_looping: if self.loop_detection { Some(is_looping) } else { None },
         })
     }
 

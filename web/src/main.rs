@@ -56,15 +56,31 @@ extern "C" {
     fn getMonacoValue() -> String;
 }
 
+#[derive(Debug, serde::Deserialize)]
+struct PendingActions {
+    asks: Vec<schema::AskPayload>,
+    plan_reviews: Vec<schema::ReviewPlanPayload>,
+}
+
+#[derive(Clone, PartialEq)]
+enum ActionSelection {
+    None,
+    NewTask,
+    Ask(schema::AskPayload),
+    PlanReview(schema::ReviewPlanPayload),
+}
+
 #[function_component(CommandView)]
 fn command_view() -> Html {
-    let evals = use_state(|| vec![]);
-    let is_creating_task = use_state(|| false);
+    let pending_actions = use_state(|| PendingActions { asks: vec![], plan_reviews: vec![] });
+    let selected_action = use_state(|| ActionSelection::None);
+    let interaction_text = use_state(|| String::new());
     
+    // Main polling loop for Pending Actions
     {
-        let evals = evals.clone();
+        let pending_actions = pending_actions.clone();
+        
         use_effect_with((), move |_| {
-            let mut last_version: Option<u64> = None;
             let cancelled = std::rc::Rc::new(std::cell::Cell::new(false));
             let cancel_clone = cancelled.clone();
             let abort_controller = web_sys::AbortController::new().ok();
@@ -73,35 +89,19 @@ fn command_view() -> Html {
             wasm_bindgen_futures::spawn_local(async move {
                 loop {
                     if cancel_clone.get() { break; }
-                    let url = if let Some(lv) = last_version {
-                        format!("/api/tasks/evaluations?last_version={}", lv)
-                    } else {
-                        "/api/tasks/evaluations".to_string()
-                    };
-
-                    let mut req = gloo_net::http::Request::get(&url);
+                    
+                    let mut req_pending = gloo_net::http::Request::get("/api/human/pending");
                     if let Some(sig) = &signal {
-                        req = req.abort_signal(Some(sig));
+                        req_pending = req_pending.abort_signal(Some(sig));
                     }
-
-                    if let Ok(resp) = req.send().await {
-                        if cancel_clone.get() { break; }
+                    if let Ok(resp) = req_pending.send().await {
                         if resp.ok() {
-                            if let Ok(data) = resp.json::<serde_json::Value>().await {
-                                if let (Some(ver), Some(eval_array)) = (
-                                    data.get("version").and_then(|v| v.as_u64()),
-                                    data.get("evaluations")
-                                ) {
-                                    if Some(ver) != last_version {
-                                        if let Ok(parsed_evals) = serde_json::from_value::<Vec<schema::TaskEvaluation>>(eval_array.clone()) {
-                                            last_version = Some(ver);
-                                            evals.set(parsed_evals);
-                                        }
-                                    }
-                                }
+                            if let Ok(data) = resp.json::<PendingActions>().await {
+                                pending_actions.set(data);
                             }
                         }
                     }
+
                     if cancel_clone.get() { break; }
                     gloo_timers::future::sleep(std::time::Duration::from_millis(500)).await;
                 }
@@ -116,9 +116,9 @@ fn command_view() -> Html {
     }
 
     {
-        let is_creating = *is_creating_task;
-        use_effect_with(is_creating, move |&creating| {
-            if creating {
+        let selected = (*selected_action).clone();
+        use_effect_with(selected, move |sel| {
+            if matches!(sel, ActionSelection::NewTask) {
                 mountMonaco("monaco-container");
             }
             || ()
@@ -126,17 +126,17 @@ fn command_view() -> Html {
     }
 
     let on_new_task = {
-        let is_creating_task = is_creating_task.clone();
+        let selected_action = selected_action.clone();
         Callback::from(move |_| {
-            is_creating_task.set(true);
+            selected_action.set(ActionSelection::NewTask);
         })
     };
 
     let on_submit_task = {
-        let is_creating_task = is_creating_task.clone();
+        let selected_action = selected_action.clone();
         Callback::from(move |_| {
             let task_desc = getMonacoValue();
-            let is_creating_task = is_creating_task.clone();
+            let selected_action = selected_action.clone();
             wasm_bindgen_futures::spawn_local(async move {
                 let payload = schema::TaskRequestPayload {
                     requestor: "Admin Web UI".to_string(),
@@ -148,7 +148,38 @@ fn command_view() -> Html {
                     .send()
                     .await {
                     if resp.ok() {
-                        is_creating_task.set(false);
+                        selected_action.set(ActionSelection::None);
+                    }
+                }
+            });
+        })
+    };
+
+    let on_submit_response = {
+        let selected = selected_action.clone();
+        let text_val = interaction_text.clone();
+        Callback::from(move |_| {
+            let text = (*text_val).clone();
+            let item_ref = match &*selected {
+                ActionSelection::Ask(a) => a.item_ref.clone(),
+                ActionSelection::PlanReview(p) => p.plan_ref.clone(),
+                _ => return,
+            };
+            let text_clone = text_val.clone();
+            let sel_clone = selected.clone();
+            wasm_bindgen_futures::spawn_local(async move {
+                let req_body = serde_json::json!({
+                    "item_ref": item_ref,
+                    "text_response": Some(text)
+                });
+                if let Ok(resp) = gloo_net::http::Request::post("/api/human/action")
+                    .json(&req_body)
+                    .unwrap()
+                    .send()
+                    .await {
+                    if resp.ok() {
+                        sel_clone.set(ActionSelection::None);
+                        text_clone.set(String::new());
                     }
                 }
             });
@@ -156,53 +187,234 @@ fn command_view() -> Html {
     };
 
     html! {
-        <div class="grid-2">
+        <div style="display: grid; grid-template-columns: 350px 1fr; gap: 20px; height: 100%;">
+            // Left Pane: Needs Action Menu
             <div class="glass-panel" style="padding: 20px; position: relative; overflow-y: auto; display: flex; flex-direction: column;">
-                <h3>{"Evaluated Agent Events"}</h3>
+                <h3>{"Needs Action"}</h3>
+                
+                <button class="btn-glow" style="margin-bottom: 20px; width: 100%;" onclick={on_new_task}>
+                    {"+ Start a New Task"}
+                </button>
+                
                 <div style="flex: 1; overflow-y: auto;">
-                    if evals.is_empty() {
-                        <p class="text-muted">{"Waiting for Dreamer evaluation events..."}</p>
+                    if pending_actions.asks.is_empty() && pending_actions.plan_reviews.is_empty() {
+                        <p class="text-muted" style="text-align: center; margin-top: 40px;">{"No pending actions at this time."}</p>
                     } else {
-                        <div style="display: flex; flex-direction: column; gap: 12px; margin-bottom: 60px;">
-                            { for evals.iter().map(|eval| {
-                                let intensity = eval.score as f64 / 100.0;
-                                let r = (255.0 * intensity) as u8;
-                                let g = (255.0 * (1.0 - intensity).max(0.4)) as u8;
-                                let color_style = format!("color: rgb({}, {}, 100); border-left: 4px solid rgb({}, {}, 100);", r, g, r, g);
-                                html! {
-                                    <div style={format!("padding: 12px; background: rgba(0,0,0,0.3); border-radius: 4px; {}", color_style)}>
-                                        <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 4px;">
-                                            <span style="font-weight: bold; font-family: monospace;">{ eval.event_type.clone() }</span>
-                                            <span style="font-size: 1.2rem; font-weight: bold;">{eval.score}{"/100"}</span>
+                        <div style="display: flex; flex-direction: column; gap: 12px;">
+                            if !pending_actions.plan_reviews.is_empty() {
+                                <h4 style="margin: 0; color: var(--accent-light);">{"Plan Reviews"}</h4>
+                                { for pending_actions.plan_reviews.iter().map(|plan| {
+                                    let p = plan.clone();
+                                    let sel = selected_action.clone();
+                                    let on_click = Callback::from(move |_| {
+                                        sel.set(ActionSelection::PlanReview(p.clone()));
+                                        let pc = p.clone();
+                                        wasm_bindgen_futures::spawn_local(async move {
+                                            let _ = gloo_net::http::Request::post("/api/human/action")
+                                                .json(&serde_json::json!({ "item_ref": pc.plan_ref, "text_response": None::<String> }))
+                                                .unwrap().send().await;
+                                        });
+                                    });
+                                    html! {
+                                        <div onclick={on_click} style="cursor: pointer; padding: 12px; background: rgba(0,0,100,0.3); border-radius: 4px; border-left: 4px solid var(--accent); transition: background 0.2s;">
+                                            <div style="font-weight: bold; margin-bottom: 8px;">{ "Plan: " } { plan.task_name.clone() }</div>
+                                            <div style="font-size: 0.8rem; color: var(--text-muted);">{"Click to review design."}</div>
                                         </div>
-                                        <div style="font-size: 0.8rem; color: var(--text-muted); font-family: monospace;">
-                                            {"ID: "} {eval.id.clone()}
+                                    }
+                                })}
+                            }
+                            
+                            if !pending_actions.asks.is_empty() {
+                                <h4 style="margin: 10px 0 0 0; color: var(--accent-orange, #ff9800);">{"Agent Asks"}</h4>
+                                { for pending_actions.asks.iter().map(|ask| {
+                                    let a = ask.clone();
+                                    let sel = selected_action.clone();
+                                    let on_click = Callback::from(move |_| {
+                                        sel.set(ActionSelection::Ask(a.clone()));
+                                        let ac = a.clone();
+                                        wasm_bindgen_futures::spawn_local(async move {
+                                            let _ = gloo_net::http::Request::post("/api/human/action")
+                                                .json(&serde_json::json!({ "item_ref": ac.item_ref, "text_response": None::<String> }))
+                                                .unwrap().send().await;
+                                        });
+                                    });
+                                    html! {
+                                        <div onclick={on_click} style="cursor: pointer; padding: 12px; background: rgba(100,50,0,0.3); border-radius: 4px; border-left: 4px solid var(--accent-orange, #ff9800); transition: background 0.2s;">
+                                            <div style="font-weight: bold; margin-bottom: 4px;">{ "Task: " } { ask.task_name.clone() }</div>
+                                            <div style="font-size: 0.8rem; color: var(--text-muted);">{"Click to answer."}</div>
                                         </div>
-                                    </div>
-                                }
-                            })}
+                                    }
+                                })}
+                            }
                         </div>
                     }
                 </div>
             </div>
             
-            <div class="glass-panel" style="padding: 20px; display: flex; flex-direction: column; min-width: 0;">
-                <h3>{"Workspace Editor"}</h3>
-                if *is_creating_task {
-                    <div class="task-editor" style="flex: 1; display: flex; flex-direction: column; gap: 12px; height: 100%;">
-                        <div id="monaco-container" style="flex: 1; width: 100%; min-height: 400px; border-radius: 8px; overflow: hidden; border: 1px solid var(--panel-border); box-shadow: inset 0 0 10px rgba(0,0,0,0.5);"></div>
-                        <div style="display: flex; justify-content: flex-end; gap: 12px; margin-top: 12px;">
-                            <button class="btn-secondary" onclick={
-                                let is_creating_task = is_creating_task.clone();
-                                Callback::from(move |_| is_creating_task.set(false))
-                            }>{"Cancel"}</button>
-                            <button class="btn-primary" onclick={on_submit_task}>{"Submit Task"}</button>
+            // Right Pane: Interaction Content
+            <div class="glass-panel" style="padding: 30px; display: flex; flex-direction: column; overflow-y: auto;">
+                { match &*selected_action {
+                    ActionSelection::None => html! {
+                        <div style="display: flex; flex: 1; align-items: center; justify-content: center;">
+                            <p style="color: var(--text-muted); font-size: 1.1rem;">{"Select an item from the left to interact."}</p>
                         </div>
-                    </div>
-                } else {
-                    <p style="color: var(--text-muted); font-size: 1.1rem; flex: 1;">{"Select an inquiry or start a new task."}</p>
-                    <button class="btn-glow" onclick={on_new_task}>{"+ New Task"}</button>
-                }
+                    },
+                    ActionSelection::NewTask => html! {
+                        <div style="display: flex; flex-direction: column; height: 100%;">
+                            <h3 style="margin-top: 0;">{"Workspace Editor"}</h3>
+                            <div id="monaco-container" style="flex: 1; width: 100%; border-radius: 8px; overflow: hidden; border: 1px solid var(--panel-border); box-shadow: inset 0 0 10px rgba(0,0,0,0.5);"></div>
+                            <div style="display: flex; justify-content: flex-end; gap: 12px; margin-top: 20px;">
+                                <button class="btn-secondary" onclick={
+                                    let sel = selected_action.clone();
+                                    Callback::from(move |_| sel.set(ActionSelection::None))
+                                }>{"Cancel"}</button>
+                                <button class="btn-primary" onclick={on_submit_task}>{"Submit Task"}</button>
+                            </div>
+                        </div>
+                    },
+                    ActionSelection::Ask(ask) => html! {
+                        <div style="display: flex; flex-direction: column; height: 100%;">
+                            <h3 style="margin-top: 0; color: var(--accent-orange, #ff9800);">{"Respond to Agent"}</h3>
+                            <div style="background: rgba(0,0,0,0.2); padding: 16px; border-radius: 6px; margin-bottom: 20px;">
+                                <div style="font-weight: bold; color: var(--text-muted); margin-bottom: 8px;">{"Question context:"}</div>
+                                <div style="font-size: 1.1rem;">{ask.question.clone()}</div>
+                            </div>
+                            
+                            <textarea 
+                                style="flex: 1; width: 100%; padding: 12px; border-radius: 6px; background: rgba(0,0,0,0.4); border: 1px solid var(--panel-border); color: #fff; font-family: inherit; resize: none;"
+                                placeholder="Type your response here..."
+                                value={(*interaction_text).clone()}
+                                oninput={
+                                    let text_val = interaction_text.clone();
+                                    Callback::from(move |e: yew::InputEvent| {
+                                        let input: web_sys::HtmlTextAreaElement = e.target_unchecked_into();
+                                        text_val.set(input.value());
+                                    })
+                                }
+                            />
+                            
+                            <div style="display: flex; justify-content: flex-end; align-items: center; gap: 12px; margin-top: 20px;">
+                                <button class="btn-secondary" onclick={
+                                    let sel = selected_action.clone();
+                                    Callback::from(move |_| sel.set(ActionSelection::None))
+                                }>{"Close"}</button>
+                                <button class="btn-primary" onclick={on_submit_response.clone()} disabled={interaction_text.trim().is_empty()}>
+                                    {"Send Response"}
+                                </button>
+                            </div>
+                        </div>
+                    },
+                    ActionSelection::PlanReview(plan) => html! {
+                        <div style="display: flex; flex-direction: column; height: 100%;">
+                            <h3 style="margin-top: 0; color: var(--accent-light);">{"Plan Review"}</h3>
+                            <div style="flex: 1; overflow-y: auto; background: rgba(0,0,0,0.2); padding: 20px; border-radius: 6px; margin-bottom: 20px;">
+                                <h2 style="margin-top: 0;">{plan.document.title.clone()}</h2>
+                                <p style="font-size: 1.1rem;">{plan.document.summary.clone()}</p>
+                                
+                                <h4 style="margin-top: 24px; color: var(--accent);">{"Goals"}</h4>
+                                <ul>
+                                    { for plan.document.goals.iter().map(|g| html!{ <li>{g}</li> }) }
+                                </ul>
+                                
+                                <h4 style="margin-top: 24px; color: var(--accent);">{"Proposed Design"}</h4>
+                                <ul>
+                                    { for plan.document.proposed_design.iter().map(|d| html!{ <li>{d}</li> }) }
+                                </ul>
+                            </div>
+                            
+                            <div style="margin-bottom: 16px;">
+                                <textarea 
+                                    style="width: 100%; padding: 12px; border-radius: 6px; background: rgba(0,0,0,0.4); border: 1px solid var(--panel-border); color: #fff; font-family: inherit; min-height: 80px;"
+                                    placeholder="Optional feedback if requesting changes..."
+                                    value={(*interaction_text).clone()}
+                                    oninput={
+                                        let text_val = interaction_text.clone();
+                                        Callback::from(move |e: yew::InputEvent| {
+                                            let input: web_sys::HtmlTextAreaElement = e.target_unchecked_into();
+                                            text_val.set(input.value());
+                                        })
+                                    }
+                                />
+                            </div>
+                            
+                            <div style="display: flex; justify-content: flex-end; gap: 12px;">
+                                <button class="btn-secondary" onclick={
+                                    let sel = selected_action.clone();
+                                    Callback::from(move |_| sel.set(ActionSelection::None))
+                                }>{"Close"}</button>
+                                
+                                <button style="background: rgba(200, 50, 50, 0.4); border: 1px solid rgba(255,100,100,0.5); border-radius: 4px; padding: 10px 20px; color: white; cursor: pointer;" 
+                                    onclick={
+                                        let text_val = interaction_text.clone();
+                                        let sel = selected_action.clone();
+                                        Callback::from(move |_| {
+                                            if text_val.trim().is_empty() {
+                                                text_val.set("Reject: Changes required on design.".to_string());
+                                            }
+                                            let text = (*text_val).clone();
+                                            let item_ref = match &*sel {
+                                                ActionSelection::PlanReview(p) => p.plan_ref.clone(),
+                                                _ => return,
+                                            };
+                                            let text_clone = text_val.clone();
+                                            let sel_clone = sel.clone();
+                                            wasm_bindgen_futures::spawn_local(async move {
+                                                let req_body = serde_json::json!({
+                                                    "item_ref": item_ref,
+                                                    "text_response": Some(text)
+                                                });
+                                                if let Ok(resp) = gloo_net::http::Request::post("/api/human/action")
+                                                    .json(&req_body)
+                                                    .unwrap()
+                                                    .send()
+                                                    .await {
+                                                    if resp.ok() {
+                                                        sel_clone.set(ActionSelection::None);
+                                                        text_clone.set(String::new());
+                                                    }
+                                                }
+                                            });
+                                        })
+                                    }>
+                                    {"Request Changes"}
+                                </button>
+                                
+                                <button class="btn-primary" onclick={
+                                    let text_val = interaction_text.clone();
+                                    let sel = selected_action.clone();
+                                    Callback::from(move |_| {
+                                        text_val.set("Approve".to_string());
+                                        let text = "Approve".to_string();
+                                        let item_ref = match &*sel {
+                                            ActionSelection::PlanReview(p) => p.plan_ref.clone(),
+                                            _ => return,
+                                        };
+                                        let text_clone = text_val.clone();
+                                        let sel_clone = sel.clone();
+                                        wasm_bindgen_futures::spawn_local(async move {
+                                            let req_body = serde_json::json!({
+                                                "item_ref": item_ref,
+                                                "text_response": Some(text)
+                                            });
+                                            if let Ok(resp) = gloo_net::http::Request::post("/api/human/action")
+                                                .json(&req_body)
+                                                .unwrap()
+                                                .send()
+                                                .await {
+                                                if resp.ok() {
+                                                    sel_clone.set(ActionSelection::None);
+                                                    text_clone.set(String::new());
+                                                }
+                                            }
+                                        });
+                                    })
+                                }>
+                                    {"Approve Plan"}
+                                </button>
+                            </div>
+                        </div>
+                    }
+                }}
             </div>
         </div>
     }
