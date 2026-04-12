@@ -268,10 +268,10 @@ async fn handle_plan_task(
 
         if let Ok(human_did) = std::env::var("NANCY_HUMAN_DID") {
             let mut human_response_text = None;
-            let mut human_last_seen = 0u64;
+            let mut _human_last_seen = 0u64;
 
             loop {
-                human_last_seen = 0;
+                _human_last_seen = 0;
                 let mut found_response = None;
                 if let Ok(repo_discover) = git2::Repository::discover(target_path) {
                     let reader = crate::events::reader::Reader::new(&repo_discover, human_did.clone());
@@ -279,7 +279,7 @@ async fn handle_plan_task(
                         for ev in iter.flatten() {
                             if let crate::schema::registry::EventPayload::Seen(s) = &ev.payload {
                                 if s.item_ref == plan_ref {
-                                    if s.timestamp > human_last_seen { human_last_seen = s.timestamp; }
+                                    if s.timestamp > _human_last_seen { _human_last_seen = s.timestamp; }
                                 }
                             } else if let crate::schema::registry::EventPayload::HumanResponse(hr) = &ev.payload {
                                 if hr.item_ref == plan_ref {
@@ -295,9 +295,9 @@ async fn handle_plan_task(
                     break;
                 }
 
-                if human_last_seen > 0 {
+                if _human_last_seen > 0 {
                     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
-                    if now > human_last_seen + 300 {
+                    if now > _human_last_seen + 300 {
                         break;
                     }
                     tokio::time::sleep(std::time::Duration::from_millis(1000)).await;

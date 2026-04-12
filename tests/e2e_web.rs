@@ -381,10 +381,6 @@ async fn test_e2e_web_tasks_evaluations() {
         println!("TEST SANITY: coordinator has {} events natively logged BEFORE boot.", count);
     }
 
-    // We expect the grinder to evaluate the task naturally via mock LLM output.
-    common::mock_gemini::push_tool_call_response(&test_queue, "ask_human", serde_json::json!({
-        "question": "Can you evaluate this task?",
-    })).await;
     // Provide plenty of responses for both grinder follow-ups and dreamer evaluations
     for _ in 0..10 {
         common::mock_gemini::push_text_response(&test_queue, "95").await;

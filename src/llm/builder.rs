@@ -1,5 +1,5 @@
 use crate::llm::client::LlmClient;
-use anyhow::{Context, bail};
+use anyhow::Context;
 
 #[derive(Clone, Copy)]
 pub enum Kind {

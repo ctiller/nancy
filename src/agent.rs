@@ -57,21 +57,33 @@ pub async fn run_agent<P: AsRef<Path>, Processor: AgentTaskProcessor>(
         }
     };
     
-    // Extracted cleanly mapping dynamic bindings securely
-    let worker_did = match &id_obj {
-        Identity::Grinder(owner) => {
+    let (worker_did, id_obj) = match id_obj {
+        Identity::Grinder(ref owner) => {
             if agent_type != "grinder" {
                 bail!("Expected {} identity context", agent_type);
             }
-            owner.did.clone()
+            (owner.did.clone(), id_obj)
         }
-        Identity::Dreamer(owner) => {
+        Identity::Dreamer(ref owner) => {
             if agent_type != "dreamer" {
                 bail!("Expected {} identity context", agent_type);
             }
-            owner.did.clone()
+            (owner.did.clone(), id_obj)
         }
-        _ => bail!("'nancy {}' must be executed within its corresponding identity context.", agent_type),
+        Identity::Coordinator { ref workers, ref dreamer, .. } => {
+            if agent_type == "grinder" {
+                // To safely execute locally without docker boundary overrides, map to first worker natively
+                if let Some(w) = workers.first() {
+                    (w.did.clone(), Identity::Grinder(w.clone()))
+                } else {
+                    bail!("No allocated Grinders in Coordinator context.");
+                }
+            } else if agent_type == "dreamer" {
+                (dreamer.did.clone(), Identity::Dreamer(dreamer.clone()))
+            } else {
+                bail!("'nancy {}' cannot run inside Coordinator identity root.", agent_type);
+            }
+        }
     };
 
     let coordinator_did = explicit_coordinator_did

@@ -58,7 +58,7 @@ async fn test_e2e_crash_recovery() {
     let grinder_socket_path = tmp.path().join(".nancy").join("sockets").join(&target_grinder_did).join("grinder.sock");
     
     let uds_client = reqwest::Client::builder().unix_socket(grinder_socket_path).build().unwrap();
-    let crash_res = uds_client.post("http://localhost/crash").send().await;
+    let _crash_res = uds_client.post("http://localhost/crash").send().await;
     // Expected to error or succeed (depending on if it crashed cleanly before sending response)
     
     // Now wait for an AgentCrashReport in the Coordinator event stream

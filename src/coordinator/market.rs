@@ -5,6 +5,9 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::{oneshot, RwLock};
 
+pub const TICK_TIME_SECS: u64 = 3;
+pub const LEASE_TIME_SECS: u64 = 12;
+
 #[derive(Debug)]
 pub struct AuctionBid {
     pub payload: RequestModelPayload,
@@ -261,7 +264,7 @@ impl ArbitrationMarket {
 
     async fn run_auction_loop(market: SharedArbitrationMarket) {
         loop {
-            tokio::time::sleep(tokio::time::Duration::from_secs(20)).await;
+            tokio::time::sleep(tokio::time::Duration::from_secs(TICK_TIME_SECS)).await;
             
             let mut lock = market.write().await;
             let now = SystemTime::now()
@@ -273,26 +276,28 @@ impl ArbitrationMarket {
             let models = schema::LlmModel::ALL;
             for model in models {
                 let limit = Self::rate_limits_for(*model);
-                let mut active = lock.active_quotas.entry(*model).or_default();
+                let active = lock.active_quotas.entry(*model).or_default();
                 
                 if let Some(r) = limit.rpm {
                     let cur = active.rpm.unwrap_or(0.0);
-                    active.rpm = Some(f64::min(cur + (r / 3.0), r)); // 20s is 1/3 of a minute
+                    active.rpm = Some(f64::min(cur + (r / (60.0 / TICK_TIME_SECS as f64)), r));
                 }
                 if let Some(t) = limit.tpm {
                     let cur = active.tpm.unwrap_or(0.0);
-                    active.tpm = Some(f64::min(cur + (t / 3.0), t));
+                    active.tpm = Some(f64::min(cur + (t / (60.0 / TICK_TIME_SECS as f64)), t));
                 }
                 if let Some(rd) = limit.rpd {
                     let cur = active.rpd.unwrap_or(0.0);
-                    active.rpd = Some(f64::min(cur + (rd / 4320.0), rd)); // 20s is 1/4320 of 24h
+                    let rounds_per_day = 86400.0 / TICK_TIME_SECS as f64;
+                    active.rpd = Some(f64::min(cur + (rd / rounds_per_day), rd));
                 }
             }
             
             // 2. Replenish USD Budget Pool
             let daily = lock.config.daily_budget_usd;
             let hourly_cap = daily / 24.0;
-            let bump_per_loop = daily / 4320.0; // 24 hours * 60 mins / 20 seconds = 4320 rounds
+            let rounds_per_day = 86400.0 / TICK_TIME_SECS as f64;
+            let bump_per_loop = daily / rounds_per_day;
             lock.budget_pool_usd = f64::min(lock.budget_pool_usd + bump_per_loop, hourly_cap);
             
             let mut available_tick_budget = lock.budget_pool_usd;
@@ -359,7 +364,7 @@ impl ArbitrationMarket {
                 
                 let mut granted_choice = false;
                 if available_tick_budget >= expected_cost {
-                    let mut active = lock.active_quotas.entry(choice.name.clone()).or_default();
+                    let active = lock.active_quotas.entry(choice.name.clone()).or_default();
                     
                     let rpm_ok = active.rpm.map_or(true, |r| r >= expected_requests);
                     let tpm_ok = active.tpm.map_or(true, |t| t >= expected_tokens);
@@ -380,7 +385,7 @@ impl ArbitrationMarket {
                     let resp = RequestModelResponse {
                         granted_model: choice.name.clone(),
                         lease_id: lease_id.clone(),
-                        lease_duration_sec: 60,
+                        lease_duration_sec: LEASE_TIME_SECS,
                         granted_at_unix: now,
                     };
                     
@@ -440,7 +445,7 @@ mod tests {
         #[test]
         fn test_quota_replenishment_bounds_and_budget(
             initial_reqs in 0.0_f64..200.0,
-            budget in 10.0_f64..50.0,
+            _budget in 10.0_f64..50.0,
             daily_usd in 10.0_f64..100.0
         ) {
             // rate_limits removed. Tests implicitly use ArbitrationMarket::rate_limits_for()
@@ -470,7 +475,7 @@ mod tests {
                 let models = schema::LlmModel::ALL;
                 for model in models {
                     let limit = ArbitrationMarket::rate_limits_for(*model);
-                    let mut active = lock.active_quotas.entry(*model).or_default();
+                    let active = lock.active_quotas.entry(*model).or_default();
                     if let Some(r) = limit.rpm {
                         active.rpm = Some(f64::min(active.rpm.unwrap_or(0.0) + (r / 3.0), r)); // Mocking the RPM 20s refill
                     }

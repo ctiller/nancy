@@ -1,7 +1,6 @@
 use anyhow::{Context, Result, anyhow};
 use did_key::{CoreSign, Ed25519KeyPair};
 use git2::Repository;
-use std::cell::RefCell;
 
 use crate::schema::identity_config::Identity;
 use crate::schema::registry::EventPayload;

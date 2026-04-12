@@ -39,9 +39,9 @@ impl AgentTaskProcessor for DreamerTaskProcessor {
                 *tree_root.root_frame.status.lock().unwrap() = Some("Evaluating Tasks...".to_string());
                 let _ = tree_root.updater.send_modify(|v| *v += 1);
             }
-            let _ = self.task_view.evaluate_events(repo, id_obj, tree_root, global_writer).await;
+            let logged_any = self.task_view.evaluate_events(repo, id_obj, tree_root, global_writer).await.unwrap_or(false);
 
-            Ok(false)
+            Ok(logged_any)
         })
     }
 }

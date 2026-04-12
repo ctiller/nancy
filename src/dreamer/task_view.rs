@@ -1,8 +1,8 @@
-use anyhow::{Context, Result};
-use std::collections::{HashSet, VecDeque};
+use anyhow::Result;
+use std::collections::HashSet;
 use std::sync::Arc;
 use crate::schema::identity_config::Identity;
-use crate::introspection::{IntrospectionTreeRoot, frame, data_log, log};
+use crate::introspection::{IntrospectionTreeRoot, frame};
 use crate::events::reader::Reader;
 
 pub struct TaskViewEvaluator {
@@ -24,7 +24,7 @@ impl TaskViewEvaluator {
         id_obj: &'a Identity,
         tree_root: &'a Arc<IntrospectionTreeRoot>,
         global_writer: &'a crate::events::writer::Writer<'_>,
-    ) -> Result<()> {
+    ) -> Result<bool> {
         let mut workers_dids = HashSet::new();
         if let Ok(branches) = repo.branches(Some(git2::BranchType::Local)) {
             for branch_res in branches {
@@ -41,6 +41,7 @@ impl TaskViewEvaluator {
         
         // Ensure our own identity is covered even if branch doesn't cleanly resolve via iterator early on
         workers_dids.insert(id_obj.get_did_owner().did.clone());
+        println!("==== DREAMER EVAL DIDS COVERED: {:?} ====", workers_dids);
 
         if !self.hydrated {
             let dreamer_did = match id_obj {
@@ -62,19 +63,23 @@ impl TaskViewEvaluator {
             self.hydrated = true;
         }
 
-        crate::introspection::INTROSPECTION_CTX.scope(
+        let logged_any = crate::introspection::INTROSPECTION_CTX.scope(
             crate::introspection::IntrospectionContext {
                 current_frame: tree_root.root_frame.clone(),
                 updater: tree_root.updater.clone(),
             },
             async {
+                let mut logged_any_outer = false;
                 frame("task_view_eval", async {
                     let mut logged_any = false;
                     for node_did in workers_dids {
                         let reader = Reader::new(repo, node_did.clone());
                         if let Ok(iter) = reader.iter_events() {
+                            let mut iter_count = 0;
                             for event_res in iter {
                                 if let Ok(event) = event_res {
+                                    iter_count += 1;
+                                    println!("DREAMER EVAL ITER ITEM: {}", event.id);
                                     if !self.evaluated_event_ids.contains(&event.id) {
                                         let id_cl = event.id.clone();
                                         
@@ -104,14 +109,19 @@ impl TaskViewEvaluator {
                                     }
                                 }
                             }
+                            println!("DREAMER EVAL ITER FINISHED WITH {} ITEMS FROM {}", iter_count, node_did);
+                        } else {
+                            println!("DREAMER EVAL FAILED TO ITERATE EVENTS FROM {}", node_did);
                         }
                     }
+                    logged_any_outer = logged_any;
                     // Deferred to run_agent outer loop so that it can trigger /updates-ready correctly
                 }).await;
+                logged_any_outer
             }
         ).await;
 
-        Ok(())
+        Ok(logged_any)
     }
 
     async fn score_event(&self, event: &crate::events::EventEnvelope) -> Result<u64> {
@@ -135,7 +145,14 @@ impl TaskViewEvaluator {
             .build()?;
 
         let mut val = 0;
-        let response = llm.ask::<String>(&prompt).await?;
+        let response = match llm.ask::<String>(&prompt).await {
+            Ok(s) => s,
+            Err(e) => {
+                println!("DREAMER EVAL ERROR: {:?}", e);
+                return Ok(0);
+            }
+        };
+        println!("DREAMER RAW SCORE: {:?}", response);
         if let Ok(raw_score) = response.trim().parse::<u64>() {
             let clamped = raw_score.clamp(0, 100);
             if clamped == 0 {

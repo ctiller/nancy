@@ -1,6 +1,6 @@
 use anyhow::{Context, bail};
 use askama::Template;
-use crate::llm::api::{Gemini, GeminiResponse, GeminiError, Tool, SystemInstruction, Session};
+use crate::llm::api::{Gemini, GeminiResponse, Tool, SystemInstruction, Session};
 use schemars::JsonSchema;
 use serde::de::DeserializeOwned;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -33,7 +33,7 @@ pub enum LoopEvent {
 }
 
 #[cfg(test)]
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 
 pub type TaskPriorityFn = std::sync::Arc<dyn Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = f64> + Send>> + Send + Sync>;
 
@@ -394,14 +394,30 @@ impl LlmClient {
                     choices,
                 };
                 crate::introspection::set_frame_status("Waiting for Spot Market lease... ⏳");
-                if let Ok(resp) = client.post("http://localhost/request-model")
-                    .timeout(std::time::Duration::from_secs(3600))
-                    .json(&payload)
-                    .send().await {
-                    if let Ok(res_data) = resp.json::<crate::schema::ipc::RequestModelResponse>().await {
-                        target_model = res_data.granted_model;
+                let timeout_secs = crate::coordinator::market::LEASE_TIME_SECS.saturating_sub(crate::coordinator::market::TICK_TIME_SECS);
+                
+                loop {
+                    match client.post("http://localhost/request-model")
+                        .timeout(std::time::Duration::from_secs(timeout_secs))
+                        .json(&payload)
+                        .send().await {
+                        Ok(resp) => {
+                            if let Ok(res_data) = resp.json::<crate::schema::ipc::RequestModelResponse>().await {
+                                target_model = res_data.granted_model;
+                            }
+                            break;
+                        },
+                        Err(e) if e.is_timeout() => {
+                            tracing::debug!("Spot Market lease request timed out, retrying loop organically...");
+                            continue;
+                        },
+                        Err(e) => {
+                            tracing::warn!("Spot Market lease request failed fundamentally: {}", e);
+                            break;
+                        }
                     }
                 }
+
                 crate::introspection::set_frame_status("Thinking... 💭 ✨");
             }
         }
@@ -551,7 +567,7 @@ impl LlmClient {
 mod tests {
     use super::*;
 
-    use reqwest::StatusCode;
+    
     use serde::{Deserialize, Serialize};
     use sealed_test::prelude::*;
     use std::sync::Arc;
@@ -567,7 +583,7 @@ mod tests {
         let repo = git2::Repository::init(&td_path).unwrap();
         crate::commands::init::init(td_path.clone(), 1).await.unwrap();
 
-        let mut gemini = Gemini::new("xxx", "test_model".to_string(), None);
+        let _gemini = Gemini::new("xxx", "test_model".to_string(), None);
         
         let json_resp = serde_json::json!({
             "candidates": [{

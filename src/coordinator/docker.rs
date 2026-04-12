@@ -22,8 +22,7 @@ fn build_worker_env_vars(coordinator_did: &str, human_did: Option<&str>) -> Vec<
         env_vars.push(format!("GEMINI_API_KEY={}", api_key));
     }
     if let Ok(base_url) = std::env::var("GEMINI_API_BASE_URL") {
-        let parsed = base_url.replace("127.0.0.1", "host.docker.internal").replace("0.0.0.0", "host.docker.internal");
-        env_vars.push(format!("GEMINI_API_BASE_URL={}", parsed));
+        env_vars.push(format!("GEMINI_API_BASE_URL={}", base_url));
     }
     if let Ok(rust_log) = std::env::var("RUST_LOG") {
         env_vars.push(format!("RUST_LOG={}", rust_log));
@@ -81,6 +80,7 @@ pub async fn build_container_config(
     let host_config = HostConfig {
         binds: Some(binds),
         auto_remove: Some(true),
+        network_mode: Some("host".to_string()),
         extra_hosts: Some(vec!["host.docker.internal:host-gateway".to_string()]),
         ..Default::default()
     };
@@ -306,6 +306,45 @@ impl DockerOrchestrator {
                     }
                 }
             }
+            
+            let nancy_worktrees = self.workdir.join(".nancy").join("worktrees");
+            fs::create_dir_all(&nancy_worktrees).await.unwrap_or_default();
+            let target_path = nancy_worktrees.join(format!("worker-{}", worker.did));
+
+            if !target_path.exists() {
+                let branch_name = format!("refs/heads/nancy/workers/{}", worker.did);
+                
+                // Natively ensure the target branch exists organically resolving empty repository crashes gracefully!
+                if let Ok(repo) = git2::Repository::open(&self.workdir) {
+                    if repo.find_reference(&branch_name).is_err() {
+                        if let Ok(sig) = git2::Signature::now("Nancy Coordinator", "coordinator@local") {
+                            if let Ok(tree_id) = repo.treebuilder(None).and_then(|tb| tb.write()) {
+                                if let Ok(tree) = repo.find_tree(tree_id) {
+                                    let _ = repo.commit(Some(&branch_name), &sig, &sig, "Init Worker Bounds", &tree, &[]);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                let shell_cmd = format!(
+                    "git worktree prune && git worktree add -f {} {}",
+                    target_path.display(), branch_name
+                );
+
+                let status = tokio::process::Command::new("sh")
+                    .arg("-c")
+                    .arg(&shell_cmd)
+                    .current_dir(&self.workdir)
+                    .status()
+                    .await
+                    .unwrap_or_else(|e| panic!("Failed executing sh worktree bounds: {}", e));
+
+                if !status.success() {
+                    tracing::error!("Failed applying git worktree command natively");
+                    continue; // Skip this container safely since the worktree failed
+                }
+            }
 
             tracing::info!("Deploying native Hot Grinder {}...", worker.did);
 
@@ -317,46 +356,8 @@ impl DockerOrchestrator {
             let worker = worker.clone();
             let container_name_clone = container_name.clone();
             let human_clone = human.clone();
-
+            
             deployment_tasks.push(tokio::spawn(async move {
-                let nancy_worktrees = workdir.join(".nancy").join("worktrees");
-                fs::create_dir_all(&nancy_worktrees).await.unwrap_or_default();
-                let target_path = nancy_worktrees.join(format!("worker-{}", worker.did));
-
-                if !target_path.exists() {
-                    let branch_name = format!("refs/heads/nancy/workers/{}", worker.did);
-                    
-                    // Natively ensure the target branch exists organically resolving empty repository crashes gracefully!
-                    if let Ok(repo) = git2::Repository::open(&workdir) {
-                        if repo.find_reference(&branch_name).is_err() {
-                            if let Ok(sig) = git2::Signature::now("Nancy Coordinator", "coordinator@local") {
-                                if let Ok(tree_id) = repo.treebuilder(None).and_then(|tb| tb.write()) {
-                                    if let Ok(tree) = repo.find_tree(tree_id) {
-                                        let _ = repo.commit(Some(&branch_name), &sig, &sig, "Init Worker Bounds", &tree, &[]);
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    let shell_cmd = format!(
-                        "git worktree prune && git worktree add -f {} {}",
-                        target_path.display(), branch_name
-                    );
-
-                    let status = tokio::process::Command::new("sh")
-                        .arg("-c")
-                        .arg(&shell_cmd)
-                        .current_dir(&workdir)
-                        .status()
-                        .await
-                        .unwrap_or_else(|e| panic!("Failed executing sh worktree bounds: {}", e));
-
-                    if !status.success() {
-                        tracing::error!("Failed applying git worktree command natively");
-                        return None;
-                    }
-                }
 
                 // Provision socket directory boundaries perfectly natively avoiding Docker Daemon ROOT ownership mapping escalations natively
                 let worker_socket_dir = workdir.join(".nancy").join("sockets").join(&worker.did);
