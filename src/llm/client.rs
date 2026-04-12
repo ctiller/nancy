@@ -35,6 +35,8 @@ pub enum LoopEvent {
 #[cfg(test)]
 use std::sync::{Arc, Mutex};
 
+pub type TaskPriorityFn = std::sync::Arc<dyn Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = f64> + Send>> + Send + Sync>;
+
 pub struct LlmClient {
     pub kind: crate::llm::builder::Kind,
     pub api_key: String,
@@ -54,6 +56,8 @@ pub struct LlmClient {
     pub shared_deadline: Option<std::sync::Arc<AtomicU64>>,
     pub loop_event_tx: Option<tokio::sync::mpsc::UnboundedSender<LoopEvent>>,
     pub is_looping: Option<std::sync::Arc<std::sync::Mutex<Option<String>>>>,
+    pub task_priority: TaskPriorityFn,
+    pub local_market_weight: f64,
 }
 
 fn should_retry(err: &crate::llm::api::GeminiError) -> Option<Duration> {
@@ -354,7 +358,55 @@ impl LlmClient {
             None
         };
 
-        let mut gemini = Gemini::new(&self.api_key, model.to_string(), sys_prompt);
+        let coord_sock = crate::agent::get_coordinator_socket_path(None);
+        
+        let mut target_model = model.clone();
+
+        if coord_sock.exists() {
+            if let Ok(client) = reqwest::Client::builder().unix_socket(coord_sock.clone()).build() {
+                let priority_val = (self.task_priority)().await;
+                let k = priority_val * self.local_market_weight;
+                
+                let choices = match self.kind {
+                    crate::llm::builder::Kind::Flexible(weight) => {
+                        let flash_model = crate::llm::builder::LlmBuilder::resolve_model(&crate::llm::builder::Kind::Fast, &version);
+                        vec![
+                            crate::schema::ipc::ModelChoice {
+                                name: model.clone(), // pro
+                                bid_value: k,
+                            },
+                            crate::schema::ipc::ModelChoice {
+                                name: flash_model,
+                                bid_value: k * weight,
+                            }
+                        ]
+                    },
+                    _ => vec![
+                        crate::schema::ipc::ModelChoice {
+                            name: model.clone(),
+                            bid_value: k,
+                        }
+                    ]
+                };
+
+                let payload = crate::schema::ipc::RequestModelPayload {
+                    requester_id: self.subagent.clone(),
+                    choices,
+                };
+                crate::introspection::set_frame_status("Waiting for Spot Market lease... ⏳");
+                if let Ok(resp) = client.post("http://localhost/request-model")
+                    .timeout(std::time::Duration::from_secs(3600))
+                    .json(&payload)
+                    .send().await {
+                    if let Ok(res_data) = resp.json::<crate::schema::ipc::RequestModelResponse>().await {
+                        target_model = res_data.granted_model;
+                    }
+                }
+                crate::introspection::set_frame_status("Thinking... 💭 ✨");
+            }
+        }
+
+        let mut gemini = Gemini::new(&self.api_key, target_model.to_string(), sys_prompt);
         if let Some(temp) = self.temperature {
             gemini.set_generation_config()["temperature"] = serde_json::json!(temp);
         }
@@ -437,6 +489,32 @@ impl LlmClient {
             };
 
             let chat = resp;
+            
+            let mut input_tokens = 1000;
+            let mut output_tokens = 1000;
+            if let Some(usage) = &chat.usage_metadata {
+                if let Some(prompt) = usage.get("promptTokenCount").and_then(|t| t.as_u64()) {
+                    input_tokens = prompt;
+                }
+                if let Some(candidates) = usage.get("candidatesTokenCount").and_then(|t| t.as_u64()) {
+                    output_tokens = candidates;
+                }
+            }
+            
+            let coord_sock = crate::agent::get_coordinator_socket_path(None);
+            if coord_sock.exists() {
+                if let Ok(client) = reqwest::Client::builder().unix_socket(coord_sock.clone()).build() {
+                    let payload = crate::schema::ipc::LlmUsagePayload {
+                        model: serde_json::from_value(serde_json::Value::String(gemini.model.clone())).unwrap_or(schema::LlmModel::TestMockModel),
+                        input_tokens,
+                        output_tokens,
+                        agent_path: String::new(),
+                        task_name: String::new(),
+                    };
+                    let _ = client.post("http://localhost/llm-usage").json(&payload).send().await;
+                }
+            }
+
             if chat.has_function_call() {
                 let tool_responses = self.handle_tool_calls(&chat).await;
                 for (name, payload) in tool_responses {
@@ -525,6 +603,8 @@ mod tests {
             shared_deadline: None,
             loop_event_tx: None,
             is_looping: None,
+            task_priority: std::sync::Arc::new(|| Box::pin(std::future::ready(0.5))),
+            local_market_weight: 0.5,
         };
 
         // This should trigger `emit_trace_event` recursively securely
@@ -652,6 +732,8 @@ mod tests {
             shared_deadline: None,
             loop_event_tx: None,
             is_looping: None,
+            task_priority: std::sync::Arc::new(|| Box::pin(std::future::ready(0.5))),
+            local_market_weight: 0.5,
         };
 
         let responses = client.handle_tool_calls(&chat).await;
@@ -713,6 +795,8 @@ mod tests {
             shared_deadline: None,
             loop_event_tx: None,
             is_looping: None,
+            task_priority: std::sync::Arc::new(|| Box::pin(std::future::ready(0.5))),
+            local_market_weight: 0.5,
         };
 
         let result = client.ask::<String>("question").await.unwrap();
@@ -746,6 +830,8 @@ mod tests {
             shared_deadline: None,
             loop_event_tx: None,
             is_looping: None,
+            task_priority: std::sync::Arc::new(|| Box::pin(std::future::ready(0.5))),
+            local_market_weight: 0.5,
         };
 
         let mut gemini = Gemini::new("xxx", "test_model".to_string(), None);
@@ -779,6 +865,8 @@ mod tests {
             shared_deadline: None,
             loop_event_tx: None,
             is_looping: None,
+            task_priority: std::sync::Arc::new(|| Box::pin(std::future::ready(0.5))),
+            local_market_weight: 0.5,
         };
 
         let mut gemini = Gemini::new("xxx", "test".to_string(), None);
@@ -830,6 +918,8 @@ mod tests {
             shared_deadline: None,
             loop_event_tx: None,
             is_looping: None,
+            task_priority: std::sync::Arc::new(|| Box::pin(std::future::ready(0.5))),
+            local_market_weight: 0.5,
         };
 
         let result = client.ask::<String>("dummy question").await.unwrap();

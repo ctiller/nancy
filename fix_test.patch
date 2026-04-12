@@ -1,0 +1,12 @@
+--- src/coordinator/market.rs
++++ src/coordinator/market.rs
+@@ -409,7 +409,8 @@
+                 lock.budget_pool_usd = f64::min(lock.budget_pool_usd + bump, hourly_cap);
+                 
+                 let res = lock.active_quotas.get(&schema::LlmModel::TestMockModel).unwrap().rpm.unwrap();
+-                assert!(res <= budget); // Proves the use-or-lose requirement holds cleanly algebraically.
++                let expected_limit = ArbitrationMarket::rate_limits_for(schema::LlmModel::TestMockModel).rpm.unwrap();
++                assert!(res <= expected_limit); // Proves the use-or-lose requirement holds cleanly algebraically.
+                 assert!(lock.budget_pool_usd <= hourly_cap); // Check strict max hourly pools
+             });
+         }

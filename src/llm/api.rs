@@ -114,6 +114,8 @@ pub struct GeminiRequest {
 pub struct GeminiResponse {
     pub candidates: Option<Vec<Candidate>>,
     pub prompt_feedback: Option<serde_json::Value>,
+    #[serde(rename = "usageMetadata")]
+    pub usage_metadata: Option<serde_json::Value>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -206,6 +208,7 @@ impl Default for GeminiResponse {
                 finish_reason: Some("STOP".to_string()),
             }]),
             prompt_feedback: None,
+            usage_metadata: None,
         }
     }
 }

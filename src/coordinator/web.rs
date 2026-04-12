@@ -455,6 +455,13 @@ async fn api_human_action(
     }
 }
 
+async fn api_get_market_state(
+    axum::extract::Extension(state): axum::extract::Extension<crate::coordinator::ipc::IpcState>,
+) -> impl IntoResponse {
+    let market_state = crate::coordinator::market::ArbitrationMarket::get_market_state(&state.token_market).await;
+    axum::Json(market_state).into_response()
+}
+
 pub fn spawn_web_server(tcp_listener: tokio::net::TcpListener, ipc_state: crate::coordinator::ipc::IpcState) -> tokio::task::JoinHandle<()> {
     assert!(
         WebAssets::get("index.html").is_some(),
@@ -476,6 +483,7 @@ pub fn spawn_web_server(tcp_listener: tokio::net::TcpListener, ipc_state: crate:
         .route("/api/remove-grinder", post(crate::coordinator::ipc::remove_grinder_handler))
         .route("/api/human/pending", get(api_human_pending))
         .route("/api/human/action", post(api_human_action))
+        .route("/api/market/state", get(api_get_market_state))
         .fallback(static_asset_handler)
         .layer(TraceLayer::new_for_http())
         .layer(axum::Extension(ipc_state));
@@ -554,6 +562,7 @@ mod tests {
             tx_ready: std::sync::Arc::new(tx),
             tx_updates: std::sync::Arc::new(tx_updates),
             shared_identity: std::sync::Arc::new(tokio::sync::RwLock::new(id)),
+            token_market: crate::coordinator::market::ArbitrationMarket::new(crate::schema::coordinator_config::CoordinatorConfig::default()),
         };
         let ext = axum::extract::Extension(ipc);
         
@@ -589,6 +598,7 @@ mod tests {
             tx_ready: std::sync::Arc::new(tx),
             tx_updates: std::sync::Arc::new(tx_updates),
             shared_identity: std::sync::Arc::new(tokio::sync::RwLock::new(id)),
+            token_market: crate::coordinator::market::ArbitrationMarket::new(crate::schema::coordinator_config::CoordinatorConfig::default()),
         };
         let ext = axum::extract::Extension(ipc);
         let json = axum::Json(crate::schema::task::TaskRequestPayload { description: "t".to_string(), requestor: "u".to_string() });

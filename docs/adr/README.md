@@ -60,3 +60,6 @@ This directory contains the documented architectural and design decisions for Na
 * [0054: Ephemeral Docker Grinder Containers](0054-ephemeral-docker-grinder-containers.md)
 * [0055: LLM Status Rollup](0055-llm-status-rollup.md)
 * [0056: Last Update Deterministic Long Polling](0056-last-update-deterministic-long-polling.md) - Details the tokio::sync::watch pattern for UDS polling.
+* [0057: Token Arbitration Spot Market](0057-token-arbitration-spot-market.md) - Orchestrates dynamic budget assignments utilizing prioritized PageRank valuations securely cleanly.
+* [0058: Arbitration Market USD Budgeting](0058-arbitration-market-usd-budgeting.md) - Bounds financial tracking dynamically cleanly.
+* [0059: Environment-Driven UDS Socket Discovery](0059-environment-driven-uds-socket-discovery.md) - Standardizes mapping `NANCY_COORDINATOR_SOCKET_PATH` for robust native Sandbox Docker boundary evaluation smoothly.

@@ -5,6 +5,7 @@ use anyhow::{Context, bail};
 pub enum Kind {
     Fast,
     Thinking,
+    Flexible(f64),
 }
 
 pub enum Version {
@@ -26,6 +27,8 @@ pub struct LlmBuilder {
     subagent: String,
     shared_deadline: Option<std::sync::Arc<std::sync::atomic::AtomicU64>>,
     loop_detection: bool,
+    task_priority: crate::llm::client::TaskPriorityFn,
+    local_market_weight: f64,
 }
 
 pub fn fast_llm(name: &str) -> LlmBuilder {
@@ -45,6 +48,10 @@ impl LlmBuilder {
         let uuid = uuid::Uuid::new_v4().to_string()[..8].to_string();
         let subagent = format!("{}_{}", name, uuid);
 
+        let default_fn: crate::llm::client::TaskPriorityFn = std::sync::Arc::new(|| {
+            Box::pin(std::future::ready(0.5))
+        });
+
         Self {
             kind,
             temperature: None,
@@ -53,7 +60,19 @@ impl LlmBuilder {
             subagent,
             shared_deadline: None,
             loop_detection: false,
+            task_priority: default_fn,
+            local_market_weight: 0.5,
         }
+    }
+
+    pub fn with_task_priority(mut self, priority_fn: crate::llm::client::TaskPriorityFn) -> Self {
+        self.task_priority = priority_fn;
+        self
+    }
+
+    pub fn with_market_weight(mut self, weight: f64) -> Self {
+        self.local_market_weight = weight.clamp(0.0, 1.0);
+        self
     }
 
     pub fn with_loop_detection(mut self) -> Self {
@@ -162,15 +181,17 @@ impl LlmBuilder {
             shared_deadline: self.shared_deadline,
             loop_event_tx,
             is_looping: if self.loop_detection { Some(is_looping) } else { None },
+            task_priority: self.task_priority,
+            local_market_weight: self.local_market_weight,
         })
     }
 
-    pub fn resolve_model(kind: &Kind, version: &Version) -> &'static str {
+    pub fn resolve_model(kind: &Kind, version: &Version) -> schema::LlmModel {
         match (kind, version) {
-            (Kind::Fast, Version::V2_5) => "gemini-2.5-flash",
-            (Kind::Fast, Version::V3_1) => "gemini-3.1-flash-preview",
-            (Kind::Thinking, Version::V2_5) => "gemini-2.5-pro",
-            (Kind::Thinking, Version::V3_1) => "gemini-3.1-pro-preview",
+            (Kind::Fast, Version::V2_5) => schema::LlmModel::Gemini25Flash,
+            (Kind::Fast, Version::V3_1) => schema::LlmModel::Gemini30FlashPreview,
+            (Kind::Thinking, Version::V2_5) | (Kind::Flexible(_), Version::V2_5) => schema::LlmModel::Gemini25Pro,
+            (Kind::Thinking, Version::V3_1) | (Kind::Flexible(_), Version::V3_1) => schema::LlmModel::Gemini31ProPreview,
         }
     }
 }
@@ -184,19 +205,19 @@ mod tests {
     fn test_resolve_model() {
         assert_eq!(
             LlmBuilder::resolve_model(&Kind::Fast, &Version::V2_5),
-            "gemini-2.5-flash"
+            schema::LlmModel::Gemini25Flash
         );
         assert_eq!(
             LlmBuilder::resolve_model(&Kind::Fast, &Version::V3_1),
-            "gemini-3.1-flash-preview"
+            schema::LlmModel::Gemini30FlashPreview
         );
         assert_eq!(
             LlmBuilder::resolve_model(&Kind::Thinking, &Version::V2_5),
-            "gemini-2.5-pro"
+            schema::LlmModel::Gemini25Pro
         );
         assert_eq!(
             LlmBuilder::resolve_model(&Kind::Thinking, &Version::V3_1),
-            "gemini-3.1-pro-preview"
+            schema::LlmModel::Gemini31ProPreview
         );
     }
 }

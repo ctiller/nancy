@@ -74,10 +74,16 @@ impl Coordinator {
         let shared_tx_ready = Arc::new(tx_ready);
         let (tx_updates, mut rx_updates) = tokio::sync::mpsc::unbounded_channel();
         let shared_identity = Arc::new(tokio::sync::RwLock::new(self.identity.clone()));
+        let coord_config = match crate::schema::coordinator_config::CoordinatorConfig::load(self.repo.workdir().unwrap()).await {
+            Ok(c) => c,
+            Err(_) => crate::schema::coordinator_config::CoordinatorConfig::default(),
+        };
+
         let ipc_state = IpcState {
             tx_ready: shared_tx_ready.clone(),
             tx_updates: Arc::new(tx_updates),
             shared_identity: shared_identity.clone(),
+            token_market: crate::coordinator::market::ArbitrationMarket::new(coord_config),
         };
 
         let listener = tokio::net::UnixListener::from_std(self.listener.take().expect("UnixListener was missing from Coordinator struct mapping!"))?;

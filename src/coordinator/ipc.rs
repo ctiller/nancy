@@ -2,17 +2,24 @@ use axum::{
     extract::{Extension, State},
     routing::{get, post},
     Router,
+    Json,
+    response::IntoResponse,
 };
+use reqwest::StatusCode;
 // Unused did_key imports cleared
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use tokio::net::UnixListener;
+use tokio::sync::RwLock;
+use crate::schema::identity_config::Identity;
+use crate::schema::ipc::{UpdateReadyPayload, RequestModelPayload, LlmUsagePayload, LlmUsageResponse};
 
 #[derive(Clone)]
 pub struct IpcState {
     pub tx_ready: Arc<tokio::sync::watch::Sender<u64>>,
-    pub tx_updates: Arc<tokio::sync::mpsc::UnboundedSender<(crate::schema::ipc::UpdateReadyPayload, tokio::sync::oneshot::Sender<()>)>>,
-    pub shared_identity: Arc<tokio::sync::RwLock<crate::schema::identity_config::Identity>>,
+    pub tx_updates: Arc<tokio::sync::mpsc::UnboundedSender<(UpdateReadyPayload, tokio::sync::oneshot::Sender<()>)>>,
+    pub shared_identity: Arc<RwLock<Identity>>,
+    pub token_market: crate::coordinator::market::SharedArbitrationMarket,
 }
 
 #[derive(serde::Deserialize)]
@@ -105,11 +112,63 @@ pub async fn updates_ready_handler(
     let _ = rx.await;
 }
 
+pub async fn request_model_handler(
+    State(state): State<IpcState>,
+    Json(payload): Json<RequestModelPayload>,
+) -> impl IntoResponse {
+    let rx = crate::coordinator::market::ArbitrationMarket::submit_bid(&state.token_market, payload);
+    if let Ok(resp) = rx.await {
+        (StatusCode::OK, Json(resp)).into_response()
+    } else {
+        (StatusCode::INTERNAL_SERVER_ERROR, "Market bidding dropped structurally.").into_response()
+    }
+}
+
+async fn llm_usage_handler(
+    State(state): State<IpcState>,
+    Json(payload): Json<LlmUsagePayload>,
+) -> impl IntoResponse {
+    crate::coordinator::market::ArbitrationMarket::record_consumption(&state.token_market, payload).await;
+    (StatusCode::OK, Json(LlmUsageResponse { status: "recorded".to_string() })).into_response()
+}
+
+pub async fn task_priority_handler(
+    axum::extract::Path(task_id): axum::extract::Path<String>,
+) -> axum::Json<serde_json::Value> {
+    let root = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let priority = tokio::task::spawn_blocking(move || {
+        let repo = match git2::Repository::discover(&root) {
+            Ok(r) => r,
+            Err(_) => return 0.5,
+        };
+        // Use a dummy identity since AppView::hydrate requires it, but PageRank only depends on the DAG topology.
+        let dummy_id = crate::schema::identity_config::Identity::Dreamer(crate::schema::identity_config::DidOwner::generate());
+        let av = crate::coordinator::appview::AppView::hydrate(&repo, &dummy_id, None);
+        let scores = av.get_pagerank_scores();
+        
+        let score = *scores.get(&task_id).unwrap_or(&0.5);
+        if scores.is_empty() { return 0.5; }
+        
+        // Dynamically rescale by finding max score. (PageRank sums to 1.0, so individuals are small).
+        let max_score = scores.values().fold(0.0_f64, |a, b| f64::max(a, *b));
+        if max_score > 0.0 {
+            score / max_score
+        } else {
+            0.5
+        }
+    }).await.unwrap_or(0.5);
+
+    axum::Json(serde_json::json!({ "priority": priority }))
+}
+
 pub fn spawn_ipc_server(listener: UnixListener, ipc_state: IpcState) -> tokio::task::JoinHandle<()> {
     let ipc_app = Router::new()
         .route("/ready-for-poll", post(ready_for_poll_handler))
         .route("/shutdown-requested", get(shutdown_requested_handler))
         .route("/updates-ready", post(updates_ready_handler))
+        .route("/request-model", post(request_model_handler))
+        .route("/llm-usage", post(llm_usage_handler))
+        .route("/api/market/task-priority/{task_id}", get(task_priority_handler))
         .layer(tower_http::trace::TraceLayer::new_for_http())
         .with_state(ipc_state);
 
@@ -153,6 +212,7 @@ mod tests {
             human: Some(crate::schema::identity_config::DidOwner::generate()),
                     }
                 )),
+                token_market: crate::coordinator::market::ArbitrationMarket::new(crate::schema::coordinator_config::CoordinatorConfig::default()),
             };
 
             let app = Router::new()

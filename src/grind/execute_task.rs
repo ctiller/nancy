@@ -8,6 +8,28 @@ use crate::schema::identity_config::Identity;
 use crate::schema::registry::EventPayload;
 use crate::schema::task::{AssignmentCompletePayload, TaskAction, TaskPayload};
 
+pub fn appview_task_priority(task_id: String) -> crate::llm::client::TaskPriorityFn {
+    std::sync::Arc::new(move || {
+        let t_id = task_id.clone();
+        Box::pin(async move {
+            let sock = crate::agent::get_coordinator_socket_path(None);
+            if sock.exists() {
+                if let Ok(client) = reqwest::Client::builder().unix_socket(sock).build() {
+                    let url = format!("http://localhost/api/market/task-priority/{}", t_id);
+                    if let Ok(resp) = client.get(&url).timeout(std::time::Duration::from_secs(5)).send().await {
+                        if let Ok(json) = resp.json::<serde_json::Value>().await {
+                            if let Some(prio) = json.get("priority").and_then(|p| p.as_f64()) {
+                                return prio;
+                            }
+                        }
+                    }
+                }
+            }
+            0.5_f64
+        })
+    })
+}
+
 #[derive(serde::Serialize, serde::Deserialize, JsonSchema)]
 struct TeamSelectionPayload {
     pub experts: Vec<String>,
@@ -103,6 +125,7 @@ fn validate_dag(tasks: &[TaskDefinition]) -> Result<()> {
 
 async fn handle_plan_task(
     target_path: &std::path::Path,
+    task_ref: &str,
     task_payload: &TaskPayload,
     writer: &Writer<'_>,
 ) -> Result<String> {
@@ -114,6 +137,8 @@ async fn handle_plan_task(
         let mut coord_client = crate::llm::thinking_llm("planning_moderator")
             .system_prompt(&mod_prompt)
             .with_loop_detection()
+            .with_task_priority(appview_task_priority(task_ref.to_string()))
+            .with_market_weight(1.0)
             .build()?;
 
         crate::introspection::log("Asking moderator for team selection...");
@@ -153,6 +178,8 @@ async fn handle_plan_task(
             tdd_guidelines: crate::grind::prompts::TDD_GUIDELINES,
         }.render()?)
         .with_loop_detection()
+        .with_task_priority(appview_task_priority(task_ref.to_string()))
+        .with_market_weight(0.9)
         .build()?;
 
     crate::introspection::frame("synthesis_loops", async {
@@ -349,6 +376,7 @@ async fn handle_plan_task(
 }
 async fn handle_implement_task(
     target_path: &std::path::Path,
+    task_ref: &str,
     task_payload: &TaskPayload,
     _writer: &Writer<'_>,
 ) -> Result<String> {
@@ -361,6 +389,8 @@ async fn handle_implement_task(
     let mut client = crate::llm::thinking_llm("implementer")
         .tools(tools)
         .system_prompt(&crate::grind::prompts::implementer_system_prompt(&target_path))
+        .with_task_priority(appview_task_priority(task_ref.to_string()))
+        .with_market_weight(0.8)
         .build()?;
 
     let out = client.ask::<String>(&task_payload.description).await?;
@@ -370,7 +400,7 @@ async fn handle_implement_task(
 async fn handle_review_task(
     target_path: &std::path::Path,
     _repo: &Repository,
-    _task_ref: &str,
+    task_ref: &str,
     task_payload: &TaskPayload,
     _writer: &Writer<'_>,
 ) -> Result<String> {
@@ -382,6 +412,8 @@ async fn handle_review_task(
 
     let mut coordinator_client = crate::llm::thinking_llm("review_coordinator")
         .system_prompt(crate::grind::prompts::review_team_selection_prompt())
+        .with_task_priority(appview_task_priority(task_ref.to_string()))
+        .with_market_weight(0.7)
         .build()?;
 
     let team_selection = coordinator_client
@@ -420,6 +452,8 @@ async fn handle_review_task(
 
     let mut synthesis_client = crate::llm::thinking_llm("review_synthesis")
         .system_prompt(&crate::grind::prompts::review_synthesis_prompt(&target_path))
+        .with_task_priority(appview_task_priority(task_ref.to_string()))
+        .with_market_weight(0.6)
         .build()?;
 
     let valid_outputs: std::collections::HashMap<_, _> = outputs.into_iter().filter_map(|(id, x)| x.ok().map(|o| (id, o))).collect();
@@ -532,9 +566,9 @@ pub async fn execute<'a>(
 
     // The writer is provided organically by the orchestrator polling loop
     let report_str = match task_payload.action {
-        TaskAction::Plan => handle_plan_task(&target_path, task_payload, &writer).await?,
+        TaskAction::Plan => handle_plan_task(&target_path, task_ref, task_payload, &writer).await?,
         TaskAction::Implement => {
-            handle_implement_task(&target_path, task_payload, &writer).await?
+            handle_implement_task(&target_path, task_ref, task_payload, &writer).await?
         }
         TaskAction::ReviewImplementation => {
             handle_review_task(&target_path, repo, task_ref, task_payload, &writer).await?

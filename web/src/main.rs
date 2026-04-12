@@ -5,6 +5,7 @@ use wasm_bindgen::prelude::*;
 pub mod repo;
 pub mod agents;
 pub mod tasks;
+pub mod logs;
 
 #[derive(Clone, Routable, PartialEq)]
 enum Route {
@@ -426,7 +427,7 @@ fn switch(routes: Route) -> Html {
         Route::Tasks => html! { <tasks::TasksView /> },
         Route::Agents => html! { <agents::AgentsView /> },
         Route::Repo => html! { <repo::RepoView /> },
-        Route::Logs => html! { <div>{"Logs"}</div> },
+        Route::Logs => html! { <logs::LogsView /> },
         Route::NotFound => html! { <h1>{ "404 - Not Found" }</h1> },
     }
 }

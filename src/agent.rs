@@ -6,11 +6,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::schema::identity_config::Identity;
 
-fn get_coordinator_socket_path(workdir: &Path) -> std::path::PathBuf {
+pub fn get_coordinator_socket_path(workdir: Option<&Path>) -> std::path::PathBuf {
     if let Ok(custom) = std::env::var("NANCY_COORDINATOR_SOCKET_PATH") {
         std::path::PathBuf::from(custom)
     } else {
-        workdir.join(".nancy").join("sockets").join("coordinator").join("coordinator.sock")
+        let root = workdir.map(|p| p.to_path_buf()).unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")));
+        root.join(".nancy").join("sockets").join("coordinator").join("coordinator.sock")
     }
 }
 
@@ -221,7 +222,7 @@ pub async fn run_agent<P: AsRef<Path>, Processor: AgentTaskProcessor>(
                 }
             }
 
-            let socket_path = get_coordinator_socket_path(&workdir);
+            let socket_path = get_coordinator_socket_path(Some(&workdir));
             if socket_path.exists() {
                 match reqwest::Client::builder().unix_socket(socket_path.clone()).build() {
                     Ok(client) => {
@@ -267,7 +268,7 @@ pub async fn run_agent<P: AsRef<Path>, Processor: AgentTaskProcessor>(
         // Push our completed update statuses to the Coordinator directly asynchronously!
         if logged_any {
             tracing::debug!("[Agent {}] Commits made to local ledger! Dispatching to Coordinator via /updates-ready", agent_type);
-            let socket_path = get_coordinator_socket_path(&workdir);
+            let socket_path = get_coordinator_socket_path(Some(&workdir));
             if socket_path.exists() {
                 let payload = crate::schema::ipc::UpdateReadyPayload {
                     grinder_did: worker_did.clone(),
@@ -294,7 +295,7 @@ pub async fn run_agent<P: AsRef<Path>, Processor: AgentTaskProcessor>(
         }
         
         // Optionally listen to immediate exit if requested locally!
-        let socket_path_local = get_coordinator_socket_path(&workdir);
+        let socket_path_local = get_coordinator_socket_path(Some(&workdir));
         if socket_path_local.exists() {
             if let Ok(client) = reqwest::Client::builder().unix_socket(socket_path_local.clone()).build() {
                 tokio::spawn(async move {
