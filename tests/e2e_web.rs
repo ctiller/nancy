@@ -547,6 +547,6 @@ async fn test_e2e_web_market_state() {
     
     // Spot Market should have active quotas hydrated organically natively.
     let market_state: serde_json::Value = res.json().await.unwrap();
-    let per_model_stats = market_state["per_model_stats"].as_object().expect("Expected per_model_stats map in deserialized payload structurally");
+    let per_model_stats = market_state["per_model_stats"].as_array().expect("Expected per_model_stats array in deserialized payload structurally");
     assert!(!per_model_stats.is_empty(), "Spot Market should have initially hydrated limits recorded defensively");
 }

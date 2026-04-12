@@ -99,7 +99,7 @@ pub fn logs_view() -> Html {
                                     <h3>{ format!("Pending Bids ({})", state.pending_bids.len()) }</h3>
                                     <div style="display: flex; flex-direction: column; gap: 10px; max-height: 400px; overflow-y: auto;">
                                         { for state.pending_bids.iter().map(|bid| {
-                                            let current_now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+                                            let current_now = (js_sys::Date::now() / 1000.0) as u64;
                                             html! {
                                             <div style="background: rgba(0,0,0,0.3); padding: 12px; border-radius: 6px; border-left: 4px solid var(--accent-orange, #ff9800);">
                                                 <div style="font-weight: bold; margin-bottom: 4px;">{ format!("Subagent: {}", bid.requester_id) }</div>
@@ -121,7 +121,7 @@ pub fn logs_view() -> Html {
                                     <h3>{ format!("Active Leases ({})", state.active_leases.len()) }</h3>
                                     <div style="display: flex; flex-direction: column; gap: 10px; max-height: 400px; overflow-y: auto;">
                                         { for state.active_leases.iter().map(|lease| {
-                                            let current_now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+                                            let current_now = (js_sys::Date::now() / 1000.0) as u64;
                                             let expires_at = lease.granted_at_unix + lease.lease_duration_sec;
                                             html! {
                                             <div style="background: rgba(0,0,0,0.3); padding: 12px; border-radius: 6px; border-left: 4px solid var(--accent-light);">

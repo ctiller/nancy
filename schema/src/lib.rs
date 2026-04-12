@@ -213,7 +213,7 @@ pub struct ModelUsageStats {
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct MarketStateResponse {
-    pub per_model_stats: std::collections::BTreeMap<LlmModel, ModelUsageStats>,
+    pub per_model_stats: Vec<(LlmModel, ModelUsageStats)>,
     pub pending_bids: Vec<PendingBidInfo>,
     pub active_leases: Vec<RequestModelResponse>,
 }

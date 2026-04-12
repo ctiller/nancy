@@ -255,8 +255,10 @@ impl ArbitrationMarket {
             submitted_at_unix: b.submitted_at_unix,
         }).collect();
 
+        let per_model_stats_vec: Vec<_> = per_model_stats.into_iter().collect();
+
         MarketStateResponse {
-            per_model_stats,
+            per_model_stats: per_model_stats_vec,
             pending_bids,
             active_leases: lock.active_leases.clone(),
         }
