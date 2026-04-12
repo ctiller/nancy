@@ -104,7 +104,7 @@ impl ReviewSession {
         panel.into_iter().collect()
     }
 
-    pub async fn ask_reviewers<T: serde::de::DeserializeOwned + Send + 'static + schemars::JsonSchema>(
+    pub async fn ask_reviewers<T: serde::de::DeserializeOwned + serde::Serialize + Send + 'static + schemars::JsonSchema>(
         &mut self,
         experts: &[String],
         prompt: &str,
@@ -153,6 +153,9 @@ impl ReviewSession {
         let required_half = (experts.len() + 1) / 2;
         let mut completed_count = 0;
         let mut results = Vec::new();
+        
+        let mut approve_count = 0;
+        let mut changes_required_count = 0;
 
         use tokio::time::{timeout, Duration};
         
@@ -172,9 +175,25 @@ impl ReviewSession {
             match timeout(time_limit, futures.next()).await {
                 Ok(Some((expert_id, res))) => {
                     completed_count += 1;
+                    
+                    if let Ok(value) = &res {
+                        if let Ok(json_val) = serde_json::to_value(value) {
+                            if let Some(vote) = json_val.get("vote").and_then(|v| v.as_str()) {
+                                if vote.eq_ignore_ascii_case("approve") {
+                                    approve_count += 1;
+                                } else if vote.eq_ignore_ascii_case("changes_required") {
+                                    changes_required_count += 1;
+                                }
+                            }
+                        }
+                    }
+                    
                     results.push((expert_id, res));
                     
-                    let new_status = format!("{} : {} agents finished, {} in progress", status_label, completed_count, started_experts.len().saturating_sub(completed_count));
+                    let mut new_status = format!("{} : {} agents finished, {} in progress", status_label, completed_count, started_experts.len().saturating_sub(completed_count));
+                    if approve_count > 0 || changes_required_count > 0 {
+                        new_status.push_str(&format!(" ({} approve, {} needs changes)", approve_count, changes_required_count));
+                    }
                     crate::introspection::set_frame_status(&new_status);
 
                     if completed_count >= required_half && deadline_state.load(std::sync::atomic::Ordering::SeqCst) == 0 {

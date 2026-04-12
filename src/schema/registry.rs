@@ -6,7 +6,7 @@ use super::llm::{
 };
 use super::task::{
     AssignmentCompletePayload, BlockedByPayload, CoordinatorAssignmentPayload,
-    ReviewFeedbackPayload, TaskPayload, TaskRequestPayload, GhostVetoOverridePayload,
+    ReviewFeedbackPayload, TaskPayload, TaskRequestPayload,
     AskPayload, CancelAskPayload, AskSeenPayload, ResponsePayload,
 };
 
@@ -29,8 +29,6 @@ pub enum EventPayload {
     BlockedBy(BlockedByPayload),
     #[serde(rename = "review_feedback")]
     ReviewFeedback(ReviewFeedbackPayload),
-    #[serde(rename = "ghost_veto_override")]
-    GhostVetoOverride(GhostVetoOverridePayload),
     #[serde(rename = "llm_prompt")]
     LlmPrompt(LlmPromptPayload),
     #[serde(rename = "llm_tool_call")]

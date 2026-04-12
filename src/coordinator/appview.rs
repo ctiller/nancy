@@ -325,7 +325,7 @@ impl AppView {
         g.set_default_edge_label(EdgeLabel::default);
 
         const NODE_WIDTH: f64 = 280.0;
-        const NODE_HEIGHT: f64 = 80.0;
+        const NODE_HEIGHT: f64 = 120.0;
 
         for node in &nodes {
             g.set_node(&node.id, NodeLabel {

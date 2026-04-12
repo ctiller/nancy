@@ -2,7 +2,7 @@ use yew::prelude::*;
 use schema::{TopologyResponse, TopologyNode, TopologyEdge, NodeType};
 
 const NODE_WIDTH: f64 = 280.0;
-const NODE_HEIGHT: f64 = 80.0;
+const NODE_HEIGHT: f64 = 120.0;
 
 #[function_component(TasksView)]
 pub fn tasks_view() -> Html {
@@ -75,39 +75,81 @@ pub fn tasks_view() -> Html {
             let active_dids: Vec<String> = nodes_state.iter()
                 .filter_map(|n| if !n.is_completed { n.active_agent.clone() } else { None })
                 .collect();
-
                 
             let cancelled = std::rc::Rc::new(std::cell::Cell::new(false));
             let cancel_clone = cancelled.clone();
             
+            let (tx, mut rx) = futures::channel::mpsc::unbounded::<(String, String)>();
+            
+            let statuses_clone = statuses.clone();
+            wasm_bindgen_futures::spawn_local(async move {
+                let mut current_map = std::collections::HashMap::new();
+                use futures::StreamExt;
+                while let Some((did, status)) = rx.next().await {
+                    if cancel_clone.get() { break; }
+                    current_map.insert(did, status);
+                    statuses_clone.set(current_map.clone());
+                }
+            });
+
+            let mut controllers = Vec::new();
             if !active_dids.is_empty() {
-                 wasm_bindgen_futures::spawn_local(async move {
-                     loop {
-                         if cancel_clone.get() { break; }
-                         let mut new_statuses = std::collections::HashMap::new();
-                         for did in &active_dids {
-                             let url = format!("/api/grinders/{}/state", did);
-                             if let Ok(resp) = gloo_net::http::Request::get(&url).send().await {
-                                 if let Ok(json) = resp.json::<serde_json::Value>().await {
-                                     if let Some(frame_val) = json.get("tree") {
-                                         if let Ok(frame) = serde_json::from_value::<schema::SerializedFrame>(frame_val.clone()) {
-                                             if let Some(st) = frame.status {
-                                                 new_statuses.insert(did.clone(), st);
+                 for did in active_dids {
+                     let tx = tx.clone();
+                     let cancel = cancelled.clone();
+                     let abort_controller = web_sys::AbortController::new().ok();
+                     let signal = abort_controller.as_ref().map(|ac| ac.signal());
+                     
+                     if let Some(ref ac) = abort_controller {
+                         controllers.push(ac.clone());
+                     }
+
+                     wasm_bindgen_futures::spawn_local(async move {
+                         let mut last_update: Option<u64> = None;
+                         loop {
+                             if cancel.get() { break; }
+                             let url = if let Some(lu) = last_update {
+                                 format!("/api/grinders/{}/state?last_update={}", did, lu)
+                             } else {
+                                 format!("/api/grinders/{}/state", did)
+                             };
+                             
+                             let mut req = gloo_net::http::Request::get(&url);
+                             if let Some(sig) = &signal {
+                                 req = req.abort_signal(Some(sig));
+                             }
+                             
+                             if let Ok(resp) = req.send().await {
+                                 if cancel.get() { break; }
+                                 if resp.ok() {
+                                     if let Ok(json) = resp.json::<serde_json::Value>().await {
+                                         if let (Some(new_update), Some(frame_val)) = (
+                                             json.get("update_number").and_then(|v| v.as_u64()),
+                                             json.get("tree")
+                                         ) {
+                                             if Some(new_update) != last_update {
+                                                 if let Ok(frame) = serde_json::from_value::<schema::SerializedFrame>(frame_val.clone()) {
+                                                     last_update = Some(new_update);
+                                                     if let Some(st) = frame.rollup.or(frame.status) {
+                                                         let _ = tx.unbounded_send((did.clone(), st));
+                                                     }
+                                                 }
                                              }
                                          }
                                      }
                                  }
                              }
+                             gloo_timers::future::sleep(std::time::Duration::from_millis(500)).await;
                          }
-                         if cancel_clone.get() { break; }
-                         statuses.set(new_statuses);
-                         gloo_timers::future::sleep(std::time::Duration::from_secs(2)).await;
-                     }
-                 });
+                     });
+                 }
             }
             
             move || {
                 cancelled.set(true);
+                for ac in controllers {
+                    ac.abort();
+                }
             }
         });
     }
@@ -153,6 +195,43 @@ pub fn tasks_view() -> Html {
             "PENDING".to_string()
         };
 
+        let wrap_text = |text: &str, max_len: usize, max_lines: usize| -> Vec<String> {
+            let mut lines = Vec::new();
+            let mut current_line = String::new();
+            for word in text.split_whitespace() {
+                if current_line.len() + word.len() + 1 > max_len {
+                    if !current_line.is_empty() {
+                        if lines.len() == max_lines - 1 {
+                            current_line.push_str("...");
+                            lines.push(current_line);
+                            return lines;
+                        }
+                        lines.push(current_line);
+                        current_line = String::new();
+                    }
+                }
+                if !current_line.is_empty() {
+                    current_line.push(' ');
+                }
+                
+                // If single word is longer than max_len
+                if current_line.is_empty() && word.len() > max_len {
+                    let mut truncated = word[..max_len.min(word.len()).saturating_sub(3)].to_string();
+                    truncated.push_str("...");
+                    current_line.push_str(&truncated);
+                } else {
+                    current_line.push_str(word);
+                }
+            }
+            if !current_line.is_empty() && lines.len() < max_lines {
+                lines.push(current_line);
+            }
+            lines
+        };
+
+        let name_lines = wrap_text(&n.name, 35, 2);
+        let status_lines = wrap_text(&status_text, 36, 3);
+
         let transform_style = format!(
             "pointer-events: auto; transform: translate({}px, {}px); transition: transform 0.35s ease-out, opacity 0.35s;", 
             n.x, n.y
@@ -183,28 +262,40 @@ pub fn tasks_view() -> Html {
                 >
                     {node_type_upper}
                 </text>
-                
+
                 <text 
-                    x={((NODE_WIDTH / 2.0) - 12.0).to_string()} 
-                    y={(-(NODE_HEIGHT / 2.0) + 24.0).to_string()} 
                     fill="var(--text-muted)" 
                     font-family="monospace" 
-                    font-size="0.75rem" 
-                    text-anchor="end"
+                    font-size="0.85rem"
                 >
-                    {status_text}
+                    { for name_lines.into_iter().enumerate().map(|(i, line)| {
+                        html! {
+                            <tspan 
+                                x={(-(NODE_WIDTH / 2.0) + 12.0).to_string()} 
+                                y={(-(NODE_HEIGHT / 2.0) + 48.0 + (i as f64 * 16.0)).to_string()}
+                            >
+                                {line}
+                            </tspan>
+                        }
+                    }) }
                 </text>
 
-                <foreignObject 
-                    x={(-(NODE_WIDTH / 2.0) + 12.0).to_string()} 
-                    y={(-(NODE_HEIGHT / 2.0) + 32.0).to_string()} 
-                    width={(NODE_WIDTH - 24.0).to_string()} 
-                    height={(NODE_HEIGHT - 40.0).to_string()}
+                <text 
+                    fill="var(--text-muted)" 
+                    font-family="monospace" 
+                    font-size="0.75rem"
                 >
-                    <div style="color: var(--text-muted); font-size: 0.85rem; font-family: monospace; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; text-overflow: ellipsis; padding-top: 4px;">
-                        {n.name.clone()}
-                    </div>
-                </foreignObject>
+                    { for status_lines.into_iter().enumerate().map(|(i, line)| {
+                        html! {
+                            <tspan 
+                                x={(-(NODE_WIDTH / 2.0) + 12.0).to_string()} 
+                                y={(-(NODE_HEIGHT / 2.0) + 82.0 + (i as f64 * 14.0)).to_string()}
+                            >
+                                {line}
+                            </tspan>
+                        }
+                    }) }
+                </text>
             </g>
         }
     });

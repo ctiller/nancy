@@ -284,6 +284,12 @@ fn agent_card(props: &AgentCardProps) -> Html {
                         }
                     </div>
                 } else if let Some(frame) = &*state {
+                    if let Some(ref rollup_text) = frame.rollup {
+                        <div style="margin-bottom: 12px; padding: 12px; background: rgba(0, 200, 255, 0.05); border-left: 3px solid var(--accent-cyan); border-radius: 4px; color: var(--text-color); font-family: sans-serif; font-size: 0.95rem; line-height: 1.5; font-style: italic;">
+                            <span style="font-weight: bold; color: var(--accent-cyan); font-style: normal; margin-right: 6px;">{"Summary:"}</span>
+                            {rollup_text.clone()}
+                        </div>
+                    }
                     <FrameView frame={frame.clone()} />
                 } else {
                     <div class="text-muted">{"Waiting for state..."}</div>

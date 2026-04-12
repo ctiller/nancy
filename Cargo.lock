@@ -4782,6 +4782,7 @@ dependencies = [
 name = "web"
 version = "0.1.0"
 dependencies = [
+ "futures",
  "gloo-net 0.3.1",
  "gloo-timers 0.4.0",
  "js-sys",

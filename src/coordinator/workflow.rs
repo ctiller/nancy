@@ -364,7 +364,7 @@ mod tests {
         }))?;
 
         let review_output = crate::pre_review::schema::ReviewOutput {
-            vote: crate::pre_review::schema::ReviewVote::ChangesRequired, agree_notes: String::new(), disagree_notes: String::new(), overridden_vetoes: vec![],
+            vote: crate::pre_review::schema::ReviewVote::ChangesRequired, agree_notes: String::new(), disagree_notes: String::new(),
             task_feedback: vec![], tdd_feedback: None,
         };
         writer.log_event(EventPayload::AssignmentComplete(AssignmentCompletePayload {
@@ -437,7 +437,7 @@ mod tests {
         }))?;
 
         let review_output = crate::pre_review::schema::ReviewOutput {
-            vote: crate::pre_review::schema::ReviewVote::Approve, agree_notes: "".to_string(), disagree_notes: "".to_string(), overridden_vetoes: vec![],
+            vote: crate::pre_review::schema::ReviewVote::Approve, agree_notes: "".to_string(), disagree_notes: "".to_string(),
             task_feedback: vec![], tdd_feedback: None,
         };
         writer.log_event(EventPayload::AssignmentComplete(AssignmentCompletePayload {
@@ -494,7 +494,7 @@ mod tests {
         appview.apply_event(&blocked_by_payload, "ev_block_id"); 
         let report = crate::pre_review::schema::ReviewOutput {
             vote: crate::pre_review::schema::ReviewVote::ChangesRequired,
-            agree_notes: "".to_string(), disagree_notes: "".to_string(), overridden_vetoes: vec![], task_feedback: vec![], tdd_feedback: None,
+            agree_notes: "".to_string(), disagree_notes: "".to_string(), task_feedback: vec![], tdd_feedback: None,
         };
         appview.completed_reports.insert(review_id.clone(), serde_json::to_string(&report)?);
         let handled = handle_review_rejection(&appview, &writer, &review_id);

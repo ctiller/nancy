@@ -11,6 +11,8 @@ pub struct TddDocument {
     pub proposed_design: Vec<String>,
     pub risks_and_tradeoffs: Vec<String>,
     pub alternatives_considered: Vec<String>,
+    #[serde(default)]
+    pub recorded_dissents: Vec<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, schemars::JsonSchema)]
@@ -63,12 +65,6 @@ pub struct ReviewFeedbackPayload {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct GhostVetoOverridePayload {
-    pub target_veto_event_id: String,
-    pub override_reason: String,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AgentCrashReportPayload {
     pub crashing_agent_did: String,
     pub log_ref: String,
@@ -92,14 +88,11 @@ pub struct TaskEvaluationPayload {
 pub enum Consensus {
     Approve,
     ChangesRequired,
-    Veto,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, JsonSchema)]
 pub struct ReviewReportPayload {
     pub consensus: Consensus,
-    pub new_vetoes: Vec<String>,
-    pub cleared_vetoes: Vec<String>,
     pub recommended_tasks: Vec<TaskRequestPayload>,
     pub general_notes: String,
 }

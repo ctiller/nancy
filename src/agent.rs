@@ -97,6 +97,42 @@ pub async fn run_agent<P: AsRef<Path>, Processor: AgentTaskProcessor>(
     use crate::introspection::{IntrospectionTreeRoot};
     let tree_root = std::sync::Arc::new(IntrospectionTreeRoot::new());
 
+    {
+        let tree_clone = tree_root.clone();
+        let mut rx = tree_clone.receiver.clone();
+        let rollup_ref = tree_clone.root_frame.rollup.clone();
+        tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    res = rx.changed() => {
+                        if res.is_err() { break; }
+                    }
+                    _ = crate::agent::SHUTDOWN_NOTIFY.notified() => { break; }
+                }
+                
+                tokio::select! {
+                    _ = tokio::time::sleep(tokio::time::Duration::from_secs(5)) => {}
+                    _ = crate::agent::SHUTDOWN_NOTIFY.notified() => { break; }
+                }
+
+                if crate::agent::SHUTDOWN.load(std::sync::atomic::Ordering::SeqCst) { break; }
+                
+                let snap = tree_clone.root_frame.snapshot();
+                if let Ok(mut llm) = crate::llm::builder::fast_llm("status_rollup").build() {
+                    let json = serde_json::to_string(&snap).unwrap_or_default();
+                    let prompt = format!("Summarize the current action being performed by this autonomous agent based on its internal frame state. Extract the lowest meaningful active task. If it is waiting on a quorum or executing a multi-agent review map, explicitly include the current round iteration and exact count of agents finished/in-progress/votes natively! Keep it very terse, 1 short sentence max.\n\nState:\n```json\n{}\n```", json);
+                    if let Ok(result) = llm.ask::<String>(&prompt).await {
+                        if let Ok(mut lock) = rollup_ref.lock() {
+                            *lock = Some(result);
+                        }
+                        let _ = tree_clone.updater.send_modify(|v| *v += 1);
+                        let _ = rx.borrow_and_update();
+                    }
+                }
+            }
+        });
+    }
+
     // Resolve socket from explicit bounds cleanly!
     let env_socket_key = format!("NANCY_{}_SOCKET_PATH", agent_type.to_uppercase());
     let socket_path_self = if let Ok(custom) = std::env::var(&env_socket_key) {

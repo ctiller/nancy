@@ -15,6 +15,8 @@ pub struct SerializedFrame {
     pub name: String,
     #[serde(default)]
     pub status: Option<String>,
+    #[serde(default)]
+    pub rollup: Option<String>,
     pub elements: Vec<SerializedElement>,
 }
 
@@ -42,6 +44,7 @@ impl StateElement {
 pub struct FrameNode {
     pub name: String,
     pub status: Arc<Mutex<Option<String>>>,
+    pub rollup: Arc<Mutex<Option<String>>>,
     pub elements: Arc<Mutex<Vec<StateElement>>>,
 }
 
@@ -50,6 +53,7 @@ impl FrameNode {
         Self {
             name: name.to_string(),
             status: Arc::new(Mutex::new(None)),
+            rollup: Arc::new(Mutex::new(None)),
             elements: Arc::new(Mutex::new(Vec::new())),
         }
     }
@@ -57,9 +61,11 @@ impl FrameNode {
     pub fn snapshot(&self) -> SerializedFrame {
         let elements = self.elements.lock().unwrap();
         let status = self.status.lock().unwrap().clone();
+        let rollup = self.rollup.lock().unwrap().clone();
         SerializedFrame {
             name: self.name.clone(),
             status,
+            rollup,
             elements: elements.iter().map(|e| e.snapshot()).collect(),
         }
     }

@@ -147,7 +147,10 @@ async fn handle_plan_task(
     let mut iteration = 0;
     
     let mut synthesizer = crate::llm::thinking_llm("moderator_synthesizer")
-        .system_prompt(&format!("You are the Nancy Moderator. Synthesize the final execution plan and its DAG task mapping purely into the requested strict JSON format.\n\n{}", crate::grind::prompts::TDD_GUIDELINES))
+        .system_prompt(&crate::grind::prompts::ModeratorSynthesizerSystemPromptTemplate {
+            task_description: &task_payload.description,
+            tdd_guidelines: crate::grind::prompts::TDD_GUIDELINES,
+        }.render()?)
         .build()?;
 
     crate::introspection::frame("synthesis_loops", async {
@@ -201,19 +204,25 @@ async fn handle_plan_task(
         let formal_panel = session.enforce_quorum(&team_selection.experts, crate::personas::PersonaRole::PlanReview);
         let review_outputs = session.ask_reviewers::<crate::pre_review::schema::ReviewOutput>(&formal_panel, &review_prompt, &format!("review round {}", iteration)).await?;
         
-        let valid_outputs: Vec<_> = review_outputs.into_iter().filter_map(|(_, x)| x.ok()).collect();
+        let valid_outputs: Vec<_> = review_outputs.into_iter().filter_map(|(id, x)| x.ok().map(|o| (id, o))).collect();
         
         let mut consensus = crate::schema::task::Consensus::Approve;
         let mut general_notes = String::new();
 
-        for out in valid_outputs {
-            if matches!(out.vote, crate::pre_review::schema::ReviewVote::ChangesRequired | crate::pre_review::schema::ReviewVote::Veto) {
+        for (expert_id, out) in valid_outputs {
+            if matches!(out.vote, crate::pre_review::schema::ReviewVote::ChangesRequired) {
                 consensus = crate::schema::task::Consensus::ChangesRequired;
-                general_notes.push_str(&format!("Expert found issues: {}\n", out.disagree_notes));
+                general_notes.push_str(&format!("{} found issues: {}\n", expert_id, out.disagree_notes));
+            } else if matches!(out.vote, crate::pre_review::schema::ReviewVote::Approve) {
+                if !out.agree_notes.trim().is_empty() {
+                    general_notes.push_str(&format!("{} approved. Notes: {}\n", expert_id, out.agree_notes));
+                } else {
+                    general_notes.push_str(&format!("{} approved.\n", expert_id));
+                }
             }
         }
 
-        if matches!(consensus, crate::schema::task::Consensus::ChangesRequired | crate::schema::task::Consensus::Veto) {
+        if matches!(consensus, crate::schema::task::Consensus::ChangesRequired) {
             tracing::info!("Review Panel rejected plan. Resynthesizing...");
             feedback_context.push_str(&format!("Review Feedback rejected the structural design: {}\n", general_notes));
             continue;
@@ -337,21 +346,12 @@ async fn handle_review_task(
         .system_prompt(&crate::grind::prompts::review_synthesis_prompt(&target_path))
         .build()?;
 
-    let valid_outputs: Vec<_> = outputs.into_iter().filter_map(|(_, x)| x.ok()).collect();
+    let valid_outputs: std::collections::HashMap<_, _> = outputs.into_iter().filter_map(|(id, x)| x.ok().map(|o| (id, o))).collect();
     let synthesis_str = serde_json::to_string(&valid_outputs)?;
 
     let report = synthesis_client
         .ask::<crate::schema::task::ReviewReportPayload>(&synthesis_str)
         .await?;
-
-    for veto in &report.cleared_vetoes {
-        writer.log_event(EventPayload::GhostVetoOverride(
-            crate::schema::task::GhostVetoOverridePayload {
-                target_veto_event_id: veto.clone(),
-                override_reason: "Cleared by Dynamic Consensus Architect".to_string(),
-            },
-        ))?;
-    }
 
     Ok(serde_json::to_string(&report)?)
 }
@@ -589,7 +589,7 @@ mod tests {
             builder = builder.respond(r#"{"vote": "approve", "agree_notes": "Good", "disagree_notes": ""}"#);
         }
             
-        builder.respond(r#"{"vote": "approve", "agree_notes": "", "disagree_notes": "", "overridden_vetoes": [], "consensus": "approve", "new_vetoes": [], "cleared_vetoes": [], "recommended_tasks": [], "general_notes": ""}"#)
+        builder.respond(r#"{"vote": "approve", "agree_notes": "", "disagree_notes": "", "consensus": "approve", "recommended_tasks": [], "general_notes": ""}"#)
             .commit();
 
         let writer = Writer::new(repo, identity.clone())?;
@@ -644,7 +644,7 @@ mod tests {
             .respond(r#"{"experts": ["The Pedant"]}"#) // TeamSelection
             .respond(r#"{"vote": "approve", "agree_notes": "", "disagree_notes": ""}"#) // Review Output 1
             .respond(r#"{"vote": "approve", "agree_notes": "", "disagree_notes": ""}"#) // Review Output 2 (Team Player)
-            .respond(r#"{"experts": ["The Pedant"], "vote": "approve", "agree_notes": "", "disagree_notes": "", "overridden_vetoes": [], "consensus": "approve", "new_vetoes": [], "cleared_vetoes": ["v_123"], "recommended_tasks": [], "general_notes": ""}"#) // Synthesis
+            .respond(r#"{"experts": ["The Pedant"], "vote": "approve", "agree_notes": "", "disagree_notes": "", "consensus": "approve", "recommended_tasks": [], "general_notes": ""}"#) // Synthesis
             .commit();
 
         let identity = Identity::Grinder(DidOwner {

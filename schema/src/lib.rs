@@ -13,6 +13,8 @@ pub struct SerializedFrame {
     pub name: String,
     #[serde(default)]
     pub status: Option<String>,
+    #[serde(default)]
+    pub rollup: Option<String>,
     pub elements: Vec<SerializedElement>,
 }
 

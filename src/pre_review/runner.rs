@@ -2,25 +2,22 @@ use crate::personas::Persona;
 
 pub fn reviewer_system_prompt(persona: &Persona, workspace: &std::path::Path) -> String {
     format!(
-        "You are an expert Reviewer on a panel. Your persona is: {persona_name}. {persona_description}.\n\
-        You sit in the `{persona_category:?}` domain.\n\
-        \n\
+        "You are an expert Reviewer on a panel. Your persona is: {persona_name}.\n\n\
+        {persona_body}\n\n\
         ## Execution Environment Bounds\n\
         Your strict dynamically mounted root workspace is absolutely restricted to: {workspace}\n\
         You MUST NEVER act outside this directory. All tools requiring paths MUST rigorously explicitly prefix against this absolute path dynamically explicitly legitimately implicitly perfectly continuously!\n\
         You have READ-ONLY access to the workspace. You DO NOT have permission to mutate the filesystem, write scratch files, or structurally modify the target repository.\n\
         If your ideation or review yields architectural plans (like a TDD), you MUST embed it directly into your JSON response payload. Do not attempt to write architectural artifacts to disk.\n\
         \n\
-        1. **Tools:** You have read-only access to terminal and filesystem investigation tools. You must use them to verify your assumptions before issuing a Veto or Changes_Required. NEVER use `run_command` to execute `ls`; you MUST use the native `list_dir` tool instead.
-        2. **Votes:** You may vote `Approve`, `Changes_Required`, `Needs_Clarification`, or `Veto`.\n\
-        3. **Ghost Vetos:** If the Coordinator removes a panel member holding an active Veto, it becomes a \"Ghost Veto\" on the Dissent Log. To unblock the system, Ghost Vetos must be explicitly cleared by the panel. A Ghost Veto is only cleared when it receives at least one clearance vote from *each* of the three domains (Technical, Paradigm, and Orchestration).\n\
+        1. **Tools:** You have read-only access to terminal and filesystem investigation tools. You must use them to verify your assumptions before issuing Changes_Required. NEVER use `run_command` to execute `ls`; you MUST use the native `list_dir` tool instead.
+        2. **Votes:** You may vote `Approve`, `Changes_Required`, or `Needs_Clarification`.\n\
         4. **Agency:** You have full agency to investigate the codebase, run tests, and provide rigorous feedback. Do not rubber-stamp approvals.\n\
         \n\
         When conducting reviews or ideation, frame your analysis against the following expectations:\n\
         {tdd_guidelines}",
         persona_name = persona.name,
-        persona_description = persona.description,
-        persona_category = persona.category,
+        persona_body = persona.persona,
         workspace = workspace.display(),
         tdd_guidelines = crate::grind::prompts::TDD_GUIDELINES,
     )
@@ -46,7 +43,7 @@ pub fn reviewer_task_prompt(
         **Evaluation Context:** \n{review_context}\n\
         **Dissent Log:** \n{dissent_log_json}\n\
         \n\
-        Review the work. If you agree with a Ghost Veto in the Dissent Log, you may adopt it as your own. \
+        Review the work and issue appropriate feedback.\
         If you disagree with it, state that it should be cleared. \n\
         You MUST provide granular feedback explicitly assessing the TddDocument payload and evaluating each and every defined task. \n\
         For each task, assert whether the scope is `Atomic`, `Multistep`, or `RequiresSplit` in your `task_feedback` array. \n\
@@ -68,8 +65,7 @@ pub fn coordinator_system_prompt(workspace: &std::path::Path, max_rounds: u32) -
     ## Orchestration Playbook\n\
     1. **Address Feedback:** You receive all reviewer feedback and must prioritize integrating requested changes by editing the codebase before generating the next round's diff.\n\
     2. **Quorum:** You must dynamically select reviewers to form a panel. The system strictly enforces a Quorum: you must maintain at least K=2 active members from *each* domain (`Technical`, `Paradigm`, and `Orchestration`). If you fail to meet quorum, the backend will forcefully randomize and inject personas to satisfy it.\n\
-    3. **Dissent Log & Ghost Vetos:** If you swap out an uncooperative panel member, any `Veto` they held is inherited as a `Ghost Veto` on the Dissent Log. A Ghost Veto is a hard block. It can only be cleared if the active panel explicitly votes to clear it. Specifically, it requires at least ONE clearance vote from *each* of the three domains to be exorcised.\n\
-    4. **Execution:** Use your tools to fulfill your role. NEVER use \"run_command\" to execute \"ls\"; you MUST use the native \"list_dir\" tool instead. Maintain high engineering standards and do not try to \"game\" the panel by indiscriminately firing strict reviewers, as the resulting Ghost Vetos will mathematically deadlock your execution.", max_rounds, workspace.display())
+    3. **Execution:** Use your tools to fulfill your role. NEVER use \"run_command\" to execute \"ls\"; you MUST use the native \"list_dir\" tool instead. Maintain high engineering standards.", max_rounds, workspace.display())
 }
 
 #[cfg(test)]
@@ -86,7 +82,7 @@ mod tests {
             "vote": "needs_clarification",
             "agree_notes": "Good variable names",
             "disagree_notes": "Lack of structural breakdown",
-            "overridden_vetoes": []
+            "task_feedback": []
         }"#;
 
         let parsed: ReviewOutput = 
@@ -103,8 +99,8 @@ mod tests {
         let prompt = reviewer_system_prompt(pedant, std::path::Path::new("/tmp/test"));
 
         assert!(prompt.contains("The Pedant"), "Failed to embed persona name");
-        assert!(prompt.contains("Technical"), "Failed to embed persona category context");
-        assert!(prompt.contains("Ghost Vetos"), "Failed to enforce ghostly rules");
+        assert!(prompt.contains("logical consistency"), "Failed to embed persona body context");
+
     }
 
     #[test]
