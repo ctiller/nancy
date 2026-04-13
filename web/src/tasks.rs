@@ -351,27 +351,82 @@ pub fn tasks_view() -> Html {
         }
     });
 
+    fn format_spline(pts: &[(f64, f64)]) -> String {
+        if pts.len() < 2 { return "".to_string(); }
+        
+        let mut ortho_pts: Vec<(f64, f64)> = vec![];
+        ortho_pts.push(pts[0]);
+        for i in 0..pts.len() - 1 {
+            let p0 = pts[i];
+            let p1 = pts[i+1];
+            if (p0.0 - p1.0).abs() > 1.0 && (p0.1 - p1.1).abs() > 1.0 { 
+                // Safely transit across the empty Y mid-point corridor between ranks to guarantee no node collisions
+                let mid_y = (p0.1 + p1.1) / 2.0;
+                ortho_pts.push((p0.0, mid_y));
+                ortho_pts.push((p1.0, mid_y));
+            }
+            ortho_pts.push(p1);
+        }
+        
+        // Strip duplicate vertices
+        let mut clean_pts: Vec<(f64, f64)> = vec![];
+        for pt in ortho_pts {
+            if let Some(last) = clean_pts.last() {
+                if (pt.0 - last.0).abs() < 1.0 && (pt.1 - last.1).abs() < 1.0 {
+                    continue;
+                }
+            }
+            clean_pts.push(pt);
+        }
+        
+        let mut path = format!("M {:.2},{:.2}", clean_pts[0].0, clean_pts[0].1);
+        let radius = 16.0_f64;
+        
+        // Paint lines and interpolate 90-degree bends with beautifully smooth rounded arcs
+        for i in 1..clean_pts.len() - 1 {
+            let p_prev = clean_pts[i-1];
+            let p_curr = clean_pts[i];
+            let p_next = clean_pts[i+1];
+            
+            let d1x = p_prev.0 - p_curr.0;
+            let d1y = p_prev.1 - p_curr.1;
+            let len1 = (d1x*d1x + d1y*d1y).sqrt();
+            
+            let d2x = p_next.0 - p_curr.0;
+            let d2y = p_next.1 - p_curr.1;
+            let len2 = (d2x*d2x + d2y*d2y).sqrt();
+            
+            if len1 < 0.1 || len2 < 0.1 { continue; }
+            
+            let r = radius.min(len1 / 2.0).min(len2 / 2.0);
+            
+            let p_start = (p_curr.0 + (d1x / len1) * r, p_curr.1 + (d1y / len1) * r);
+            let p_end = (p_curr.0 + (d2x / len2) * r, p_curr.1 + (d2y / len2) * r);
+            
+            path.push_str(&format!(" L {:.2},{:.2}", p_start.0, p_start.1));
+            // Intercept vertex with a buttery soft Quadratic bezier corner
+            path.push_str(&format!(" Q {:.2},{:.2} {:.2},{:.2}", p_curr.0, p_curr.1, p_end.0, p_end.1));
+        }
+        
+        let last = clean_pts.last().unwrap();
+        path.push_str(&format!(" L {:.2},{:.2}", last.0, last.1));
+        
+        path
+    }
+
     let edges = rendered_edges.iter().map(|edge| {
         let pts = edge.points.clone();
         let key = format!("{}->{}", edge.source, edge.target);
-        let d = if pts.is_empty() {
-            "".to_string()
-        } else {
-            let mut path = format!("M {} {}", pts[0].0, pts[0].1);
-            for p in pts.iter().skip(1) {
-                path.push_str(&format!(" L {} {}", p.0, p.1));
-            }
-            path
-        };
+        let d = format_spline(&pts);
 
         html! {
             <path
                 key={key}
                 d={d}
-                stroke="rgba(255, 255, 255, 0.25)"
-                stroke-width="2"
+                stroke="rgba(255, 255, 255, 0.4)"
+                stroke-width="2.5"
                 fill="none"
-                stroke-dasharray="4 4"
+                stroke-dasharray="0"
                 style="transition: all 0.35s ease-out;"
             />
         }

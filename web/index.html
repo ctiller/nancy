@@ -9,6 +9,7 @@
     <link data-trunk rel="copy-file" href="../public/nancy-avatar.png" />
     <link data-trunk rel="copy-dir" href="public/monaco" />
     <script src="/monaco/vs/loader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/lib/marked.umd.js"></script>
     <script>
         window.mountMonaco = function(elementId) {
             if (window.require) {
@@ -27,6 +28,112 @@
         window.getMonacoValue = function() {
             return window.monacoEditor ? window.monacoEditor.getValue() : "";
         };
+
+        window.mountReadOnlyMonaco = function(elementId, content, path) {
+            if (window.require) {
+                require.config({ paths: { 'vs': '/monaco/vs' } });
+                require(['vs/editor/editor.main'], function() {
+                    let ext = path.split('.').pop().toLowerCase();
+                    let lang = 'plaintext';
+                    const extToLang = {
+                        'rs': 'rust', 'js': 'javascript', 'ts': 'typescript',
+                        'py': 'python', 'json': 'json', 'yaml': 'yaml', 'yml': 'yaml',
+                        'html': 'html', 'css': 'css', 'md': 'markdown'
+                    };
+                    if (extToLang[ext]) {
+                        lang = extToLang[ext];
+                    }
+                    
+                    if (window.readOnlyMonacoEditor) {
+                        window.readOnlyMonacoEditor.dispose();
+                    }
+                    window.readOnlyMonacoEditor = monaco.editor.create(document.getElementById(elementId), {
+                        value: content,
+                        language: lang,
+                        theme: 'vs-dark',
+                        minimap: { enabled: false },
+                        automaticLayout: true,
+                        readOnly: true
+                    });
+                });
+            }
+        };
+        
+        window.parseMarkdown = function(md) {
+            return typeof marked !== 'undefined' ? marked.parse(md) : md;
+        };
+
+        document.addEventListener('DOMContentLoaded', () => {
+            const popup = document.createElement('div');
+            popup.id = 'comment-popup';
+            popup.style.cssText = 'display:none; position:absolute; z-index:9999; background:var(--accent-cyan, #00BCD4); color:#000; padding:6px 12px; border-radius:4px; font-weight:bold; cursor:pointer; box-shadow:0 4px 12px rgba(0,0,0,0.5); pointer-events:auto; font-family:sans-serif; text-transform:uppercase; font-size:0.8rem;';
+            popup.innerHTML = '+ Add Comment';
+            document.body.appendChild(popup);
+
+            let currentSelection = '';
+
+            document.addEventListener('selectionchange', () => {
+                const sel = window.getSelection();
+                if (!sel || sel.isCollapsed) {
+                    popup.style.display = 'none';
+                    return;
+                }
+                currentSelection = sel.toString().trim();
+            });
+
+            document.addEventListener('mouseup', (e) => {
+                if (e.target === popup) return;
+                
+                const sel = window.getSelection();
+                if (!sel || sel.isCollapsed) {
+                    popup.style.display = 'none';
+                    return;
+                }
+                
+                popup.style.left = e.pageX + 'px';
+                popup.style.top = (e.pageY - 35) + 'px';
+                popup.style.display = 'block';
+            });
+
+            popup.addEventListener('mousedown', (e) => {
+                e.preventDefault();
+            });
+
+            popup.addEventListener('click', () => {
+                popup.style.display = 'none';
+                if (!currentSelection) return;
+                
+                const comment = window.prompt("Enter your comment/task for this selection:");
+                if (!comment || comment.trim() === '') return;
+                
+                const fullDesc = `Concerning selection:\n\n\`\`\`\n${currentSelection}\n\`\`\`\n\nComment: ${comment}`;
+                
+                // If there is an active monacoEditor for responding to tasks/reviews, concatenate it there
+                if (window.monacoEditor && document.getElementById('monaco-container') && document.getElementById('monaco-container').contains(window.monacoEditor.getDomNode())) {
+                    const currentVal = window.monacoEditor.getValue();
+                    const prefix = currentVal.trim().length > 0 ? '\n\n' : '';
+                    window.monacoEditor.setValue(currentVal + prefix + fullDesc);
+                    
+                    window.getSelection().removeAllRanges();
+                    return;
+                }
+                
+                // Otherwise fallback to creating a standalone agent task
+                fetch('/api/tasks', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        requestor: 'Admin Web UI',
+                        description: fullDesc
+                    })
+                }).then(res => {
+                    if(res.ok) alert('Task created successfully!');
+                    else alert('Failed to create task.');
+                }).catch(err => alert('Error: ' + err));
+                
+                window.getSelection().removeAllRanges();
+            });
+        });
     </script>
 </head>
 <body>

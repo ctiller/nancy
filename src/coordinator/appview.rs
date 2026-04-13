@@ -342,30 +342,49 @@ impl AppView {
             }
         }
 
+        let mut existing_node_ids = std::collections::HashSet::new();
+        for node in &nodes {
+            existing_node_ids.insert(node.id.clone());
+        }
+
         for (id, payload) in &self.active_asks {
-            nodes.push(schema::TopologyNode {
-                id: id.clone(),
-                node_type: schema::NodeType::Ask,
-                name: payload.question.clone(),
-                active_agent: Some(payload.agent_path.clone()),
-                is_completed: false,
-                x: 0.0,
-                y: 0.0,
-                cost_usd: 0.0,
-            });
+            if !existing_node_ids.contains(id) {
+                nodes.push(schema::TopologyNode {
+                    id: id.clone(),
+                    node_type: schema::NodeType::Ask,
+                    name: payload.question.clone(),
+                    active_agent: Some(payload.agent_path.clone()),
+                    is_completed: false,
+                    x: 0.0,
+                    y: 0.0,
+                    cost_usd: 0.0,
+                });
+                existing_node_ids.insert(id.clone());
+            } else {
+                if let Some(n) = nodes.iter_mut().find(|n| n.id == *id) {
+                    n.active_agent = Some(payload.agent_path.clone());
+                }
+            }
         }
 
         for (id, payload) in &self.active_plan_reviews {
-            nodes.push(schema::TopologyNode {
-                id: id.clone(),
-                node_type: schema::NodeType::Plan, // mapping to Plan type for Topology viewing
-                name: payload.task_name.clone(),
-                active_agent: Some(payload.agent_path.clone()),
-                is_completed: false,
-                x: 0.0,
-                y: 0.0,
-                cost_usd: 0.0,
-            });
+            if !existing_node_ids.contains(id) {
+                nodes.push(schema::TopologyNode {
+                    id: id.clone(),
+                    node_type: schema::NodeType::Plan, // mapping to Plan type for Topology viewing
+                    name: payload.task_name.clone(),
+                    active_agent: Some(payload.agent_path.clone()),
+                    is_completed: false,
+                    x: 0.0,
+                    y: 0.0,
+                    cost_usd: 0.0,
+                });
+                existing_node_ids.insert(id.clone());
+            } else {
+                if let Some(n) = nodes.iter_mut().find(|n| n.id == *id) {
+                    n.active_agent = Some(payload.agent_path.clone());
+                }
+            }
         }
 
         // Layout evaluation

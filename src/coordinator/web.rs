@@ -424,11 +424,77 @@ async fn get_api_tasks_evaluations(
     .into_response()
 }
 
+#[derive(serde::Serialize)]
+struct FileNode {
+    name: String,
+    path: String,
+    is_dir: bool,
+}
+
 async fn api_get_repo_tree(
-    axum::extract::Query(_params): axum::extract::Query<std::collections::HashMap<String, String>>,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
 ) -> impl IntoResponse {
-    // let _branch = _params.get("branch").cloned().unwrap_or_else(|| "main".to_string());
-    axum::Json(serde_json::json!([]))
+    let branch = params.get("branch").cloned().unwrap_or_else(|| "master".to_string());
+    let dir = params.get("dir").cloned().unwrap_or_else(|| "".to_string());
+    let root = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    
+    let nodes = tokio::task::spawn_blocking(move || -> Vec<FileNode> {
+        let mut result = Vec::new();
+        let repo = match git2::Repository::discover(&root) {
+            Ok(r) => r,
+            Err(_) => return result,
+        };
+        
+        let obj = match repo.revparse_single(&branch) {
+            Ok(o) => o,
+            Err(_) => return result,
+        };
+        let commit = match obj.peel_to_commit() {
+            Ok(c) => c,
+            Err(_) => return result,
+        };
+        let tree = match commit.tree() {
+            Ok(t) => t,
+            Err(_) => return result,
+        };
+        
+        let target_tree = if dir.is_empty() {
+            tree
+        } else {
+            let entry = match tree.get_path(&std::path::Path::new(&dir)) {
+                Ok(e) => e,
+                Err(_) => return result,
+            };
+            let obj = match entry.to_object(&repo) {
+                Ok(o) => o,
+                Err(_) => return result,
+            };
+            match obj.into_tree() {
+                Ok(t) => t,
+                Err(_) => return result,
+            }
+        };
+
+        for entry in target_tree.iter() {
+            let is_dir = entry.kind() == Some(git2::ObjectType::Tree);
+            let name = entry.name().unwrap_or("").to_string();
+            let path = if dir.is_empty() { name.clone() } else { format!("{}/{}", dir, name) };
+            result.push(FileNode { name, path, is_dir });
+        }
+        
+        result.sort_by(|a, b| {
+            if a.is_dir == b.is_dir {
+                a.name.cmp(&b.name)
+            } else if a.is_dir {
+                std::cmp::Ordering::Less
+            } else {
+                std::cmp::Ordering::Greater
+            }
+        });
+        result
+    }).await.unwrap_or_default();
+
+    axum::Json(nodes)
 }
 
 async fn api_get_repo_branches() -> impl IntoResponse {
@@ -445,8 +511,27 @@ async fn api_get_repo_branches() -> impl IntoResponse {
     axum::Json(Vec::<String>::new()).into_response()
 }
 
-async fn api_read_file_text() -> impl IntoResponse {
-    axum::Json(serde_json::json!({ "content": "" }))
+async fn api_read_file_text(
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> impl IntoResponse {
+    let branch = params.get("branch").cloned().unwrap_or_else(|| "master".to_string());
+    let path = params.get("path").cloned().unwrap_or_else(|| "".to_string());
+    let root = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    
+    let content = tokio::task::spawn_blocking(move || -> Option<String> {
+        let repo = git2::Repository::discover(&root).ok()?;
+        let obj = repo.revparse_single(&branch).ok()?;
+        let commit = obj.peel_to_commit().ok()?;
+        let tree = commit.tree().ok()?;
+        let entry = tree.get_path(&std::path::Path::new(&path)).ok()?;
+        let blob = entry.to_object(&repo).ok()?.into_blob().ok()?;
+        String::from_utf8(blob.content().to_vec()).ok()
+    }).await.unwrap_or(None);
+
+    match content {
+        Some(text) => (StatusCode::OK, text).into_response(),
+        None => (StatusCode::NOT_FOUND, "Not found or not valid utf-8").into_response(),
+    }
 }
 
 async fn api_submit_task(
@@ -697,8 +782,9 @@ mod tests {
         let r2 = api_get_repo_branches().await.into_response();
         assert!(r2.status() == StatusCode::OK || r2.status() == StatusCode::INTERNAL_SERVER_ERROR);
 
-        let r3 = api_read_file_text().await.into_response();
-        assert_eq!(r3.status(), StatusCode::OK);
+        let q2 = axum::extract::Query(std::collections::HashMap::new());
+        let r3 = api_read_file_text(q2).await.into_response();
+        assert_eq!(r3.status(), StatusCode::NOT_FOUND);
     }
 
     #[tokio::test]

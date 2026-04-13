@@ -1,6 +1,15 @@
 use serde::{Deserialize, Serialize};
 use yew::prelude::*;
 
+#[wasm_bindgen::prelude::wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen::prelude::wasm_bindgen(js_namespace = window)]
+    fn mountReadOnlyMonaco(id: &str, content: &str, path: &str);
+
+    #[wasm_bindgen::prelude::wasm_bindgen(js_namespace = window)]
+    fn parseMarkdown(md: &str) -> String;
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct FileNode {
     pub name: String,
@@ -187,6 +196,19 @@ pub fn file_inspector(props: &FileInspectorProps) -> Html {
         });
     }
 
+    {
+        let content_opt = file_content.clone();
+        let path_opt = props.active_file.clone();
+        use_effect_with((content_opt.clone(), path_opt.clone()), move |(content, path)| {
+            if let (Some(c), Some(p)) = (&**content, path) {
+                if !p.to_lowercase().ends_with(".md") && !p.to_lowercase().ends_with(".png") && !p.to_lowercase().ends_with(".jpg") && !p.to_lowercase().ends_with(".svg") {
+                    mountReadOnlyMonaco("repo-monaco", c, p);
+                }
+            }
+            || ()
+        });
+    }
+
     html! {
         if let Some(path) = &props.active_file {
             if path.to_lowercase().ends_with(".png") || path.to_lowercase().ends_with(".jpg") || path.to_lowercase().ends_with(".svg") {
@@ -196,9 +218,13 @@ pub fn file_inspector(props: &FileInspectorProps) -> Html {
             } else if let Some(err) = &*error {
                 <div style="padding: 20px; color: #f43f5e;">{"Fail: "}{err}</div>
             } else if let Some(content) = &*file_content {
-                <div style="padding: 16px; font-family: monospace; font-size: 0.9rem;">
-                    {yew::Html::from_html_unchecked(AttrValue::from(content.clone()))}
-                </div>
+                if path.to_lowercase().ends_with(".md") {
+                    <div style="padding: 16px; font-family: sans-serif; font-size: 1rem; color: var(--text-main); height: 100%; overflow-y: auto;" class="markdown-body">
+                        {yew::Html::from_html_unchecked(AttrValue::from(parseMarkdown(content)))}
+                    </div>
+                } else {
+                    <div id="repo-monaco" style="height: 100%; min-height: 500px; width: 100%;"></div>
+                }
             } else {
                 <div style="padding: 20px;">{"Loading..."}</div>
             }
