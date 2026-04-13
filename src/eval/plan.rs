@@ -3,8 +3,11 @@ use anyhow::{Context, Result, bail};
 use tokio::fs;
 
 pub async fn parse_eval_definition(path: &std::path::Path) -> Result<EvalDefinition> {
-    let def: EvalDefinition =
-        serde_yaml::from_slice(&fs::read(path).await.context("Failed to read eval yaml mapping")?)?;
+    let def: EvalDefinition = serde_yaml::from_slice(
+        &fs::read(path)
+            .await
+            .context("Failed to read eval yaml mapping")?,
+    )?;
     if def.action != "plan" {
         bail!("Only 'plan' supported");
     }
@@ -34,7 +37,9 @@ pub async fn eval_plan(path: &str, output_path: &std::path::Path) -> Result<()> 
             if final_plan_doc.is_none() {
                 if let Some(plan_path_str) = &payload.plan {
                     if let Ok(content) = tokio::fs::read_to_string(plan_path_str).await {
-                        if let Ok(doc) = serde_json::from_str::<crate::schema::task::TddDocument>(&content) {
+                        if let Ok(doc) =
+                            serde_json::from_str::<crate::schema::task::TddDocument>(&content)
+                        {
                             final_plan_doc = Some(doc);
                         }
                     }
@@ -46,7 +51,11 @@ pub async fn eval_plan(path: &str, output_path: &std::path::Path) -> Result<()> 
     let recommended_tasks = if tasks.is_empty() { None } else { Some(tasks) };
     let final_plan = final_plan_doc;
 
-    let result = crate::eval::EvalResult { final_plan, recommended_tasks, traces: runner.extract_traces() };
+    let result = crate::eval::EvalResult {
+        final_plan,
+        recommended_tasks,
+        traces: runner.extract_traces(),
+    };
 
     let result_yaml = serde_yaml::to_string(&result)?;
     tokio::fs::write(output_path, result_yaml).await?;
@@ -69,13 +78,17 @@ mod tests {
         let plan_file = td.path().join("def.yaml");
         let yaml = "action: implement\ntask_description: foo\ncommits: []";
         std::fs::write(&plan_file, yaml).unwrap();
-        
+
         let res = tokio::runtime::Runtime::new().unwrap().block_on(eval_plan(
             plan_file.to_str().unwrap(),
             &td.path().join("out.yaml"),
         ));
         assert!(res.is_err());
-        assert!(res.unwrap_err().to_string().contains("Only 'plan' supported"));
+        assert!(
+            res.unwrap_err()
+                .to_string()
+                .contains("Only 'plan' supported")
+        );
     }
 
     #[test]
@@ -84,7 +97,7 @@ mod tests {
         let plan_file = td.path().join("invalid.yaml");
         let yaml = "action: plan\ncommits: [{broken_list:"; // Malformed structurally
         std::fs::write(&plan_file, yaml).unwrap();
-        
+
         let res = tokio::runtime::Runtime::new().unwrap().block_on(eval_plan(
             plan_file.to_str().unwrap(),
             &td.path().join("out.yaml"),

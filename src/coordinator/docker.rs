@@ -5,10 +5,10 @@ use bollard::query_parameters::{
     CreateContainerOptions, CreateImageOptions, StartContainerOptions,
 };
 use futures_util::stream::StreamExt;
-use std::collections::{HashMap, HashSet};
 use rand::Rng;
-use tokio::fs;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use tokio::fs;
 
 use crate::coordinator::appview::AppView;
 use crate::schema::identity_config::Identity;
@@ -30,7 +30,6 @@ fn build_worker_env_vars(coordinator_did: &str, human_did: Option<&str>) -> Vec<
     env_vars
 }
 
-
 pub async fn build_container_config(
     rt_image: &str,
     target_path: &Path,
@@ -43,14 +42,14 @@ pub async fn build_container_config(
         .canonicalize()
         .map(|p| p.display().to_string())
         .unwrap_or_else(|_| target_path.display().to_string());
-        
+
     let host_workdir_str = host_workdir
         .canonicalize()
         .map(|p| p.display().to_string())
         .unwrap_or_else(|_| host_workdir.display().to_string());
 
     // To support git worktree absolute path references in sandboxes securely,
-    // we must mount the host workdir natively. To enforce strict sandboxing, 
+    // we must mount the host workdir natively. To enforce strict sandboxing,
     // we mount the root repo read-only (so agents cannot touch other host files),
     // and we predictably override `.git` and the specific worktree as read-write!
     let mut binds = vec![
@@ -60,8 +59,15 @@ pub async fn build_container_config(
     ];
 
     let mut env_vars = env_vars;
-    env_vars.push(format!("NANCY_{}_SOCKET_PATH=/tmp/nancy_sockets/{}/{}.sock", agent_type.to_uppercase(), worker_did, agent_type));
-    env_vars.push("NANCY_COORDINATOR_SOCKET_PATH=/tmp/nancy_sockets/coordinator/coordinator.sock".to_string());
+    env_vars.push(format!(
+        "NANCY_{}_SOCKET_PATH=/tmp/nancy_sockets/{}/{}.sock",
+        agent_type.to_uppercase(),
+        worker_did,
+        agent_type
+    ));
+    env_vars.push(
+        "NANCY_COORDINATOR_SOCKET_PATH=/tmp/nancy_sockets/coordinator/coordinator.sock".to_string(),
+    );
     env_vars.push("SSL_CERT_DIR=/etc/ssl/certs".to_string());
     env_vars.push("SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt".to_string());
 
@@ -70,7 +76,7 @@ pub async fn build_container_config(
         "{}/.nancy/sockets/{}:/tmp/nancy_sockets/{}:rw",
         host_workdir_str, worker_did, worker_did
     ));
-    
+
     // Shared isolated socket tunnel for coordinator UDS (ro) bounded via explicit short path
     binds.push(format!(
         "{}/.nancy/sockets/coordinator:/tmp/nancy_sockets/coordinator:ro",
@@ -85,10 +91,34 @@ pub async fn build_container_config(
         ..Default::default()
     };
 
-    let uid = String::from_utf8(tokio::process::Command::new("id").arg("-u").output().await.unwrap().stdout).unwrap().trim().to_string();
-    let gid = String::from_utf8(tokio::process::Command::new("id").arg("-g").output().await.unwrap().stdout).unwrap().trim().to_string();
+    let uid = String::from_utf8(
+        tokio::process::Command::new("id")
+            .arg("-u")
+            .output()
+            .await
+            .unwrap()
+            .stdout,
+    )
+    .unwrap()
+    .trim()
+    .to_string();
+    let gid = String::from_utf8(
+        tokio::process::Command::new("id")
+            .arg("-g")
+            .output()
+            .await
+            .unwrap()
+            .stdout,
+    )
+    .unwrap()
+    .trim()
+    .to_string();
 
-    let cli_cmd = if agent_type == "grinder" { "grind" } else { "dreamer" };
+    let cli_cmd = if agent_type == "grinder" {
+        "grind"
+    } else {
+        "dreamer"
+    };
     let cmd_str = format!(
         "/nancy {cmd} > /tmp/nancy_sockets/{worker}/container.log 2>&1; echo $? > /tmp/nancy_sockets/{worker}/exit_code",
         cmd = cli_cmd,
@@ -122,7 +152,8 @@ pub struct DockerOrchestrator {
 
 impl DockerOrchestrator {
     pub fn new(workdir: PathBuf) -> Result<Self> {
-        let docker = Docker::connect_with_local_defaults().context("Failed to connect to local Docker")?;
+        let docker =
+            Docker::connect_with_local_defaults().context("Failed to connect to local Docker")?;
         Ok(Self {
             docker,
             workdir,
@@ -139,7 +170,15 @@ impl DockerOrchestrator {
             tracing::info!("Cleaning up container {} gracefully...", name);
             let docker = self.docker.clone();
             futures.push(tokio::spawn(async move {
-                let _ = docker.remove_container(&name, Some(bollard::query_parameters::RemoveContainerOptions { force: true, ..Default::default() })).await;
+                let _ = docker
+                    .remove_container(
+                        &name,
+                        Some(bollard::query_parameters::RemoveContainerOptions {
+                            force: true,
+                            ..Default::default()
+                        }),
+                    )
+                    .await;
             }));
         }
         for f in futures {
@@ -147,11 +186,20 @@ impl DockerOrchestrator {
         }
     }
 
-    pub async fn sync_deployments(&mut self, _appview: &AppView, identity: &Identity) -> Vec<(crate::schema::task::AgentCrashReportPayload, String)> {
+    pub async fn sync_deployments(
+        &mut self,
+        _appview: &AppView,
+        identity: &Identity,
+    ) -> Vec<(crate::schema::task::AgentCrashReportPayload, String)> {
         let root_did = identity.get_did_owner().did.clone();
 
         let (workers, dreamer, human) = match identity {
-            Identity::Coordinator { workers, dreamer, human, .. } => (workers.clone(), dreamer.clone(), human.clone()),
+            Identity::Coordinator {
+                workers,
+                dreamer,
+                human,
+                ..
+            } => (workers.clone(), dreamer.clone(), human.clone()),
             _ => return Vec::new(), // Grinders don't launch docker containers
         };
 
@@ -170,7 +218,7 @@ impl DockerOrchestrator {
         if !self.has_spawned_pull {
             self.has_spawned_pull = true;
             let docker_clone = self.docker.clone();
-            
+
             // Check if image exists cleanly
             if docker_clone.inspect_image(&rt_image).await.is_err() {
                 tokio::spawn(async move {
@@ -195,7 +243,7 @@ impl DockerOrchestrator {
         let exe_path = std::env::var("NANCY_E2E_EXECUTABLE")
             .map(PathBuf::from)
             .unwrap_or_else(|_| std::env::current_exe().unwrap());
-            
+
         let mut cached_tar_payload = None;
         if let Ok(exe_data) = fs::read(&exe_path).await {
             let mut tar_builder = tar::Builder::new(Vec::new());
@@ -225,48 +273,56 @@ impl DockerOrchestrator {
             } else {
                 container_name.replace("nancy-worker-", "") // legacy boundary
             };
-            
-            // With auto_remove: true, the docker daemon will implicitly destroy the container the 
+
+            // With auto_remove: true, the docker daemon will implicitly destroy the container the
             // instant it exits. Therefore, if inspect_container returns Err, we evaluate its volume logs natively!
             if let Ok(_inspect) = self.docker.inspect_container(container_name, None).await {
                 // Container is actively breathing
             } else {
                 to_remove.push(container_name.clone());
-                
+
                 let worker_sock_dir = self.workdir.join(".nancy").join("sockets").join(&did);
                 let exit_code_path = worker_sock_dir.join("exit_code");
                 let log_path = worker_sock_dir.join("container.log");
-                
+
                 let mut is_crash = true;
                 if let Ok(code_str) = fs::read_to_string(&exit_code_path).await {
                     if code_str.trim() == "0" {
                         is_crash = false;
                     }
                 }
-                
+
                 if is_crash {
-                    let logs = fs::read_to_string(&log_path).await.unwrap_or_else(|_| "No host logs found.".to_string());
-                    
-                    let entry = self.crash_backoffs.entry(container_name.clone()).or_insert(ContainerState {
-                        name: container_name.clone(),
-                        failures: 0,
-                        next_restart_allowed_at: None,
-                    });
+                    let logs = fs::read_to_string(&log_path)
+                        .await
+                        .unwrap_or_else(|_| "No host logs found.".to_string());
+
+                    let entry = self.crash_backoffs.entry(container_name.clone()).or_insert(
+                        ContainerState {
+                            name: container_name.clone(),
+                            failures: 0,
+                            next_restart_allowed_at: None,
+                        },
+                    );
                     entry.failures += 1;
-                    
+
                     let base_delay = 5_u64;
                     let max_delay = 300_u64;
                     let mut delay = base_delay * (2_u64.pow((entry.failures - 1).min(6) as u32));
                     delay = std::cmp::min(delay, max_delay);
-                    
+
                     let jitter = rand::thread_rng().gen_range(0..=std::cmp::max(delay / 4, 1));
                     let total_delay = delay + jitter;
                     let now = std::time::Instant::now();
-                    entry.next_restart_allowed_at = Some(now + std::time::Duration::from_secs(total_delay));
-                    
-                    let timestamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+                    entry.next_restart_allowed_at =
+                        Some(now + std::time::Duration::from_secs(total_delay));
+
+                    let timestamp = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap()
+                        .as_secs();
                     let log_filename = format!("nancy-worker-{}-crash-{}.log", did, timestamp);
-                    
+
                     crash_reports.push((
                         crate::schema::task::AgentCrashReportPayload {
                             crashing_agent_did: did.clone(),
@@ -274,14 +330,19 @@ impl DockerOrchestrator {
                             next_restart_at_unix: Some(timestamp + total_delay),
                             failures: Some(entry.failures),
                         },
-                        logs
+                        logs,
                     ));
-                    
-                    tracing::warn!("Worker {} crashed and was auto-removed! failures={} backoff={}s", did, entry.failures, total_delay);
+
+                    tracing::warn!(
+                        "Worker {} crashed and was auto-removed! failures={} backoff={}s",
+                        did,
+                        entry.failures,
+                        total_delay
+                    );
                 }
             }
         }
-        
+
         for name in to_remove {
             self.active_containers.remove(&name);
         }
@@ -306,21 +367,32 @@ impl DockerOrchestrator {
                     }
                 }
             }
-            
+
             let nancy_worktrees = self.workdir.join(".nancy").join("worktrees");
-            fs::create_dir_all(&nancy_worktrees).await.unwrap_or_default();
+            fs::create_dir_all(&nancy_worktrees)
+                .await
+                .unwrap_or_default();
             let target_path = nancy_worktrees.join(format!("worker-{}", worker.did));
 
             if !target_path.exists() {
                 let branch_name = format!("refs/heads/nancy/workers/{}", worker.did);
-                
+
                 // Natively ensure the target branch exists organically resolving empty repository crashes gracefully!
                 if let Ok(repo) = git2::Repository::open(&self.workdir) {
                     if repo.find_reference(&branch_name).is_err() {
-                        if let Ok(sig) = git2::Signature::now("Nancy Coordinator", "coordinator@local") {
+                        if let Ok(sig) =
+                            git2::Signature::now("Nancy Coordinator", "coordinator@local")
+                        {
                             if let Ok(tree_id) = repo.treebuilder(None).and_then(|tb| tb.write()) {
                                 if let Ok(tree) = repo.find_tree(tree_id) {
-                                    let _ = repo.commit(Some(&branch_name), &sig, &sig, "Init Worker Bounds", &tree, &[]);
+                                    let _ = repo.commit(
+                                        Some(&branch_name),
+                                        &sig,
+                                        &sig,
+                                        "Init Worker Bounds",
+                                        &tree,
+                                        &[],
+                                    );
                                 }
                             }
                         }
@@ -329,7 +401,8 @@ impl DockerOrchestrator {
 
                 let shell_cmd = format!(
                     "git worktree prune && git worktree add -f {} {}",
-                    target_path.display(), branch_name
+                    target_path.display(),
+                    branch_name
                 );
 
                 let status = tokio::process::Command::new("sh")
@@ -356,20 +429,26 @@ impl DockerOrchestrator {
             let worker = worker.clone();
             let container_name_clone = container_name.clone();
             let human_clone = human.clone();
-            
-            deployment_tasks.push(tokio::spawn(async move {
 
+            deployment_tasks.push(tokio::spawn(async move {
                 // Provision socket directory boundaries perfectly natively avoiding Docker Daemon ROOT ownership mapping escalations natively
                 let worker_socket_dir = workdir.join(".nancy").join("sockets").join(&worker.did);
-                fs::create_dir_all(&worker_socket_dir).await.unwrap_or_default();
+                fs::create_dir_all(&worker_socket_dir)
+                    .await
+                    .unwrap_or_default();
                 let _ = fs::remove_file(worker_socket_dir.join("grinder.sock")).await;
-                
-                let coordinator_socket_dir = workdir.join(".nancy").join("sockets").join("coordinator");
-                fs::create_dir_all(&coordinator_socket_dir).await.unwrap_or_default();
+
+                let coordinator_socket_dir =
+                    workdir.join(".nancy").join("sockets").join("coordinator");
+                fs::create_dir_all(&coordinator_socket_dir)
+                    .await
+                    .unwrap_or_default();
 
                 // Provision identity.json explicitly mapping the grinder subset into its context
                 let worker_nancy_dir = target_path.join(".nancy");
-                fs::create_dir_all(&worker_nancy_dir).await.unwrap_or_default();
+                fs::create_dir_all(&worker_nancy_dir)
+                    .await
+                    .unwrap_or_default();
                 let worker_identity = if agent_type == "dreamer" {
                     Identity::Dreamer(worker.clone())
                 } else {
@@ -378,11 +457,21 @@ impl DockerOrchestrator {
                 let _ = fs::write(
                     worker_nancy_dir.join("identity.json"),
                     serde_json::to_string_pretty(&worker_identity).unwrap(),
-                ).await;
+                )
+                .await;
 
                 // Run container
-                let env_vars = build_worker_env_vars(&root_did, human_clone.as_ref().map(|h| h.did.as_str()));
-                let config = build_container_config("rust:latest", &target_path, &workdir, &worker.did, env_vars, &agent_type).await;
+                let env_vars =
+                    build_worker_env_vars(&root_did, human_clone.as_ref().map(|h| h.did.as_str()));
+                let config = build_container_config(
+                    "rust:latest",
+                    &target_path,
+                    &workdir,
+                    &worker.did,
+                    env_vars,
+                    &agent_type,
+                )
+                .await;
 
                 match docker
                     .create_container(
@@ -400,12 +489,23 @@ impl DockerOrchestrator {
                                 path: "/".to_string(),
                                 ..Default::default()
                             };
-                            let stream = futures_util::stream::iter(vec![bytes::Bytes::from(tar_payload.clone())]);
+                            let stream = futures_util::stream::iter(vec![bytes::Bytes::from(
+                                tar_payload.clone(),
+                            )]);
                             #[allow(deprecated)]
-                            let _ = docker.upload_to_container_streaming(&response.id, Some(upload_opts), stream).await;
+                            let _ = docker
+                                .upload_to_container_streaming(
+                                    &response.id,
+                                    Some(upload_opts),
+                                    stream,
+                                )
+                                .await;
                         }
 
-                        if let Err(e) = docker.start_container(&response.id, None::<StartContainerOptions>).await {
+                        if let Err(e) = docker
+                            .start_container(&response.id, None::<StartContainerOptions>)
+                            .await
+                        {
                             tracing::error!("Failed to start container {}: {}", response.id, e);
                             None
                         } else {
@@ -417,8 +517,19 @@ impl DockerOrchestrator {
                     Err(e) => {
                         if e.to_string().contains("409") {
                             // Conflict gracefully drops previously orphaned executing boundaries before recreating them
-                            tracing::warn!("Container {} orphaned, pruning and re-evaluating gracefully.", container_name_clone);
-                            let _ = docker.remove_container(&container_name_clone, Some(bollard::query_parameters::RemoveContainerOptions { force: true, ..Default::default() })).await;
+                            tracing::warn!(
+                                "Container {} orphaned, pruning and re-evaluating gracefully.",
+                                container_name_clone
+                            );
+                            let _ = docker
+                                .remove_container(
+                                    &container_name_clone,
+                                    Some(bollard::query_parameters::RemoveContainerOptions {
+                                        force: true,
+                                        ..Default::default()
+                                    }),
+                                )
+                                .await;
                             None
                         } else {
                             tracing::error!("Failed to build container node natively: {}", e);
@@ -428,13 +539,13 @@ impl DockerOrchestrator {
                 }
             }));
         }
-        
+
         for task in deployment_tasks {
             if let Ok(Some(name)) = task.await {
                 self.active_containers.insert(name);
             }
         }
-        
+
         crash_reports
     }
 }
@@ -448,11 +559,19 @@ impl Drop for DockerOrchestrator {
             let docker_clone = docker.clone();
             let _ = std::thread::spawn(move || {
                 let rt = tokio::runtime::Runtime::new().unwrap_or_else(|_| {
-                    tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap()
+                    tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build()
+                        .unwrap()
                 });
                 rt.block_on(async {
-                    let opts = RemoveContainerOptions { force: true, ..Default::default() };
-                    let _ = docker_clone.remove_container(&container_id, Some(opts)).await;
+                    let opts = RemoveContainerOptions {
+                        force: true,
+                        ..Default::default()
+                    };
+                    let _ = docker_clone
+                        .remove_container(&container_id, Some(opts))
+                        .await;
                 });
             });
         }

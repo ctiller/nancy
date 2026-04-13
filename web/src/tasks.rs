@@ -1,5 +1,5 @@
+use schema::{NodeType, TopologyEdge, TopologyNode, TopologyResponse};
 use yew::prelude::*;
-use schema::{TopologyResponse, TopologyNode, TopologyEdge, NodeType};
 
 const NODE_WIDTH: f64 = 280.0;
 const NODE_HEIGHT: f64 = 120.0;
@@ -27,20 +27,24 @@ pub fn tasks_view() -> Html {
 
             wasm_bindgen_futures::spawn_local(async move {
                 loop {
-                    if cancel_clone.get() { break; }
+                    if cancel_clone.get() {
+                        break;
+                    }
                     let url = if let Some(lv) = last_version {
                         format!("/api/tasks/topology?last_version={}", lv)
                     } else {
                         "/api/tasks/topology".to_string()
                     };
-                    
+
                     let mut req = gloo_net::http::Request::get(&url);
                     if let Some(sig) = &signal {
                         req = req.abort_signal(Some(sig));
                     }
-                    
+
                     if let Ok(resp) = req.send().await {
-                        if cancel_clone.get() { break; }
+                        if cancel_clone.get() {
+                            break;
+                        }
                         if resp.ok() {
                             if let Ok(data) = resp.json::<TopologyResponse>().await {
                                 last_version = Some(data.version);
@@ -51,7 +55,9 @@ pub fn tasks_view() -> Html {
                             }
                         }
                     }
-                    if cancel_clone.get() { break; }
+                    if cancel_clone.get() {
+                        break;
+                    }
                     gloo_timers::future::sleep(std::time::Duration::from_secs(2)).await;
                 }
             });
@@ -67,26 +73,42 @@ pub fn tasks_view() -> Html {
     {
         let nodes_state = rendered_nodes.clone();
         let statuses = active_agent_statuses.clone();
-        let active_dids: Vec<String> = rendered_nodes.iter()
-            .filter_map(|n| if !n.is_completed { n.active_agent.clone() } else { None })
+        let active_dids: Vec<String> = rendered_nodes
+            .iter()
+            .filter_map(|n| {
+                if !n.is_completed {
+                    n.active_agent.clone()
+                } else {
+                    None
+                }
+            })
             .collect();
         let active_dids_key = active_dids.join(",");
         use_effect_with(active_dids_key, move |_| {
-            let active_dids: Vec<String> = nodes_state.iter()
-                .filter_map(|n| if !n.is_completed { n.active_agent.clone() } else { None })
+            let active_dids: Vec<String> = nodes_state
+                .iter()
+                .filter_map(|n| {
+                    if !n.is_completed {
+                        n.active_agent.clone()
+                    } else {
+                        None
+                    }
+                })
                 .collect();
-                
+
             let cancelled = std::rc::Rc::new(std::cell::Cell::new(false));
             let cancel_clone = cancelled.clone();
-            
+
             let (tx, mut rx) = futures::channel::mpsc::unbounded::<(String, String)>();
-            
+
             let statuses_clone = statuses.clone();
             wasm_bindgen_futures::spawn_local(async move {
                 let mut current_map = std::collections::HashMap::new();
                 use futures::StreamExt;
                 while let Some((did, status)) = rx.next().await {
-                    if cancel_clone.get() { break; }
+                    if cancel_clone.get() {
+                        break;
+                    }
                     current_map.insert(did, status);
                     statuses_clone.set(current_map.clone());
                 }
@@ -94,57 +116,67 @@ pub fn tasks_view() -> Html {
 
             let mut controllers = Vec::new();
             if !active_dids.is_empty() {
-                 for did in active_dids {
-                     let tx = tx.clone();
-                     let cancel = cancelled.clone();
-                     let abort_controller = web_sys::AbortController::new().ok();
-                     let signal = abort_controller.as_ref().map(|ac| ac.signal());
-                     
-                     if let Some(ref ac) = abort_controller {
-                         controllers.push(ac.clone());
-                     }
+                for did in active_dids {
+                    let tx = tx.clone();
+                    let cancel = cancelled.clone();
+                    let abort_controller = web_sys::AbortController::new().ok();
+                    let signal = abort_controller.as_ref().map(|ac| ac.signal());
 
-                     wasm_bindgen_futures::spawn_local(async move {
-                         let mut last_update: Option<u64> = None;
-                         loop {
-                             if cancel.get() { break; }
-                             let url = if let Some(lu) = last_update {
-                                 format!("/api/grinders/{}/state?last_update={}", did, lu)
-                             } else {
-                                 format!("/api/grinders/{}/state", did)
-                             };
-                             
-                             let mut req = gloo_net::http::Request::get(&url);
-                             if let Some(sig) = &signal {
-                                 req = req.abort_signal(Some(sig));
-                             }
-                             
-                             if let Ok(resp) = req.send().await {
-                                 if cancel.get() { break; }
-                                 if resp.ok() {
-                                     if let Ok(json) = resp.json::<serde_json::Value>().await {
-                                         if let (Some(new_update), Some(frame_val)) = (
-                                             json.get("update_number").and_then(|v| v.as_u64()),
-                                             json.get("tree")
-                                         ) {
-                                             if Some(new_update) != last_update {
-                                                 if let Ok(frame) = serde_json::from_value::<schema::SerializedFrame>(frame_val.clone()) {
-                                                     last_update = Some(new_update);
-                                                     if let Some(st) = frame.rollup.or(frame.status) {
-                                                         let _ = tx.unbounded_send((did.clone(), st));
-                                                     }
-                                                 }
-                                             }
-                                         }
-                                     }
-                                 }
-                             }
-                             gloo_timers::future::sleep(std::time::Duration::from_millis(500)).await;
-                         }
-                     });
-                 }
+                    if let Some(ref ac) = abort_controller {
+                        controllers.push(ac.clone());
+                    }
+
+                    wasm_bindgen_futures::spawn_local(async move {
+                        let mut last_update: Option<u64> = None;
+                        loop {
+                            if cancel.get() {
+                                break;
+                            }
+                            let url = if let Some(lu) = last_update {
+                                format!("/api/grinders/{}/state?last_update={}", did, lu)
+                            } else {
+                                format!("/api/grinders/{}/state", did)
+                            };
+
+                            let mut req = gloo_net::http::Request::get(&url);
+                            if let Some(sig) = &signal {
+                                req = req.abort_signal(Some(sig));
+                            }
+
+                            if let Ok(resp) = req.send().await {
+                                if cancel.get() {
+                                    break;
+                                }
+                                if resp.ok() {
+                                    if let Ok(json) = resp.json::<serde_json::Value>().await {
+                                        if let (Some(new_update), Some(frame_val)) = (
+                                            json.get("update_number").and_then(|v| v.as_u64()),
+                                            json.get("tree"),
+                                        ) {
+                                            if Some(new_update) != last_update {
+                                                if let Ok(frame) = serde_json::from_value::<
+                                                    schema::SerializedFrame,
+                                                >(
+                                                    frame_val.clone()
+                                                ) {
+                                                    last_update = Some(new_update);
+                                                    if let Some(st) = frame.rollup.or(frame.status)
+                                                    {
+                                                        let _ =
+                                                            tx.unbounded_send((did.clone(), st));
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            gloo_timers::future::sleep(std::time::Duration::from_millis(500)).await;
+                        }
+                    });
+                }
             }
-            
+
             move || {
                 cancelled.set(true);
                 for ac in controllers {
@@ -331,9 +363,9 @@ pub fn tasks_view() -> Html {
             }
             path
         };
-        
+
         html! {
-            <path 
+            <path
                 key={key}
                 d={d}
                 stroke="rgba(255, 255, 255, 0.25)"
@@ -347,7 +379,7 @@ pub fn tasks_view() -> Html {
 
     html! {
         <div class="glass-panel" style="height: calc(100vh - 140px); min-height: 600px; width: 100%; overflow: auto; position: relative;">
-            <svg 
+            <svg
                 width={(*max_width).to_string()}
                 height={(*max_height).to_string()}
                 style="position: absolute; top: 0; left: 0; min-height: 100%; min-width: 100%;"

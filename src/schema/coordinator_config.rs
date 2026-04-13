@@ -21,7 +21,7 @@ impl CoordinatorConfig {
     pub async fn load(repo_path: &Path) -> anyhow::Result<Self> {
         let nancy_dir = repo_path.join(".nancy");
         let config_path = nancy_dir.join("coordinator_config.json");
-        
+
         let mut config = if !config_path.exists() {
             let default_cfg = Self::default();
             let json = serde_json::to_string_pretty(&default_cfg)?;
@@ -31,7 +31,7 @@ impl CoordinatorConfig {
             let content = tokio::fs::read_to_string(&config_path).await?;
             serde_json::from_str(&content)?
         };
-        
+
         config.nancy_dir = Some(nancy_dir);
         Ok(config)
     }

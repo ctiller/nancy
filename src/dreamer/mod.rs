@@ -1,12 +1,12 @@
 pub mod task_view;
 
+use crate::agent::AgentTaskProcessor;
+use crate::events::writer::Writer;
+use crate::introspection::IntrospectionTreeRoot;
+use crate::schema::identity_config::Identity;
 use anyhow::Result;
 use std::future::Future;
 use std::pin::Pin;
-use crate::schema::identity_config::Identity;
-use crate::agent::AgentTaskProcessor;
-use crate::introspection::IntrospectionTreeRoot;
-use crate::events::writer::Writer;
 
 pub struct DreamerTaskProcessor {
     pub task_view: task_view::TaskViewEvaluator,
@@ -36,10 +36,15 @@ impl AgentTaskProcessor for DreamerTaskProcessor {
 
             // Run evaluate events background worker
             {
-                *tree_root.root_frame.status.lock().unwrap() = Some("Evaluating Tasks...".to_string());
+                *tree_root.root_frame.status.lock().unwrap() =
+                    Some("Evaluating Tasks...".to_string());
                 let _ = tree_root.updater.send_modify(|v| *v += 1);
             }
-            let logged_any = self.task_view.evaluate_events(repo, id_obj, tree_root, global_writer).await.unwrap_or(false);
+            let logged_any = self
+                .task_view
+                .evaluate_events(repo, id_obj, tree_root, global_writer)
+                .await
+                .unwrap_or(false);
 
             Ok(logged_any)
         })
@@ -51,24 +56,26 @@ mod tests {
     use super::*;
     use crate::schema::identity_config::*;
     use tempfile::TempDir;
-    
+
     #[tokio::test]
     async fn test_dreamer_processor_process() {
         let tmp = TempDir::new().unwrap();
         let repo = git2::Repository::init(tmp.path()).unwrap();
         crate::commands::init::init(tmp.path(), 1).await.unwrap();
-        
+
         let id_obj = Identity::load(tmp.path()).await.unwrap();
         let tree_root = std::sync::Arc::new(IntrospectionTreeRoot::new());
         let writer = Writer::new(&repo, id_obj.clone()).unwrap();
-        
+
         // Use a short timeout to prevent waiting the full 1000ms if not necessary, or let it wait 1 tick.
         let mut processor = DreamerTaskProcessor::new();
-        // The process method waits 1000ms then evaluates events. 
+        // The process method waits 1000ms then evaluates events.
         // We can just run it using tokio::time::timeout
         let _ = tokio::time::timeout(
             tokio::time::Duration::from_millis(1500),
-            processor.process(&repo, &id_obj, "worker", "coord", &tree_root, &writer)
-        ).await.unwrap();
+            processor.process(&repo, &id_obj, "worker", "coord", &tree_root, &writer),
+        )
+        .await
+        .unwrap();
     }
 }

@@ -1,7 +1,7 @@
 use anyhow::{Context, Result, bail};
 use git2::Repository;
-use tokio::fs;
 use std::path::{Path, PathBuf};
+use tokio::fs;
 
 use crate::events::writer::Writer;
 use crate::schema::identity_config::Identity;
@@ -27,15 +27,17 @@ pub async fn add_task<P: AsRef<Path>>(
         bail!("nancy is not initialized (identity.json missing). Please run nancy init first.");
     }
 
-    let identity_content =
-        fs::read_to_string(&identity_file).await.context("Failed to read identity.json")?;
+    let identity_content = fs::read_to_string(&identity_file)
+        .await
+        .context("Failed to read identity.json")?;
     let id_obj: Identity =
         serde_json::from_str(&identity_content).context("Failed to parse identity.json")?;
 
     // Determine the description based on the provided inputs
     let description = match (task, file) {
         (Some(t), _) => t,
-        (None, Some(f)) => fs::read_to_string(&f).await
+        (None, Some(f)) => fs::read_to_string(&f)
+            .await
             .with_context(|| format!("Failed to read task file at {}", f.display()))?,
         _ => bail!("Either --task or --file must be provided."),
     };

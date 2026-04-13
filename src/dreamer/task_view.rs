@@ -1,9 +1,9 @@
+use crate::events::reader::Reader;
+use crate::introspection::{IntrospectionTreeRoot, frame};
+use crate::schema::identity_config::Identity;
 use anyhow::Result;
 use std::collections::HashSet;
 use std::sync::Arc;
-use crate::schema::identity_config::Identity;
-use crate::introspection::{IntrospectionTreeRoot, frame};
-use crate::events::reader::Reader;
 
 pub struct TaskViewEvaluator {
     evaluated_event_ids: HashSet<String>,
@@ -31,14 +31,15 @@ impl TaskViewEvaluator {
                 if let Ok((branch, _)) = branch_res {
                     if let Ok(Some(name)) = branch.name() {
                         if name.starts_with("nancy/") && name != "nancy/workers" {
-                            let extracted_did = name.replace("nancy/workers/", "").replace("nancy/", "");
+                            let extracted_did =
+                                name.replace("nancy/workers/", "").replace("nancy/", "");
                             workers_dids.insert(extracted_did);
                         }
                     }
                 }
             }
         }
-        
+
         // Ensure our own identity is covered even if branch doesn't cleanly resolve via iterator early on
         workers_dids.insert(id_obj.get_did_owner().did.clone());
         println!("==== DREAMER EVAL DIDS COVERED: {:?} ====", workers_dids);
@@ -49,7 +50,9 @@ impl TaskViewEvaluator {
                 if let Ok(iter) = reader.iter_events() {
                     for event_res in iter {
                         if let Ok(event) = event_res {
-                            if let crate::schema::registry::EventPayload::TaskEvaluation(te) = event.payload {
+                            if let crate::schema::registry::EventPayload::TaskEvaluation(te) =
+                                event.payload
+                            {
                                 self.evaluated_event_ids.insert(te.evaluated_event_id);
                             }
                         }
@@ -131,7 +134,10 @@ impl TaskViewEvaluator {
 
     async fn score_event(&self, event: &crate::events::EventEnvelope) -> Result<Option<u64>> {
         let is_ask = matches!(event.payload, crate::schema::registry::EventPayload::Ask(_));
-        let is_review = matches!(event.payload, crate::schema::registry::EventPayload::ReviewPlan(_));
+        let is_review = matches!(
+            event.payload,
+            crate::schema::registry::EventPayload::ReviewPlan(_)
+        );
 
         if !is_ask && !is_review {
             return Ok(None);
@@ -156,7 +162,7 @@ impl TaskViewEvaluator {
                 return Ok(Some(val));
             }
         };
-        
+
         println!("DREAMER RAW SCORE: {:?}", response);
         if let Ok(raw_score) = response.trim().parse::<u64>() {
             let clamped = raw_score.clamp(0, 100);
@@ -168,7 +174,7 @@ impl TaskViewEvaluator {
                 val = (40.0 + ((clamped - 1) as f64 / 99.0) * 60.0).round() as u64;
             }
         }
-        
+
         Ok(Some(val))
     }
 }
@@ -176,18 +182,18 @@ impl TaskViewEvaluator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::TempDir;
     use crate::events::EventEnvelope;
     use crate::schema::registry::EventPayload;
     use sealed_test::prelude::*;
-    
+    use tempfile::TempDir;
+
     #[tokio::test]
     #[sealed_test(env = [("GEMINI_API_KEY", "mock"), ("NANCY_NO_TRACE_EVENTS", "1")])]
     async fn test_score_event_success() {
         crate::llm::mock::builder::MockChatBuilder::new()
             .respond("95")
             .commit();
-            
+
         let eval = TaskViewEvaluator::new();
         let ev = EventEnvelope {
             id: "test".to_string(),
@@ -210,7 +216,7 @@ mod tests {
         crate::llm::mock::builder::MockChatBuilder::new()
             .respond("broken text not an int")
             .commit();
-            
+
         let eval = TaskViewEvaluator::new();
         let ev = EventEnvelope {
             id: "test2".to_string(),
@@ -233,35 +239,48 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let repo = git2::Repository::init(tmp.path()).unwrap();
         crate::commands::init::init(tmp.path(), 1).await.unwrap();
-        
+
         let id_obj = Identity::load(tmp.path()).await.unwrap();
-        
+
         if let Identity::Coordinator { workers, .. } = &id_obj {
-            let writer = crate::events::writer::Writer::new(&repo, Identity::Grinder(workers[0].clone())).unwrap();
-            writer.log_event(crate::schema::registry::EventPayload::Ask(
-                crate::schema::task::AskPayload { item_ref: "aref".to_string(), question: "test".to_string(), agent_path: "a".to_string(), task_name: "t".to_string() }
-            )).unwrap();
+            let writer =
+                crate::events::writer::Writer::new(&repo, Identity::Grinder(workers[0].clone()))
+                    .unwrap();
+            writer
+                .log_event(crate::schema::registry::EventPayload::Ask(
+                    crate::schema::task::AskPayload {
+                        item_ref: "aref".to_string(),
+                        question: "test".to_string(),
+                        agent_path: "a".to_string(),
+                        task_name: "t".to_string(),
+                    },
+                ))
+                .unwrap();
             writer.commit_batch().unwrap();
         }
-        
+
         let tree_root = Arc::new(IntrospectionTreeRoot::new());
         let global_writer = crate::events::writer::Writer::new(&repo, id_obj.clone()).unwrap();
-        
+
         crate::llm::mock::builder::MockChatBuilder::new()
             .respond("99")
             .commit();
-        
+
         let mut eval = TaskViewEvaluator::new();
-        eval.evaluate_events(&repo, &id_obj, &tree_root, &global_writer).await.unwrap();
+        eval.evaluate_events(&repo, &id_obj, &tree_root, &global_writer)
+            .await
+            .unwrap();
         global_writer.commit_batch().unwrap();
-        
+
         assert!(eval.evaluated_event_ids.len() >= 1);
-        
+
         let reader = Reader::new(&repo, id_obj.get_did_owner().did.clone());
         let mut found = false;
         for ev in reader.iter_events().unwrap() {
             if let EventPayload::TaskEvaluation(te) = ev.unwrap().payload {
-                if te.score == 50 { found = true; }
+                if te.score == 50 {
+                    found = true;
+                }
             }
         }
         assert!(found);
@@ -273,37 +292,50 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let repo = git2::Repository::init(tmp.path()).unwrap();
         crate::commands::init::init(tmp.path(), 1).await.unwrap();
-        
+
         let id_obj = Identity::load(tmp.path()).await.unwrap();
-        
+
         let dreamer_id = if let Identity::Coordinator { dreamer, .. } = &id_obj {
             Identity::Dreamer(dreamer.clone())
-        } else { unreachable!() };
-        
+        } else {
+            unreachable!()
+        };
+
         let writer = crate::events::writer::Writer::new(&repo, dreamer_id.clone()).unwrap();
-        writer.log_event(crate::schema::registry::EventPayload::Ask(
-            crate::schema::task::AskPayload { item_ref: "aref".to_string(), question: "test".to_string(), agent_path: "a".to_string(), task_name: "t".to_string() }
-        )).unwrap();
+        writer
+            .log_event(crate::schema::registry::EventPayload::Ask(
+                crate::schema::task::AskPayload {
+                    item_ref: "aref".to_string(),
+                    question: "test".to_string(),
+                    agent_path: "a".to_string(),
+                    task_name: "t".to_string(),
+                },
+            ))
+            .unwrap();
         writer.commit_batch().unwrap();
-        
+
         let tree_root = Arc::new(IntrospectionTreeRoot::new());
         let global_writer = crate::events::writer::Writer::new(&repo, dreamer_id.clone()).unwrap();
-        
+
         crate::llm::mock::builder::MockChatBuilder::new()
             .respond("42")
             .commit();
-        
+
         let mut eval = TaskViewEvaluator::new();
-        eval.evaluate_events(&repo, &dreamer_id, &tree_root, &global_writer).await.unwrap();
+        eval.evaluate_events(&repo, &dreamer_id, &tree_root, &global_writer)
+            .await
+            .unwrap();
         global_writer.commit_batch().unwrap();
-        
+
         assert!(eval.evaluated_event_ids.len() >= 1);
-        
+
         let reader = Reader::new(&repo, dreamer_id.get_did_owner().did.clone());
         let mut found = false;
         for ev in reader.iter_events().unwrap() {
             if let EventPayload::TaskEvaluation(te) = ev.unwrap().payload {
-                if te.score == 32 { found = true; } // scaled from 42
+                if te.score == 32 {
+                    found = true;
+                } // scaled from 42
             }
         }
         assert!(found);

@@ -36,9 +36,9 @@ impl Identity {
     pub async fn load<P: AsRef<std::path::Path>>(dir: P) -> anyhow::Result<Self> {
         let identity_file = dir.as_ref().join(".nancy").join("identity.json");
         let content = tokio::fs::read_to_string(&identity_file).await?;
-        
+
         let mut raw: serde_json::Value = serde_json::from_str(&content)?;
-        
+
         // Auto-patch missing `dreamer` and `human` configuration gracefully inside Coordinator schema backwards compatibly!
         let mut patched_dreamer = None;
 
@@ -55,7 +55,7 @@ impl Identity {
         if let Some(new_dreamer) = patched_dreamer {
             let patched_content = serde_json::to_string_pretty(&raw)?;
             tokio::fs::write(&identity_file, &patched_content).await?;
-            
+
             // Natively emit the Event Payload mapping back to event ledger dynamically
             if let Ok(repo) = git2::Repository::discover(dir.as_ref()) {
                 let identity_patched: Self = serde_json::from_value(raw.clone())?;
@@ -64,8 +64,11 @@ impl Identity {
                         crate::schema::identity::IdentityPayload {
                             did: new_dreamer.did.clone(),
                             public_key_hex: new_dreamer.public_key_hex.clone(),
-                            timestamp: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs(),
-                        }
+                            timestamp: std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap()
+                                .as_secs(),
+                        },
                     );
                     let _ = writer.log_event(payload);
                 }
@@ -96,18 +99,17 @@ impl Identity {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
 
     #[tokio::test]
     async fn test_identity_auto_patching() {
         let mut _tr = crate::debug::test_repo::TestRepo::new().unwrap();
         let repo_path = _tr.td.path();
-        
+
         let nancy_dir = repo_path.join(".nancy");
         tokio::fs::create_dir_all(&nancy_dir).await.unwrap();
-        
+
         let identity_file = nancy_dir.join("identity.json");
-        
+
         // Write older schema
         let older_schema = r#"{
             "type": "Coordinator",
@@ -118,19 +120,30 @@ mod tests {
             },
             "workers": []
         }"#;
-        
-        tokio::fs::write(&identity_file, older_schema).await.unwrap();
-        
+
+        tokio::fs::write(&identity_file, older_schema)
+            .await
+            .unwrap();
+
         let loaded = Identity::load(repo_path).await.unwrap();
-        
-        if let Identity::Coordinator { did, dreamer, human, .. } = loaded {
+
+        if let Identity::Coordinator {
+            did,
+            dreamer,
+            human,
+            ..
+        } = loaded
+        {
             assert_eq!(did.did, "zOldCoordinator");
             assert!(!dreamer.did.is_empty(), "Dreamer should be auto-generated");
-            assert!(human.is_none(), "Human should be None for headless old schemas");
+            assert!(
+                human.is_none(),
+                "Human should be None for headless old schemas"
+            );
         } else {
             panic!("Expected Coordinator identity");
         }
-        
+
         let fully_populated_schema = r#"{
             "type": "Coordinator",
             "did": {
@@ -146,10 +159,18 @@ mod tests {
             },
             "human": null
         }"#;
-        
-        tokio::fs::write(&identity_file, fully_populated_schema).await.unwrap();
+
+        tokio::fs::write(&identity_file, fully_populated_schema)
+            .await
+            .unwrap();
         let loaded2 = Identity::load(repo_path).await.unwrap();
-        if let Identity::Coordinator { did, dreamer, human, .. } = loaded2 {
+        if let Identity::Coordinator {
+            did,
+            dreamer,
+            human,
+            ..
+        } = loaded2
+        {
             assert_eq!(did.did, "zFullCoordinator");
             assert_eq!(dreamer.did, "zFullDreamer");
             assert!(human.is_none());

@@ -1,7 +1,7 @@
 use anyhow::{Context, Result, bail};
+use askama::Template;
 use git2::Repository;
 use schemars::JsonSchema;
-use askama::Template;
 
 use crate::events::writer::Writer;
 use crate::schema::identity_config::Identity;
@@ -14,9 +14,18 @@ pub fn appview_task_priority(task_id: String) -> crate::llm::client::TaskPriorit
         Box::pin(async move {
             let sock = crate::agent::get_coordinator_socket_path(None);
             if sock.exists() {
-                if let Ok(client) = reqwest::Client::builder().unix_socket(sock).http2_prior_knowledge().build() {
+                if let Ok(client) = reqwest::Client::builder()
+                    .unix_socket(sock)
+                    .http2_prior_knowledge()
+                    .build()
+                {
                     let url = format!("http://localhost/api/market/task-priority/{}", t_id);
-                    if let Ok(resp) = client.get(&url).timeout(std::time::Duration::from_secs(5)).send().await {
+                    if let Ok(resp) = client
+                        .get(&url)
+                        .timeout(std::time::Duration::from_secs(5))
+                        .send()
+                        .await
+                    {
                         if let Ok(json) = resp.json::<serde_json::Value>().await {
                             if let Some(prio) = json.get("priority").and_then(|p| p.as_f64()) {
                                 return prio;
@@ -55,14 +64,20 @@ struct SynthesisOutput {
 }
 
 fn validate_tdd(tdd: &crate::schema::task::TddDocument) -> Result<()> {
-    if tdd.title.trim().is_empty() { bail!("TddDocument title is empty"); }
-    if tdd.summary.trim().is_empty() { bail!("TddDocument summary is empty"); }
-    if tdd.goals.is_empty() { bail!("TddDocument must contain at least one explicit goal"); }
-    if tdd.proposed_design.is_empty() { bail!("TddDocument must contain at least one proposed design section"); }
+    if tdd.title.trim().is_empty() {
+        bail!("TddDocument title is empty");
+    }
+    if tdd.summary.trim().is_empty() {
+        bail!("TddDocument summary is empty");
+    }
+    if tdd.goals.is_empty() {
+        bail!("TddDocument must contain at least one explicit goal");
+    }
+    if tdd.proposed_design.is_empty() {
+        bail!("TddDocument must contain at least one proposed design section");
+    }
     Ok(())
 }
-
-
 
 fn validate_dag(tasks: &[TaskDefinition]) -> Result<()> {
     let mut defined_ids = std::collections::HashSet::new();
@@ -83,7 +98,7 @@ fn validate_dag(tasks: &[TaskDefinition]) -> Result<()> {
     for t in tasks {
         states.insert(t.id.clone(), 0);
     }
-    
+
     let mut adj = std::collections::HashMap::new();
     for t in tasks {
         adj.insert(t.id.clone(), t.depends_on.clone());
@@ -95,11 +110,15 @@ fn validate_dag(tasks: &[TaskDefinition]) -> Result<()> {
         states: &mut std::collections::HashMap<String, i32>,
     ) -> bool {
         let state = *states.get(node).unwrap_or(&0);
-        if state == 1 { return true; }
-        if state == 2 { return false; }
+        if state == 1 {
+            return true;
+        }
+        if state == 2 {
+            return false;
+        }
 
         states.insert(node.to_string(), 1);
-        
+
         if let Some(deps) = adj.get(node) {
             for dep in deps {
                 if has_cycle(dep, adj, states) {
@@ -388,7 +407,9 @@ async fn handle_implement_task(
 
     let mut client = crate::llm::thinking_llm("implementer")
         .tools(tools)
-        .system_prompt(&crate::grind::prompts::implementer_system_prompt(&target_path))
+        .system_prompt(&crate::grind::prompts::implementer_system_prompt(
+            &target_path,
+        ))
         .with_task_priority(appview_task_priority(task_ref.to_string()))
         .with_market_weight(0.8)
         .build()?;
@@ -405,7 +426,8 @@ async fn handle_review_task(
     _writer: &Writer<'_>,
 ) -> Result<String> {
     let target_repo = Repository::open(target_path)?;
-    let head_minus_one = target_repo.revparse_single("HEAD~1")
+    let head_minus_one = target_repo
+        .revparse_single("HEAD~1")
         .map(|obj| obj.id().to_string())
         .unwrap_or_else(|_| "4b825dc642cb6eb9a060e54bf8d69288fbee4904".to_string());
     let mut session = crate::pre_review::session::ReviewSession::new(target_path.to_path_buf());
@@ -425,9 +447,12 @@ async fn handle_review_task(
         Ok(commit) => commit.tree()?,
         Err(_) => target_repo.find_tree(begin_oid)?,
     };
-    let t_end = target_repo.revparse_single("HEAD")?.peel_to_commit()?.tree()?;
+    let t_end = target_repo
+        .revparse_single("HEAD")?
+        .peel_to_commit()?
+        .tree()?;
     let diff = target_repo.diff_tree_to_tree(Some(&t_begin), Some(&t_end), None)?;
-    
+
     let mut diff_text = String::new();
     diff.print(git2::DiffFormat::Patch, |_delta, _hunk, line| {
         let origin = line.origin();
@@ -439,24 +464,38 @@ async fn handle_review_task(
     })?;
 
     let review_context = format!("Git Diff:\n{}", diff_text);
-    let task_prompt = crate::pre_review::runner::reviewer_task_prompt(1, 15, &task_payload.description, &review_context, "{}");
+    let task_prompt = crate::pre_review::runner::reviewer_task_prompt(
+        1,
+        15,
+        &task_payload.description,
+        &review_context,
+        "{}",
+    );
 
-    let formal_panel = session.enforce_quorum(&team_selection.experts, crate::personas::PersonaRole::CodeReview);
+    let formal_panel = session.enforce_quorum(
+        &team_selection.experts,
+        crate::personas::PersonaRole::CodeReview,
+    );
     let outputs = session
         .ask_reviewers::<crate::pre_review::schema::ReviewOutput>(
             &formal_panel,
             &task_prompt,
-            "code review round 1"
+            "code review round 1",
         )
         .await?;
 
     let mut synthesis_client = crate::llm::thinking_llm("review_synthesis")
-        .system_prompt(&crate::grind::prompts::review_synthesis_prompt(&target_path))
+        .system_prompt(&crate::grind::prompts::review_synthesis_prompt(
+            &target_path,
+        ))
         .with_task_priority(appview_task_priority(task_ref.to_string()))
         .with_market_weight(0.6)
         .build()?;
 
-    let valid_outputs: std::collections::HashMap<_, _> = outputs.into_iter().filter_map(|(id, x)| x.ok().map(|o| (id, o))).collect();
+    let valid_outputs: std::collections::HashMap<_, _> = outputs
+        .into_iter()
+        .filter_map(|(id, x)| x.ok().map(|o| (id, o)))
+        .collect();
     let synthesis_str = serde_json::to_string(&valid_outputs)?;
 
     let report = synthesis_client
@@ -475,27 +514,40 @@ pub async fn execute<'a>(
     writer: &crate::events::writer::Writer<'a>,
 ) -> Result<()> {
     tracing::info!("Executing {:?} task: {}", task_payload.action, task_ref);
-    unsafe { std::env::set_var("NANCY_TASK_ID", task_ref); }
+    unsafe {
+        std::env::set_var("NANCY_TASK_ID", task_ref);
+    }
 
     let workdir = repo.workdir().context("Bare repository missing WorkDir")?;
     let safe_ref = task_ref.replace(":", "_").replace("/", "_");
     let target_path = workdir.join("worktrees").join(&safe_ref);
 
-    let mut safe_target_branch = task_payload.branch.strip_prefix("refs/heads/").unwrap_or(&task_payload.branch).to_string();
-    
+    let mut safe_target_branch = task_payload
+        .branch
+        .strip_prefix("refs/heads/")
+        .unwrap_or(&task_payload.branch)
+        .to_string();
+
     let default_fallback = if repo.find_reference("refs/heads/main").is_ok() {
         "main".to_string()
     } else if repo.find_reference("refs/heads/master").is_ok() {
         "master".to_string()
     } else {
-        repo.head().ok().and_then(|h| h.shorthand().map(|s| s.to_string())).unwrap_or_else(|| "HEAD".to_string())
+        repo.head()
+            .ok()
+            .and_then(|h| h.shorthand().map(|s| s.to_string()))
+            .unwrap_or_else(|| "HEAD".to_string())
     };
 
-    if safe_target_branch.starts_with("nancy/") 
+    if safe_target_branch.starts_with("nancy/")
         && !safe_target_branch.starts_with("nancy/tasks/")
-        && !safe_target_branch.starts_with("nancy/features/") 
+        && !safe_target_branch.starts_with("nancy/features/")
     {
-        tracing::warn!("Task {} attempted to checkout mapped control branch {}. Falling back dynamically structurally.", task_ref, safe_target_branch);
+        tracing::warn!(
+            "Task {} attempted to checkout mapped control branch {}. Falling back dynamically structurally.",
+            task_ref,
+            safe_target_branch
+        );
         safe_target_branch = default_fallback.clone();
     }
 
@@ -518,21 +570,28 @@ pub async fn execute<'a>(
         .status()
         .await;
 
-    let branch_exists = repo.find_reference(&format!("refs/heads/{}", safe_target_branch)).is_ok() || safe_target_branch == "HEAD";
+    let branch_exists = repo
+        .find_reference(&format!("refs/heads/{}", safe_target_branch))
+        .is_ok()
+        || safe_target_branch == "HEAD";
 
     let mut add_cmd = tokio::process::Command::new("git");
-    add_cmd.arg("worktree").arg("add").arg("-f").arg(&target_path);
-    
+    add_cmd
+        .arg("worktree")
+        .arg("add")
+        .arg("-f")
+        .arg(&target_path);
+
     if !branch_exists {
-        add_cmd.arg("-b").arg(&safe_target_branch).arg(&default_fallback);
+        add_cmd
+            .arg("-b")
+            .arg(&safe_target_branch)
+            .arg(&default_fallback);
     } else {
         add_cmd.arg(&safe_target_branch);
     }
 
-    let status = add_cmd
-        .current_dir(workdir)
-        .status()
-        .await?;
+    let status = add_cmd.current_dir(workdir).status().await?;
 
     if !status.success() {
         bail!("Failed to spawn worktree for {}", task_ref);
@@ -541,7 +600,7 @@ pub async fn execute<'a>(
     if task_payload.action == TaskAction::Plan {
         tracing::info!("Provisioning localized dual-worktree for planning evaluation bounds...");
         let plan_exec_path = target_path.join("codebase_checkout");
-        
+
         let _ = tokio::process::Command::new("git")
             .arg("worktree")
             .arg("remove")
@@ -550,9 +609,9 @@ pub async fn execute<'a>(
             .current_dir(workdir)
             .status()
             .await;
-            
+
         let _ = tokio::fs::remove_dir_all(&plan_exec_path).await;
-        
+
         tokio::process::Command::new("git")
             .arg("worktree")
             .arg("add")
@@ -614,7 +673,6 @@ pub async fn execute<'a>(
 mod tests {
     use super::*;
     use crate::schema::identity_config::DidOwner;
-    
 
     #[tokio::test]
     async fn test_execute_failure_bounds() -> anyhow::Result<()> {
@@ -639,9 +697,21 @@ mod tests {
         };
 
         let writer = Writer::new(repo, identity.clone())?;
-        let res = execute(&repo, &identity, "assign_123", "task_ref_7xyz", &payload, &writer).await;
+        let res = execute(
+            &repo,
+            &identity,
+            "assign_123",
+            "task_ref_7xyz",
+            &payload,
+            &writer,
+        )
+        .await;
         assert!(res.is_err());
-        assert!(res.unwrap_err().to_string().contains("Failed to spawn worktree"));
+        assert!(
+            res.unwrap_err()
+                .to_string()
+                .contains("Failed to spawn worktree")
+        );
 
         Ok(())
     }
@@ -685,21 +755,26 @@ mod tests {
             plan: None,
         };
 
-        let worktrees_dir = repo.workdir().unwrap().join("worktrees").join("task_ref_success");
+        let worktrees_dir = repo
+            .workdir()
+            .unwrap()
+            .join("worktrees")
+            .join("task_ref_success");
         let _plan_file = worktrees_dir.join("plan.md");
         let mut builder = crate::llm::mock::builder::MockChatBuilder::new()
             .respond(r#"{"experts": ["The Pedant"]}"#);
-            
+
         for _ in 0..9 {
             builder = builder.respond("Expert ideation...");
         }
-        
+
         builder = builder.respond(r#"{"tdd": {"title": "T", "summary": "S", "background_context": "", "goals": ["G"], "non_goals": [], "proposed_design": ["D"], "risks_and_tradeoffs": [], "alternatives_considered": []}, "tasks": [{"id": "t1", "description": "foo", "preconditions": "foo", "postconditions": "foo", "validation_strategy": "foo", "action": "implement", "branch": "foo", "depends_on": []}]}"#);
-            
+
         for _ in 0..6 {
-            builder = builder.respond(r#"{"vote": "approve", "agree_notes": "Good", "disagree_notes": ""}"#);
+            builder = builder
+                .respond(r#"{"vote": "approve", "agree_notes": "Good", "disagree_notes": ""}"#);
         }
-            
+
         builder.respond(r#"{"vote": "approve", "agree_notes": "", "disagree_notes": "", "consensus": "approve", "recommended_tasks": [], "general_notes": ""}"#)
             .commit();
 
@@ -714,8 +789,12 @@ mod tests {
             &writer,
         )
         .await;
-        
-        assert!(res.is_ok(), "Safely compiled execution trace logic naturally bounds the mock dynamically: {:?}", res);
+
+        assert!(
+            res.is_ok(),
+            "Safely compiled execution trace logic naturally bounds the mock dynamically: {:?}",
+            res
+        );
 
         Ok(())
     }
@@ -736,15 +815,22 @@ mod tests {
         let sig = git2::Signature::now("Mock", "mock@mock.com")?;
         let commit_id1 = repo.commit(Some("refs/heads/main"), &sig, &sig, "init1", &tree, &[])?;
         let commit1 = repo.find_commit(commit_id1)?;
-        
+
         let path = td.path().join("file.patch");
         tokio::fs::write(&path, "1").await?;
         let mut index2 = repo.index()?;
         index2.add_path(std::path::Path::new("file.patch"))?;
         let tree_id2 = index2.write_tree()?;
         let tree2 = repo.find_tree(tree_id2)?;
-        
-        let commit_id = repo.commit(Some("refs/heads/main"), &sig, &sig, "init", &tree2, &[&commit1])?;
+
+        let commit_id = repo.commit(
+            Some("refs/heads/main"),
+            &sig,
+            &sig,
+            "init",
+            &tree2,
+            &[&commit1],
+        )?;
         let commit = repo.find_commit(commit_id)?;
         repo.branch("working_branch", &commit, false)?;
 
@@ -783,9 +869,14 @@ mod tests {
             "task_ref_review",
             &payload,
             &writer,
-        ).await;
-        
-        assert!(res.is_ok(), "Safely compiled execution trace logic naturally bounds the mock dynamically: {:?}", res);
+        )
+        .await;
+
+        assert!(
+            res.is_ok(),
+            "Safely compiled execution trace logic naturally bounds the mock dynamically: {:?}",
+            res
+        );
 
         Ok(())
     }
@@ -840,8 +931,9 @@ mod tests {
             "task_ref_impl",
             &payload,
             &writer,
-        ).await;
-        
+        )
+        .await;
+
         assert!(res.is_ok(), "test failed with {:?}", res.err().unwrap());
 
         Ok(())
@@ -870,11 +962,11 @@ mod tests {
 
         let mut builder = crate::llm::mock::builder::MockChatBuilder::new()
             .respond(r#"{"experts": ["The Pedant"]}"#);
-        
+
         for _ in 0..9 {
             builder = builder.respond("Expert ideation...");
         }
-        
+
         builder
             .respond("I tried to plan but forgot my tools!")
             .respond("Oops I forgot again!")
@@ -902,8 +994,6 @@ mod tests {
             private_key_hex: "00".into(),
         });
 
-
-
         let payload = TaskPayload {
             description: "fake".into(),
             preconditions: "fake".into(),
@@ -923,8 +1013,13 @@ mod tests {
             "task_ref_retry",
             &payload,
             &writer,
-        ).await;
-        assert!(res.unwrap_err().to_string().contains("Exceeded max synthesis loops!"));
+        )
+        .await;
+        assert!(
+            res.unwrap_err()
+                .to_string()
+                .contains("Exceeded max synthesis loops!")
+        );
 
         Ok(())
     }
@@ -950,15 +1045,19 @@ mod tests {
         let nancy_dir = td.path().join(".nancy");
         tokio::fs::create_dir_all(&nancy_dir).await?;
 
-        let worktrees_dir = repo.workdir().unwrap().join("worktrees").join("task_ref_complex");
+        let worktrees_dir = repo
+            .workdir()
+            .unwrap()
+            .join("worktrees")
+            .join("task_ref_complex");
         let _plan_file = worktrees_dir.join("plan.md");
         let mut builder = crate::llm::mock::builder::MockChatBuilder::new()
             .respond(r#"{"experts": ["The Pedant", "Junk Persona"]}"#);
-            
+
         for _ in 0..9 {
             builder = builder.respond("Expert ideation...");
         }
-        
+
         builder = builder
             // Iteration 1: Return parse error array payload
             .respond(r#"["unparsable]"#)
@@ -971,24 +1070,23 @@ mod tests {
         builder = builder
             .respond(r#"{"vote": "changes_required", "agree_notes": "", "disagree_notes": "Needs rework"}"#)
             .respond(r#"{"vote": "changes_required", "agree_notes": "", "disagree_notes": "Needs rework"}"#);
-        
-        // Iteration 4: Moderator resynthesizes plan 
+
+        // Iteration 4: Moderator resynthesizes plan
         builder = builder.respond(r#"{"tdd": {"title": "T", "summary": "S", "background_context": "", "goals": ["G"], "non_goals": [], "proposed_design": ["D"], "risks_and_tradeoffs": [], "alternatives_considered": []}, "tasks": [{"id": "t1", "description": "", "preconditions": "", "postconditions": "", "validation_strategy": "", "action": "implement", "branch": "", "depends_on": []}, {"id": "t2", "description": "", "preconditions": "", "postconditions": "", "validation_strategy": "", "action": "implement", "branch": "", "depends_on": ["t1"]}]}"#);
 
         // Iteration 4: Formal review accepts
         for _ in 0..6 {
-            builder = builder.respond(r#"{"vote": "approve", "agree_notes": "Looks good", "disagree_notes": ""}"#);
+            builder = builder.respond(
+                r#"{"vote": "approve", "agree_notes": "Looks good", "disagree_notes": ""}"#,
+            );
         }
         builder.commit();
-
 
         let identity = Identity::Grinder(DidOwner {
             did: "mock1".into(),
             public_key_hex: "00".into(),
             private_key_hex: "00".into(),
         });
-
-
 
         let payload = TaskPayload {
             description: "fake".into(),
@@ -1009,8 +1107,9 @@ mod tests {
             "task_ref_complex",
             &payload,
             &writer,
-        ).await;
-        
+        )
+        .await;
+
         assert!(res.is_ok(), "test failed with {:?}", res.err().unwrap());
 
         Ok(())
@@ -1041,19 +1140,19 @@ mod tests {
             for i in 0..num_nodes {
                 tasks.push(mock_task(&format!("t{}", i), vec![]));
             }
-            
-            // Generate acyclic forward-only edges 
+
+            // Generate acyclic forward-only edges
             for (from, to) in edges {
                 let a = from % num_nodes;
                 let b = to % num_nodes;
                 let actual_from = std::cmp::max(a, b);
                 let actual_to = std::cmp::min(a, b);
-                
+
                 if actual_from != actual_to {
                     tasks[actual_from].depends_on.push(format!("t{}", actual_to));
                 }
             }
-            
+
             assert!(super::validate_dag(&tasks).is_ok());
         }
     }
@@ -1070,12 +1169,12 @@ mod tests {
         let t3 = mock_task("t3", vec!["t1"]);
         assert!(super::validate_dag(&[t1, t2, t3]).is_err());
     }
-    
+
     #[test]
     fn test_validate_dag_rejects_missing_deps() {
         assert!(super::validate_dag(&[mock_task("t1", vec!["t_missing"])]).is_err());
     }
-    
+
     #[test]
     fn test_validate_dag_rejects_duplicates() {
         assert!(super::validate_dag(&[mock_task("t1", vec![]), mock_task("t1", vec![])]).is_err());

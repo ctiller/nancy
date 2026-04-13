@@ -90,7 +90,7 @@ pub(crate) async fn execute_command(args: &Args, cwd: PathBuf) -> Result<()> {
 #[tokio::main]
 async fn main() -> Result<()> {
     dotenvy::dotenv().ok();
-    
+
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::builder()
@@ -102,7 +102,7 @@ async fn main() -> Result<()> {
 
     let cwd = std::env::current_dir()?;
 
-    // If we're being executed by `cargo leptos` (which sets LEPTOS_SITE_ROOT) and 
+    // If we're being executed by `cargo leptos` (which sets LEPTOS_SITE_ROOT) and
     // no explicit subcommands were provided, automatically boot into the web server loop.
     if std::env::args().len() <= 1 && std::env::var("LEPTOS_SITE_ROOT").is_ok() {
         tracing::info!("Detected Leptos execution context. Auto-booting coordinator...");
@@ -161,7 +161,7 @@ mod tests {
         }
 
         let grind_dir = td_path.clone();
-        
+
         // Init identity so that coordinator/grind bounds don't blow up prior to spinning the loop!
         let args_init = Args::try_parse_from(["nancy", "init"]).unwrap();
         execute_command(&args_init, grind_dir.clone()).await?;
@@ -172,10 +172,10 @@ mod tests {
         tokio::select! {
             _ = tokio::time::sleep(tokio::time::Duration::from_secs(2)) => {}
             res = execute_command(&args_grind, grind_dir.clone()) => {
-                let _ = res; 
+                let _ = res;
             }
         }
-        
+
         let args_coordinator = Args::try_parse_from(["nancy", "coordinator"]).unwrap();
         let coord_dir = grind_dir.clone();
         tokio::select! {
@@ -188,13 +188,17 @@ mod tests {
         // Give spawned coordinator bounds 1000ms to gracefully crash natively on drop under llvm-cov slowing execution
         tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
 
+        nancy::agent::SHUTDOWN.store(true, std::sync::atomic::Ordering::SeqCst);
+        nancy::agent::SHUTDOWN_NOTIFY.notify_waiters();
+        tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+
         // Test Cleanup
         let args_cleanup = Args::try_parse_from(["nancy", "cleanup"]).unwrap();
         execute_command(&args_cleanup, grind_dir.clone()).await?;
 
         // Ensure no stray files are magically created inside .nancy
         assert!(!grind_dir.join(".nancy").exists());
-        
+
         Ok(())
     }
 }

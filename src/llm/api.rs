@@ -17,7 +17,10 @@ impl Session {
     pub fn ask(&mut self, text: String) {
         self.history.push(Content {
             role: "user".to_string(),
-            parts: vec![Part { text: Some(text), function_call: None }],
+            parts: vec![Part {
+                text: Some(text),
+                function_call: None,
+            }],
         });
         if self.history.len() > self.max_history {
             self.history.remove(0);
@@ -54,7 +57,10 @@ pub struct SystemInstruction {
 impl From<String> for SystemInstruction {
     fn from(s: String) -> Self {
         Self {
-            parts: vec![Part { text: Some(s), function_call: None }],
+            parts: vec![Part {
+                text: Some(s),
+                function_call: None,
+            }],
         }
     }
 }
@@ -139,7 +145,9 @@ impl std::fmt::Display for GeminiError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Reqwest(e) => write!(f, "Reqwest error: {}", e),
-            Self::ApiStatus { status, message } => write!(f, "API Status Error: {} - {}", status, message),
+            Self::ApiStatus { status, message } => {
+                write!(f, "API Status Error: {} - {}", status, message)
+            }
             Self::ResourceExhausted => write!(f, "Resource Exhausted"),
             Self::Json(e) => write!(f, "JSON Deserialization Error: {}", e),
             Self::MalformedResponse => write!(f, "Malformed Response"),
@@ -150,10 +158,14 @@ impl std::fmt::Display for GeminiError {
 impl std::error::Error for GeminiError {}
 
 impl From<reqwest::Error> for GeminiError {
-    fn from(e: reqwest::Error) -> Self { Self::Reqwest(e) }
+    fn from(e: reqwest::Error) -> Self {
+        Self::Reqwest(e)
+    }
 }
 impl From<serde_json::Error> for GeminiError {
-    fn from(e: serde_json::Error) -> Self { Self::Json(e) }
+    fn from(e: serde_json::Error) -> Self {
+        Self::Json(e)
+    }
 }
 
 impl GeminiResponse {
@@ -204,7 +216,13 @@ impl Default for GeminiResponse {
     fn default() -> Self {
         Self {
             candidates: Some(vec![Candidate {
-                content: Content { role: "model".to_string(), parts: vec![Part { text: Some("{}".to_string()), function_call: None }] },
+                content: Content {
+                    role: "model".to_string(),
+                    parts: vec![Part {
+                        text: Some("{}".to_string()),
+                        function_call: None,
+                    }],
+                },
                 finish_reason: Some("STOP".to_string()),
             }]),
             prompt_feedback: None,
@@ -214,10 +232,14 @@ impl Default for GeminiResponse {
 }
 
 impl Gemini {
-    pub fn new(api_key: &str, model: String, system_instruction: Option<SystemInstruction>) -> Self {
+    pub fn new(
+        api_key: &str,
+        model: String,
+        system_instruction: Option<SystemInstruction>,
+    ) -> Self {
         let base_url = std::env::var("GEMINI_API_BASE_URL")
             .unwrap_or_else(|_| "https://generativelanguage.googleapis.com".to_string());
-            
+
         Self {
             api_key: api_key.to_string(),
             model,
@@ -243,38 +265,44 @@ impl Gemini {
         &mut self.generation_config
     }
 
-
-
     pub async fn ask(&self, contents: &[Content]) -> Result<GeminiResponse, GeminiError> {
         let mut req_contents = Vec::new();
         for item in contents {
             req_contents.push(item.clone());
         }
-        
+
         let request = GeminiRequest {
             contents: req_contents,
             system_instruction: self.system_instruction.clone(),
             tools: self.tools.clone(),
-            generation_config: if self.generation_config.is_object() && !self.generation_config.as_object().unwrap().is_empty() {
+            generation_config: if self.generation_config.is_object()
+                && !self.generation_config.as_object().unwrap().is_empty()
+            {
                 Some(self.generation_config.clone())
             } else {
                 None
             },
         };
 
-        let url = format!("{}/v1beta/models/{}:generateContent?key={}", self.base_url, self.model, self.api_key);
+        let url = format!(
+            "{}/v1beta/models/{}:generateContent?key={}",
+            self.base_url, self.model, self.api_key
+        );
         let client = reqwest::Client::new();
         let res = client.post(&url).json(&request).send().await?;
 
         let status = res.status();
         let text = res.text().await?;
-        
+
         if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
             return Err(GeminiError::ResourceExhausted);
         }
-        
+
         if !status.is_success() {
-            return Err(GeminiError::ApiStatus { status: status.to_string(), message: text });
+            return Err(GeminiError::ApiStatus {
+                status: status.to_string(),
+                message: text,
+            });
         }
 
         let resp: GeminiResponse = serde_json::from_str(&text)?;

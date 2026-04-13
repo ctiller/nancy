@@ -116,7 +116,10 @@ pub async fn grep_search_impl(
 
     for path in &search_paths {
         if !perms.can_read(Path::new(path)) {
-            bail!("Execution denied: Explicit permission missing to natively access structural component bound: {}", path);
+            bail!(
+                "Execution denied: Explicit permission missing to natively access structural component bound: {}",
+                path
+            );
         }
         let builder = WalkBuilder::new(path);
         if let Some(_filters) = &file_filters {
@@ -171,11 +174,14 @@ pub async fn list_dir_impl(
     let max_depth = if is_recursive { 3 } else { 1 };
 
     let path = Path::new(&target_directory);
-    
+
     if !perms.can_read(path) {
-        bail!("Execution denied: Explicit permission missing against mapped boundary target: {}", target_directory);
+        bail!(
+            "Execution denied: Explicit permission missing against mapped boundary target: {}",
+            target_directory
+        );
     }
-    
+
     if !path.exists() {
         if let Some(suggestion) = suggest_closest_path(path).await {
             bail!(
@@ -235,7 +241,7 @@ pub async fn view_files_impl(
             results.push(serde_json::json!({ "file": target, "error": "Execution denied: Explicit permission missing to structurally map boundary target natively." }));
             continue;
         }
-        
+
         if !path.exists() {
             if let Some(suggestion) = suggest_closest_path(path).await {
                 results.push(serde_json::json!({ "file": target, "error": format!("File does not exist. Did you mean '{}'?", suggestion) }));
@@ -309,9 +315,12 @@ pub async fn multi_replace_file_content_impl(
 ) -> Result<serde_json::Value> {
     let path = Path::new(&target_file);
     if !perms.can_write(path) {
-        bail!("Execution denied: Explicit permission missing to natively mutate boundary target: {}", target_file);
+        bail!(
+            "Execution denied: Explicit permission missing to natively mutate boundary target: {}",
+            target_file
+        );
     }
-    
+
     if !path.exists() {
         if let Some(suggestion) = suggest_closest_path(path).await {
             bail!(
@@ -360,12 +369,18 @@ pub struct WritePayload {
 }
 
 /// Create fresh artifacts structurally or safely destroy previous architectures wrapping Overwrite protections.
-pub async fn write_files_impl(perms: Arc<Permissions>, files: Vec<WritePayload>) -> Result<serde_json::Value> {
+pub async fn write_files_impl(
+    perms: Arc<Permissions>,
+    files: Vec<WritePayload>,
+) -> Result<serde_json::Value> {
     for file in &files {
         let path = Path::new(&file.target_path);
-        
+
         if !perms.can_write(path) {
-            bail!("Execution denied: Explicit permission missing to natively write to boundary target explicitly: {}", file.target_path);
+            bail!(
+                "Execution denied: Explicit permission missing to natively write to boundary target explicitly: {}",
+                file.target_path
+            );
         }
 
         if path.exists() && !file.overwrite.unwrap_or(false) {
@@ -388,7 +403,10 @@ pub async fn write_files_impl(perms: Arc<Permissions>, files: Vec<WritePayload>)
 }
 
 /// Fallback wrapper for extremely simple models mapping single reads without array layouts.
-pub async fn read_file_impl(perms: Arc<Permissions>, target_file: String) -> Result<serde_json::Value> {
+pub async fn read_file_impl(
+    perms: Arc<Permissions>,
+    target_file: String,
+) -> Result<serde_json::Value> {
     view_files_impl(perms, vec![target_file], None).await
 }
 
@@ -399,11 +417,14 @@ pub async fn write_file_impl(
     content: String,
     overwrite: Option<bool>,
 ) -> Result<serde_json::Value> {
-    write_files_impl(perms, vec![WritePayload {
-        target_path: target_file,
-        content,
-        overwrite,
-    }])
+    write_files_impl(
+        perms,
+        vec![WritePayload {
+            target_path: target_file,
+            content,
+            overwrite,
+        }],
+    )
     .await
 }
 
@@ -435,11 +456,17 @@ async fn copy_dir_all(src: &Path, dst: &Path) -> Result<(), std::io::Error> {
 }
 
 /// Execute standardized layout transitions logically avoiding external linux bash boundaries securely.
-pub async fn manage_paths_impl(perms: Arc<Permissions>, operations: Vec<PathOperation>) -> Result<serde_json::Value> {
+pub async fn manage_paths_impl(
+    perms: Arc<Permissions>,
+    operations: Vec<PathOperation>,
+) -> Result<serde_json::Value> {
     for op in &operations {
         let target = Path::new(&op.target_path);
         if !perms.can_write(target) {
-            bail!("Execution denied: Explicit permission missing to structurally manage target boundary: {}", op.target_path);
+            bail!(
+                "Execution denied: Explicit permission missing to structurally manage target boundary: {}",
+                op.target_path
+            );
         }
 
         match op.action.as_str() {
@@ -473,7 +500,10 @@ pub async fn manage_paths_impl(perms: Arc<Permissions>, operations: Vec<PathOper
                     .context("source_path explicitly required for mapping transitions")?;
                 let source = Path::new(source_raw);
                 if !perms.can_read(source) {
-                    bail!("Execution denied: Explicit permission missing to natively extract logically mapped boundary: {}", source_raw);
+                    bail!(
+                        "Execution denied: Explicit permission missing to natively extract logically mapped boundary: {}",
+                        source_raw
+                    );
                 }
 
                 if !source.exists() {
@@ -510,54 +540,102 @@ pub async fn manage_paths_impl(perms: Arc<Permissions>, operations: Vec<PathOper
     Ok(serde_json::json!({ "status": "Successfully managed system objects cleanly" }))
 }
 
-pub fn create_filesystem_tools(permissions: Arc<Permissions>) -> Vec<Box<dyn crate::llm::tool::LlmTool>> {
+pub fn create_filesystem_tools(
+    permissions: Arc<Permissions>,
+) -> Vec<Box<dyn crate::llm::tool::LlmTool>> {
     let p_grep = Arc::clone(&permissions);
-    let grep = llm_macros::make_tool!("grep_search", "Search for exact or regex strings across the filesystem. Respects .gitignore automatically.", move |query: String, search_paths: Vec<String>, is_regex: Option<bool>, file_filters: Option<FileFilters>, match_per_line: Option<bool>| {
-        let perms = Arc::clone(&p_grep);
-        async move { grep_search_impl(perms, query, search_paths, is_regex, file_filters, match_per_line).await }
-    });
+    let grep = llm_macros::make_tool!(
+        "grep_search",
+        "Search for exact or regex strings across the filesystem. Respects .gitignore automatically.",
+        move |query: String,
+              search_paths: Vec<String>,
+              is_regex: Option<bool>,
+              file_filters: Option<FileFilters>,
+              match_per_line: Option<bool>| {
+            let perms = Arc::clone(&p_grep);
+            async move {
+                grep_search_impl(
+                    perms,
+                    query,
+                    search_paths,
+                    is_regex,
+                    file_filters,
+                    match_per_line,
+                )
+                .await
+            }
+        }
+    );
 
     let p_list = Arc::clone(&permissions);
-    let list = llm_macros::make_tool!("list_dir", "List the contents of a directory. Has built-in recursion bounding to protect context loops.", move |target_directory: String, recursive: Option<bool>| {
-        let perms = Arc::clone(&p_list);
-        async move { list_dir_impl(perms, target_directory, recursive).await }
-    });
+    let list = llm_macros::make_tool!(
+        "list_dir",
+        "List the contents of a directory. Has built-in recursion bounding to protect context loops.",
+        move |target_directory: String, recursive: Option<bool>| {
+            let perms = Arc::clone(&p_list);
+            async move { list_dir_impl(perms, target_directory, recursive).await }
+        }
+    );
 
     let p_view = Arc::clone(&permissions);
-    let view = llm_macros::make_tool!("view_files", "Read complete files or exact line ranges. Extremely large files will gracefully error explicitly prompting pagination.", move |target_paths: Vec<String>, pagination: Option<Vec<PaginationBounds>>| {
-        let perms = Arc::clone(&p_view);
-        async move { view_files_impl(perms, target_paths, pagination).await }
-    });
+    let view = llm_macros::make_tool!(
+        "view_files",
+        "Read complete files or exact line ranges. Extremely large files will gracefully error explicitly prompting pagination.",
+        move |target_paths: Vec<String>, pagination: Option<Vec<PaginationBounds>>| {
+            let perms = Arc::clone(&p_view);
+            async move { view_files_impl(perms, target_paths, pagination).await }
+        }
+    );
 
     let p_multi = Arc::clone(&permissions);
-    let multi = llm_macros::make_tool!("multi_replace_file_content", "Precision code manipulation modifying precise structural loops inside buffers", move |target_file: String, replacement_chunks: Vec<ReplacementChunk>| {
-        let perms = Arc::clone(&p_multi);
-        async move { multi_replace_file_content_impl(perms, target_file, replacement_chunks).await }
-    });
+    let multi = llm_macros::make_tool!(
+        "multi_replace_file_content",
+        "Precision code manipulation modifying precise structural loops inside buffers",
+        move |target_file: String, replacement_chunks: Vec<ReplacementChunk>| {
+            let perms = Arc::clone(&p_multi);
+            async move { multi_replace_file_content_impl(perms, target_file, replacement_chunks).await }
+        }
+    );
 
     let p_write = Arc::clone(&permissions);
-    let write = llm_macros::make_tool!("write_files", "Create fresh artifacts structurally or safely destroy previous architectures wrapping Overwrite protections.", move |files: Vec<WritePayload>| {
-        let perms = Arc::clone(&p_write);
-        async move { write_files_impl(perms, files).await }
-    });
+    let write = llm_macros::make_tool!(
+        "write_files",
+        "Create fresh artifacts structurally or safely destroy previous architectures wrapping Overwrite protections.",
+        move |files: Vec<WritePayload>| {
+            let perms = Arc::clone(&p_write);
+            async move { write_files_impl(perms, files).await }
+        }
+    );
 
     let p_manage = Arc::clone(&permissions);
-    let manage = llm_macros::make_tool!("manage_paths", "Execute standardized layout transitions logically avoiding external linux bash boundaries securely.", move |operations: Vec<PathOperation>| {
-        let perms = Arc::clone(&p_manage);
-        async move { manage_paths_impl(perms, operations).await }
-    });
+    let manage = llm_macros::make_tool!(
+        "manage_paths",
+        "Execute standardized layout transitions logically avoiding external linux bash boundaries securely.",
+        move |operations: Vec<PathOperation>| {
+            let perms = Arc::clone(&p_manage);
+            async move { manage_paths_impl(perms, operations).await }
+        }
+    );
 
     let p_rr = Arc::clone(&permissions);
-    let rr = llm_macros::make_tool!("read_file", "Fallback wrapper for extremely simple models mapping single reads without array layouts.", move |target_file: String| {
-        let perms = Arc::clone(&p_rr);
-        async move { read_file_impl(perms, target_file).await }
-    });
+    let rr = llm_macros::make_tool!(
+        "read_file",
+        "Fallback wrapper for extremely simple models mapping single reads without array layouts.",
+        move |target_file: String| {
+            let perms = Arc::clone(&p_rr);
+            async move { read_file_impl(perms, target_file).await }
+        }
+    );
 
     let p_ww = Arc::clone(&permissions);
-    let ww = llm_macros::make_tool!("write_file", "Fallback wrapper for extremely simple models mapping single writes without array payloads.", move |target_file: String, content: String, overwrite: Option<bool>| {
-        let perms = Arc::clone(&p_ww);
-        async move { write_file_impl(perms, target_file, content, overwrite).await }
-    });
+    let ww = llm_macros::make_tool!(
+        "write_file",
+        "Fallback wrapper for extremely simple models mapping single writes without array payloads.",
+        move |target_file: String, content: String, overwrite: Option<bool>| {
+            let perms = Arc::clone(&p_ww);
+            async move { write_file_impl(perms, target_file, content, overwrite).await }
+        }
+    );
 
     vec![grep, list, view, multi, write, manage, rr, ww]
 }
@@ -570,7 +648,10 @@ mod tests {
     use tempfile::tempdir;
 
     fn get_test_tool(name: &str) -> Box<dyn crate::llm::tool::LlmTool> {
-        let perms = Arc::new(Permissions { read_dirs: vec![PathBuf::from("/")], write_dirs: vec![PathBuf::from("/")] });
+        let perms = Arc::new(Permissions {
+            read_dirs: vec![PathBuf::from("/")],
+            write_dirs: vec![PathBuf::from("/")],
+        });
         let tools = create_filesystem_tools(perms);
         tools.into_iter().find(|t| t.name() == name).unwrap()
     }
@@ -582,9 +663,12 @@ mod tests {
         std::fs::write(&file_path, "hello").unwrap();
 
         let root_str = if cfg!(windows) { "C:\\" } else { "/" };
-        
+
         let perms = Permissions {
-            read_dirs: vec![dir.path().to_path_buf(), PathBuf::from("/nonexistent/fake/dir")],
+            read_dirs: vec![
+                dir.path().to_path_buf(),
+                PathBuf::from("/nonexistent/fake/dir"),
+            ],
             write_dirs: vec![],
         };
 

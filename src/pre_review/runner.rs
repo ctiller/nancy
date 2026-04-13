@@ -31,13 +31,16 @@ pub fn reviewer_task_prompt(
     dissent_log_json: &str,
 ) -> String {
     let rounds_remaining = max_rounds.saturating_sub(round);
-     let round_warning = if rounds_remaining == 0 {
-         "This is the final round of discussion.".to_string()
-     } else {
-         format!("A maximum of {} rounds of discussion remain.", rounds_remaining)
-     };
+    let round_warning = if rounds_remaining == 0 {
+        "This is the final round of discussion.".to_string()
+    } else {
+        format!(
+            "A maximum of {} rounds of discussion remain.",
+            rounds_remaining
+        )
+    };
 
-     format!(
+    format!(
         "{round_warning_if_applicable}\n\
         **Task:** {task_description}\n\
         **Evaluation Context:** \n{review_context}\n\
@@ -56,7 +59,8 @@ pub fn reviewer_task_prompt(
 }
 
 pub fn coordinator_system_prompt(workspace: &std::path::Path, max_rounds: u32) -> String {
-    format!("You are the Review Coordinator. Your job is to drive the panel to an `Approve` consensus within {} rounds.\n\
+    format!(
+        "You are the Review Coordinator. Your job is to drive the panel to an `Approve` consensus within {} rounds.\n\
     \n\
     ## Execution Environment Bounds\n\
     Your strict dynamically mounted root workspace is absolutely restricted to: {}\n\
@@ -65,13 +69,16 @@ pub fn coordinator_system_prompt(workspace: &std::path::Path, max_rounds: u32) -
     ## Orchestration Playbook\n\
     1. **Address Feedback:** You receive all reviewer feedback and must prioritize integrating requested changes by editing the codebase before generating the next round's diff.\n\
     2. **Quorum:** You must dynamically select reviewers to form a panel. The system strictly enforces a Quorum: you must maintain at least K=2 active members from *each* domain (`Technical`, `Paradigm`, and `Orchestration`). If you fail to meet quorum, the backend will forcefully randomize and inject personas to satisfy it.\n\
-    3. **Execution:** Use your tools to fulfill your role. NEVER use \"run_command\" to execute \"ls\"; you MUST use the native \"list_dir\" tool instead. Maintain high engineering standards.", max_rounds, workspace.display())
+    3. **Execution:** Use your tools to fulfill your role. NEVER use \"run_command\" to execute \"ls\"; you MUST use the native \"list_dir\" tool instead. Maintain high engineering standards.",
+        max_rounds,
+        workspace.display()
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     use crate::personas::get_all_personas;
     use crate::pre_review::schema::ReviewOutput;
 
@@ -85,22 +92,33 @@ mod tests {
             "task_feedback": []
         }"#;
 
-        let parsed: ReviewOutput = 
+        let parsed: ReviewOutput =
             crate::llm::client::parse_response(valid_llm_response).expect("Schema parsing failed");
-            
-        assert_eq!(parsed.vote, crate::pre_review::schema::ReviewVote::NeedsClarification);
+
+        assert_eq!(
+            parsed.vote,
+            crate::pre_review::schema::ReviewVote::NeedsClarification
+        );
         assert!(!parsed.disagree_notes.is_empty());
     }
 
     #[test]
     fn test_reviewer_system_prompt_builder() {
         let all_personas = get_all_personas();
-        let pedant = all_personas.iter().find(|p| p.name == "The Pedant").unwrap();
+        let pedant = all_personas
+            .iter()
+            .find(|p| p.name == "The Pedant")
+            .unwrap();
         let prompt = reviewer_system_prompt(pedant, std::path::Path::new("/tmp/test"));
 
-        assert!(prompt.contains("The Pedant"), "Failed to embed persona name");
-        assert!(prompt.contains("logical consistency"), "Failed to embed persona body context");
-
+        assert!(
+            prompt.contains("The Pedant"),
+            "Failed to embed persona name"
+        );
+        assert!(
+            prompt.contains("logical consistency"),
+            "Failed to embed persona body context"
+        );
     }
 
     #[test]

@@ -4,8 +4,8 @@ pub mod execution;
 pub mod filesystem;
 pub mod investigate;
 
-use std::path::{Path, PathBuf};
 use crate::tools::filesystem::Permissions;
+use std::path::{Path, PathBuf};
 
 pub struct AgentToolsBuilder {
     read_paths: Vec<PathBuf>,
@@ -62,13 +62,15 @@ impl AgentToolsBuilder {
         });
 
         let mut tools = filesystem::create_filesystem_tools(std::sync::Arc::clone(&perms));
-        
+
         tools.extend(vec![
-            Box::new(execution::RunCommand::new()) as Box<dyn LlmTool>,
+            Box::new(execution::RunCommand::new()) as Box<dyn LlmTool>
         ]);
-        
+
         let tn = self.task_name.unwrap_or_else(|| "Unknown Task".to_string());
-        let ap = self.agent_path.unwrap_or_else(|| "Unknown Agent".to_string());
+        let ap = self
+            .agent_path
+            .unwrap_or_else(|| "Unknown Agent".to_string());
         tools.extend(investigate::create_investigate_tools(perms, tn, ap));
 
         tools

@@ -1,5 +1,5 @@
-use yew::prelude::*;
 use serde::{Deserialize, Serialize};
+use yew::prelude::*;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct FileNode {
@@ -31,7 +31,7 @@ pub fn file_tree(props: &FileTreeProps) -> Html {
         let dir = props.current_dir.clone();
         let nodes = nodes.clone();
         let error = error.clone();
-        
+
         use_effect_with((branch.clone(), dir.clone()), move |(b, d)| {
             nodes.set(None);
             error.set(None);
@@ -42,7 +42,7 @@ pub fn file_tree(props: &FileTreeProps) -> Html {
                 if let Some(dir_path) = d_pass {
                     url.push_str(&format!("&dir={}", urlencoding::encode(&dir_path)));
                 }
-                
+
                 match gloo_net::http::Request::get(&url).send().await {
                     Ok(resp) => {
                         if resp.ok() {
@@ -73,7 +73,7 @@ pub fn file_tree(props: &FileTreeProps) -> Html {
                     let is_dir = node.is_dir;
                     let path = node.path.clone();
                     let name = node.name.clone();
-                    
+
                     html! {
                         <FileNodeItem is_dir={is_dir} path={path} name={name} branch={props.branch.clone()} on_select_file={props.on_select_file.clone()} />
                     }
@@ -97,10 +97,10 @@ struct FileNodeItemProps {
 #[function_component(FileNodeItem)]
 fn file_node_item(props: &FileNodeItemProps) -> Html {
     let expanded = use_state(|| false);
-    
+
     let is_dir = props.is_dir;
     let path = props.path.clone();
-    
+
     let onclick = {
         let expanded = expanded.clone();
         let on_select = props.on_select_file.clone();
@@ -114,7 +114,14 @@ fn file_node_item(props: &FileNodeItemProps) -> Html {
         })
     };
 
-    let style = format!("cursor: pointer; padding: 4px; border-radius: 4px; display:flex; gap: 8px; align-items:center; {}", if is_dir { "font-weight: bold; color: var(--accent-cyan);" } else { "" });
+    let style = format!(
+        "cursor: pointer; padding: 4px; border-radius: 4px; display:flex; gap: 8px; align-items:center; {}",
+        if is_dir {
+            "font-weight: bold; color: var(--accent-cyan);"
+        } else {
+            ""
+        }
+    );
 
     html! {
         <div class="file-node" style="margin-top: 4px;">
@@ -147,7 +154,7 @@ pub fn file_inspector(props: &FileInspectorProps) -> Html {
         let branch = props.branch.clone();
         let file_content = file_content.clone();
         let error = error.clone();
-        
+
         use_effect_with((path_opt.clone(), branch.clone()), move |(path, b)| {
             if let Some(p) = path {
                 file_content.set(None);
@@ -155,7 +162,11 @@ pub fn file_inspector(props: &FileInspectorProps) -> Html {
                 let p_pass = p.clone();
                 let b_pass = b.clone();
                 wasm_bindgen_futures::spawn_local(async move {
-                    let url = format!("/api/repo/file?branch={}&path={}", urlencoding::encode(&b_pass), urlencoding::encode(&p_pass));
+                    let url = format!(
+                        "/api/repo/file?branch={}&path={}",
+                        urlencoding::encode(&b_pass),
+                        urlencoding::encode(&p_pass)
+                    );
                     match gloo_net::http::Request::get(&url).send().await {
                         Ok(resp) => {
                             if resp.ok() {
@@ -203,14 +214,17 @@ pub fn file_inspector(props: &FileInspectorProps) -> Html {
 pub fn repo_view() -> Html {
     let active_file = use_state(|| None::<String>);
     let selected_branch = use_state(|| None::<String>);
-    
+
     let branches_ctx = use_state(|| None::<GitBranchContext>);
-    
+
     {
         let branches_ctx = branches_ctx.clone();
         use_effect_with((), move |_| {
             wasm_bindgen_futures::spawn_local(async move {
-                if let Ok(resp) = gloo_net::http::Request::get("/api/repo/branches").send().await {
+                if let Ok(resp) = gloo_net::http::Request::get("/api/repo/branches")
+                    .send()
+                    .await
+                {
                     if let Ok(data) = resp.json::<GitBranchContext>().await {
                         branches_ctx.set(Some(data));
                     }
@@ -221,7 +235,10 @@ pub fn repo_view() -> Html {
     }
 
     let branch_to_use = selected_branch.as_ref().cloned().unwrap_or_else(|| {
-        branches_ctx.as_ref().map(|c| c.active_branch.clone()).unwrap_or_else(|| "master".to_string())
+        branches_ctx
+            .as_ref()
+            .map(|c| c.active_branch.clone())
+            .unwrap_or_else(|| "master".to_string())
     });
 
     let on_select_file = {
@@ -249,7 +266,7 @@ pub fn repo_view() -> Html {
                 <div style="display: flex; flex-direction: column; gap: 12px; margin-bottom: 16px;">
                     <h3 style="margin: 0; white-space: nowrap; flex-shrink: 0;">{"Repository Explorer"}</h3>
                     if let Some(ctx) = &*branches_ctx {
-                        <select 
+                        <select
                             class="branch-select"
                             style="background: rgba(0,0,0,0.2); color: var(--text-main); border: 1px solid var(--panel-border); padding: 6px 8px; border-radius: 4px; outline: none; font-size: 0.85rem; width: 100%; box-sizing: border-box; text-overflow: ellipsis; overflow: hidden; white-space: nowrap;"
                             onchange={on_branch_change}

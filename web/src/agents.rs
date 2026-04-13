@@ -1,11 +1,11 @@
+use schema::{GrinderStatus, GrindersResponse, SerializedElement, SerializedFrame};
 use yew::prelude::*;
-use schema::{GrinderStatus, SerializedElement, SerializedFrame, GrindersResponse};
 
 #[function_component(AgentsView)]
 pub fn agents_view() -> Html {
     let list = use_state(|| None::<Vec<GrinderStatus>>);
     let reload_trigger = use_state(|| 0);
-    
+
     {
         let list = list.clone();
         let reload = *reload_trigger;
@@ -15,23 +15,27 @@ pub fn agents_view() -> Html {
             let cancel_clone = cancelled.clone();
             let abort_controller = web_sys::AbortController::new().ok();
             let signal = abort_controller.as_ref().map(|ac| ac.signal());
-            
+
             wasm_bindgen_futures::spawn_local(async move {
                 loop {
-                    if cancel_clone.get() { break; }
+                    if cancel_clone.get() {
+                        break;
+                    }
                     let url = if let Some(lv) = last_version {
                         format!("/api/grinders?last_version={}", lv)
                     } else {
                         "/api/grinders".to_string()
                     };
-                    
+
                     let mut req = gloo_net::http::Request::get(&url);
                     if let Some(sig) = &signal {
                         req = req.abort_signal(Some(sig));
                     }
-                    
+
                     if let Ok(resp) = req.send().await {
-                        if cancel_clone.get() { break; }
+                        if cancel_clone.get() {
+                            break;
+                        }
                         if resp.ok() {
                             let parse_res = resp.json::<GrindersResponse>().await;
                             if let Ok(data) = parse_res {
@@ -40,19 +44,26 @@ pub fn agents_view() -> Html {
                                     list.set(Some(data.grinders));
                                 }
                             } else if let Err(e) = parse_res {
-                                web_sys::console::error_1(&format!("Failed to parse GrindersResponse: {:?}", e).into());
+                                web_sys::console::error_1(
+                                    &format!("Failed to parse GrindersResponse: {:?}", e).into(),
+                                );
                             }
                         } else {
-                            web_sys::console::error_1(&format!("Agents fetch failed with status: {}", resp.status()).into());
+                            web_sys::console::error_1(
+                                &format!("Agents fetch failed with status: {}", resp.status())
+                                    .into(),
+                            );
                         }
                     } else {
                         web_sys::console::error_1(&"Network error in Agents fetch".into());
                     }
-                    if cancel_clone.get() { break; }
+                    if cancel_clone.get() {
+                        break;
+                    }
                     gloo_timers::future::sleep(std::time::Duration::from_secs(2)).await;
                 }
             });
-            
+
             move || {
                 cancelled.set(true);
                 if let Some(ac) = abort_controller {
@@ -67,7 +78,9 @@ pub fn agents_view() -> Html {
         Callback::from(move |_| {
             let reload_trigger = reload_trigger.clone();
             wasm_bindgen_futures::spawn_local(async move {
-                let _ = gloo_net::http::Request::post("/api/add-grinder").send().await;
+                let _ = gloo_net::http::Request::post("/api/add-grinder")
+                    .send()
+                    .await;
                 reload_trigger.set(*reload_trigger + 1);
             });
         })
@@ -114,7 +127,7 @@ fn agent_card(props: &AgentCardProps) -> Html {
     let state = use_state(|| None::<SerializedFrame>);
     let is_online = use_state(|| props.status.is_online);
     let crash_log = use_state(|| None::<String>);
-    
+
     let did = props.status.did.clone();
     let log_ref = props.status.log_ref.clone();
 
@@ -124,7 +137,7 @@ fn agent_card(props: &AgentCardProps) -> Html {
         let state = state.clone();
         let is_online = is_online.clone();
         let crash_log = crash_log.clone();
-        
+
         use_effect_with((), move |_| {
             let cancelled = std::rc::Rc::new(std::cell::Cell::new(false));
             let cancel_clone = cancelled.clone();
@@ -134,7 +147,11 @@ fn agent_card(props: &AgentCardProps) -> Html {
             if let Some(l_ref) = log_ref {
                 let crash_log = crash_log.clone();
                 wasm_bindgen_futures::spawn_local(async move {
-                    if let Ok(res) = gloo_net::http::Request::get(&format!("/api/incidents/{}", l_ref)).send().await {
+                    if let Ok(res) =
+                        gloo_net::http::Request::get(&format!("/api/incidents/{}", l_ref))
+                            .send()
+                            .await
+                    {
                         if let Ok(text) = res.text().await {
                             crash_log.set(Some(text));
                         }
@@ -145,28 +162,34 @@ fn agent_card(props: &AgentCardProps) -> Html {
             wasm_bindgen_futures::spawn_local(async move {
                 let mut last_update: Option<u64> = None;
                 loop {
-                    if cancel_clone.get() { break; }
+                    if cancel_clone.get() {
+                        break;
+                    }
                     let url = if let Some(lu) = last_update {
                         format!("/api/grinders/{}/state?last_update={}", did, lu)
                     } else {
                         format!("/api/grinders/{}/state", did)
                     };
-                    
+
                     let mut req = gloo_net::http::Request::get(&url);
                     if let Some(sig) = &signal {
                         req = req.abort_signal(Some(sig));
                     }
-                    
+
                     if let Ok(resp) = req.send().await {
-                        if cancel_clone.get() { break; }
+                        if cancel_clone.get() {
+                            break;
+                        }
                         if resp.ok() {
                             if let Ok(json) = resp.json::<serde_json::Value>().await {
                                 if let (Some(new_update), Some(frame_val)) = (
                                     json.get("update_number").and_then(|v| v.as_u64()),
-                                    json.get("tree")
+                                    json.get("tree"),
                                 ) {
                                     if Some(new_update) != last_update {
-                                        if let Ok(frame) = serde_json::from_value::<SerializedFrame>(frame_val.clone()) {
+                                        if let Ok(frame) = serde_json::from_value::<SerializedFrame>(
+                                            frame_val.clone(),
+                                        ) {
                                             last_update = Some(new_update);
                                             state.set(Some(frame));
                                             is_online.set(true);
@@ -175,25 +198,35 @@ fn agent_card(props: &AgentCardProps) -> Html {
                                         is_online.set(true);
                                     }
                                 } else {
-                                    web_sys::console::error_1(&"AgentCard missing update_number or tree in payload".into());
+                                    web_sys::console::error_1(
+                                        &"AgentCard missing update_number or tree in payload"
+                                            .into(),
+                                    );
                                     is_online.set(true);
                                 }
                             } else if let Err(e) = resp.json::<serde_json::Value>().await {
-                                web_sys::console::error_1(&format!("AgentCard failed to parse JSON: {:?}", e).into());
+                                web_sys::console::error_1(
+                                    &format!("AgentCard failed to parse JSON: {:?}", e).into(),
+                                );
                             }
                         } else {
-                            web_sys::console::error_1(&format!("AgentCard fetch failed with status: {}", resp.status()).into());
+                            web_sys::console::error_1(
+                                &format!("AgentCard fetch failed with status: {}", resp.status())
+                                    .into(),
+                            );
                             is_online.set(false);
                         }
                     } else {
                         web_sys::console::error_1(&"Network error in AgentCard fetch".into());
                         is_online.set(false);
                     }
-                    if cancel_clone.get() { break; }
+                    if cancel_clone.get() {
+                        break;
+                    }
                     gloo_timers::future::sleep(std::time::Duration::from_secs(2)).await;
                 }
             });
-            
+
             move || {
                 cancelled.set(true);
                 if let Some(ac) = abort_controller {
@@ -215,7 +248,8 @@ fn agent_card(props: &AgentCardProps) -> Html {
                 let _ = gloo_net::http::Request::post("/api/remove-grinder")
                     .json(&serde_json::json!({"did": did}))
                     .unwrap()
-                    .send().await;
+                    .send()
+                    .await;
                 reload_trigger.set(*reload_trigger + 1);
             });
         })
@@ -224,17 +258,37 @@ fn agent_card(props: &AgentCardProps) -> Html {
     let online_val = *is_online;
     let style = format!(
         "padding: 16px; margin-bottom: 12px; background: rgba(0,0,0,0.2); border-left: {}; opacity: {};",
-        if online_val { "4px solid var(--accent-cyan)" } else { "4px solid var(--text-muted)" },
+        if online_val {
+            "4px solid var(--accent-cyan)"
+        } else {
+            "4px solid var(--text-muted)"
+        },
         if online_val { "1.0" } else { "0.6" }
     );
 
-    let is_active = online_val && state.as_ref().map(|f| f.status.as_deref() != Some("Waiting for assignments...")).unwrap_or(false);
+    let is_active = online_val
+        && state
+            .as_ref()
+            .map(|f| f.status.as_deref() != Some("Waiting for assignments..."))
+            .unwrap_or(false);
 
     let dot_style = format!(
         "background-color: {}; box-shadow: {}; animation: {};",
-        if online_val { "var(--accent-cyan)" } else { "var(--text-muted)" },
-        if online_val { "0 0 8px var(--accent-cyan)" } else { "none" },
-        if is_active { "pulse 2s infinite" } else { "none" }
+        if online_val {
+            "var(--accent-cyan)"
+        } else {
+            "var(--text-muted)"
+        },
+        if online_val {
+            "0 0 8px var(--accent-cyan)"
+        } else {
+            "none"
+        },
+        if is_active {
+            "pulse 2s infinite"
+        } else {
+            "none"
+        }
     );
 
     html! {
@@ -255,7 +309,7 @@ fn agent_card(props: &AgentCardProps) -> Html {
                     {"✖ Remove"}
                 </button>
             </div>
-            
+
             <div style="padding: 12px; background: rgba(0, 0, 0, 0.4); border-radius: 8px; border: 1px solid var(--panel-border); font-family: monospace; font-size: 0.9rem; overflow-x: auto;">
                 if !online_val {
                     <div>
@@ -273,7 +327,7 @@ fn agent_card(props: &AgentCardProps) -> Html {
                         </div>
                         if props.status.log_ref.is_some() {
                             if let Some(log) = &*crash_log {
-                                <div 
+                                <div
                                     style="background: rgba(255, 0, 0, 0.1); border-left: 2px solid var(--accent-red); padding: 8px 8px 24px 8px; border-radius: 0 4px 4px 0; white-space: pre; font-size: 0.8rem; overflow: auto; max-height: 400px; color: var(--text-muted); font-family: monospace;"
                                 >
                                     {Html::from_html_unchecked(AttrValue::from(log.clone()))}
@@ -309,58 +363,84 @@ fn render_markdown(text: &str) -> String {
 
 fn highlight_json(value: &serde_json::Value) -> String {
     let raw = serde_json::to_string_pretty(value).unwrap_or_default();
-    
+
     let mut html = String::new();
     let chars: Vec<char> = raw.chars().collect();
     let mut i = 0;
     while i < chars.len() {
         let ch = chars[i];
         if ch == '"' {
-             let start = i;
-             i += 1;
-             while i < chars.len() {
-                 if chars[i] == '"' && chars[i-1] != '\\' {
-                     i += 1;
-                     break;
-                 }
-                 i += 1;
-             }
-             let content = &raw[start..i];
-             
-             let mut is_key = false;
-             let mut j = i;
-             while j < chars.len() && chars[j].is_whitespace() { j += 1; }
-             if j < chars.len() && chars[j] == ':' {
-                 is_key = true;
-             }
-             
-             let escaped = content.replace("<", "&lt;").replace(">", "&gt;");
-             if is_key {
-                 html.push_str(&format!("<span class=\"ts-property\">{}</span>", escaped));
-             } else {
-                 html.push_str(&format!("<span class=\"ts-string\">{}</span>", escaped));
-             }
+            let start = i;
+            i += 1;
+            while i < chars.len() {
+                if chars[i] == '"' && chars[i - 1] != '\\' {
+                    i += 1;
+                    break;
+                }
+                i += 1;
+            }
+            let content = &raw[start..i];
+
+            let mut is_key = false;
+            let mut j = i;
+            while j < chars.len() && chars[j].is_whitespace() {
+                j += 1;
+            }
+            if j < chars.len() && chars[j] == ':' {
+                is_key = true;
+            }
+
+            let escaped = content.replace("<", "&lt;").replace(">", "&gt;");
+            if is_key {
+                html.push_str(&format!("<span class=\"ts-property\">{}</span>", escaped));
+            } else {
+                html.push_str(&format!("<span class=\"ts-string\">{}</span>", escaped));
+            }
         } else if ch.is_ascii_digit() || ch == '-' {
-             let start = i;
-             while i < chars.len() && (chars[i].is_ascii_digit() || chars[i] == '.' || chars[i] == 'e' || chars[i] == 'E' || chars[i] == '-' || chars[i] == '+') {
-                 i += 1;
-             }
-             html.push_str(&format!("<span class=\"ts-constant\">{}</span>", &raw[start..i]));
-        } else if raw[i..].starts_with("true") || raw[i..].starts_with("false") || raw[i..].starts_with("null") {
-             if raw[i..].starts_with("true") { html.push_str("<span class=\"ts-keyword\">true</span>"); i += 4; }
-             else if raw[i..].starts_with("false") { html.push_str("<span class=\"ts-keyword\">false</span>"); i += 5; }
-             else { html.push_str("<span class=\"ts-keyword\">null</span>"); i += 4; }
+            let start = i;
+            while i < chars.len()
+                && (chars[i].is_ascii_digit()
+                    || chars[i] == '.'
+                    || chars[i] == 'e'
+                    || chars[i] == 'E'
+                    || chars[i] == '-'
+                    || chars[i] == '+')
+            {
+                i += 1;
+            }
+            html.push_str(&format!(
+                "<span class=\"ts-constant\">{}</span>",
+                &raw[start..i]
+            ));
+        } else if raw[i..].starts_with("true")
+            || raw[i..].starts_with("false")
+            || raw[i..].starts_with("null")
+        {
+            if raw[i..].starts_with("true") {
+                html.push_str("<span class=\"ts-keyword\">true</span>");
+                i += 4;
+            } else if raw[i..].starts_with("false") {
+                html.push_str("<span class=\"ts-keyword\">false</span>");
+                i += 5;
+            } else {
+                html.push_str("<span class=\"ts-keyword\">null</span>");
+                i += 4;
+            }
         } else if ch == '{' || ch == '}' || ch == '[' || ch == ']' || ch == ',' || ch == ':' {
-             html.push_str(&format!("<span class=\"ts-punctuation\">{}</span>", ch));
-             i += 1;
+            html.push_str(&format!("<span class=\"ts-punctuation\">{}</span>", ch));
+            i += 1;
         } else {
-             if ch == '<' { html.push_str("&lt;"); }
-             else if ch == '>' { html.push_str("&gt;"); }
-             else { html.push_str(&ch.to_string()); }
-             i += 1;
+            if ch == '<' {
+                html.push_str("&lt;");
+            } else if ch == '>' {
+                html.push_str("&gt;");
+            } else {
+                html.push_str(&ch.to_string());
+            }
+            i += 1;
         }
     }
-    
+
     html
 }
 

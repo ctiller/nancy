@@ -1,5 +1,5 @@
 pub mod builder {
-    use crate::llm::api::{GeminiResponse, GeminiError};
+    use crate::llm::api::{GeminiError, GeminiResponse};
     use std::sync::Arc;
     use std::sync::LazyLock;
     use std::sync::Mutex;
@@ -9,9 +9,8 @@ pub mod builder {
         pub hang_on_exhaustion: bool,
     }
 
-    pub static MOCK_LLM_QUEUE: LazyLock<
-        Mutex<Option<Arc<Mutex<MockQueue>>>>,
-    > = LazyLock::new(|| Mutex::new(None));
+    pub static MOCK_LLM_QUEUE: LazyLock<Mutex<Option<Arc<Mutex<MockQueue>>>>> =
+        LazyLock::new(|| Mutex::new(None));
 
     pub struct MockChatBuilder {
         queue: MockQueue,
@@ -21,10 +20,15 @@ pub mod builder {
         pub fn new() -> Self {
             let lock = MOCK_LLM_QUEUE.lock().unwrap();
             if lock.is_some() {
-                panic!("MockChatBuilder::new() called, but MOCK_LLM_QUEUE is already set! This indicates test pollution/race conditions across test bounds! Ensure tests run in isolated processes via #[sealed_test].");
+                panic!(
+                    "MockChatBuilder::new() called, but MOCK_LLM_QUEUE is already set! This indicates test pollution/race conditions across test bounds! Ensure tests run in isolated processes via #[sealed_test]."
+                );
             }
             Self {
-                queue: MockQueue { responses: Vec::new(), hang_on_exhaustion: false },
+                queue: MockQueue {
+                    responses: Vec::new(),
+                    hang_on_exhaustion: false,
+                },
             }
         }
 
@@ -46,8 +50,9 @@ pub mod builder {
                 "usageMetadata": {},
                 "modelVersion": "MockChatBuilder"
             });
-            
-            let resp: GeminiResponse = serde_json::from_value(json).expect("Failed to build GeminiResponse from text");
+
+            let resp: GeminiResponse =
+                serde_json::from_value(json).expect("Failed to build GeminiResponse from text");
             self.queue.responses.push(Ok(resp));
             self
         }
@@ -70,8 +75,9 @@ pub mod builder {
                 "usageMetadata": {},
                 "modelVersion": "MockChatBuilder"
             });
-            
-            let resp: GeminiResponse = serde_json::from_value(json).expect("Failed to build GeminiResponse from functionCall");
+
+            let resp: GeminiResponse = serde_json::from_value(json)
+                .expect("Failed to build GeminiResponse from functionCall");
             self.queue.responses.push(Ok(resp));
             self
         }

@@ -1,7 +1,5 @@
 use askama::Template;
 
-
-
 pub const TDD_GUIDELINES: &str = r#"# Key Characteristics of an Effective JSON-driven TDD:
 - Title: The clear, concise name of the architecture document.
 - Summary: High-level overview of the problem and structured solution.
@@ -16,10 +14,13 @@ pub const TDD_GUIDELINES: &str = r#"# Key Characteristics of an Effective JSON-d
 You must embed these strictly into the `tdd` JSON object exactly as formatted in the schema."#;
 
 pub fn implementer_system_prompt(workspace: &std::path::Path) -> String {
-    format!(r#"You are the Nancy Implementer. Your job is to execute the given Task Description strictly inside this isolated Git worktree absolute mount path: {}
+    format!(
+        r#"You are the Nancy Implementer. Your job is to execute the given Task Description strictly inside this isolated Git worktree absolute mount path: {}
 1. You MUST use absolute paths prefixed with this exact mount path for all file manipulation tools dynamically actively! NEVER use relative paths.
 2. Ensure you adhere to all requirements set forth in the provided Plan/Task Description explicitly.
-3. Once you verify your changes work locally securely via run_command setting cwd implicitly matching this absolute path bounds, state that you are Complete natively."#, workspace.display())
+3. Once you verify your changes work locally securely via run_command setting cwd implicitly matching this absolute path bounds, state that you are Complete natively."#,
+        workspace.display()
+    )
 }
 
 pub fn review_team_selection_prompt() -> &'static str {
@@ -29,14 +30,15 @@ Map specific expert archetypes to areas of complexity in the diff."#
 }
 
 pub fn review_synthesis_prompt(workspace: &std::path::Path) -> String {
-    format!(r#"You are the Nancy Review Coordinator Phase 2.
+    format!(
+        r#"You are the Nancy Review Coordinator Phase 2.
 Your job is to read the output of all individual Expert Reviewers and synthesize a final Consensus. 
 Your evaluation namespace organically isolates internally mounted perfectly functionally explicitly bounds dynamically exclusively matching to: {}
 1. If the consensus requires changes, you must specifically instantiate 'recommended_tasks' to direct the Orchestrator on how to proceed.
-2. If the consensus approves, output an Approve consensus."#, workspace.display())
+2. If the consensus approves, output an Approve consensus."#,
+        workspace.display()
+    )
 }
-
-
 
 #[derive(Template)]
 #[template(
@@ -129,4 +131,3 @@ pub struct ModeratorSynthesizerSystemPromptTemplate<'a> {
     pub task_description: &'a str,
     pub tdd_guidelines: &'a str,
 }
-

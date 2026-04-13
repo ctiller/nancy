@@ -1,6 +1,6 @@
+use crate::llm::api::{Gemini, GeminiResponse, Session, SystemInstruction, Tool};
 use anyhow::{Context, bail};
 use askama::Template;
-use crate::llm::api::{Gemini, GeminiResponse, Tool, SystemInstruction, Session};
 use schemars::JsonSchema;
 use serde::de::DeserializeOwned;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -35,7 +35,9 @@ pub enum LoopEvent {
 #[cfg(test)]
 use std::sync::Mutex;
 
-pub type TaskPriorityFn = std::sync::Arc<dyn Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = f64> + Send>> + Send + Sync>;
+pub type TaskPriorityFn = std::sync::Arc<
+    dyn Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = f64> + Send>> + Send + Sync,
+>;
 
 pub struct LlmClient {
     pub kind: crate::llm::builder::Kind,
@@ -45,13 +47,7 @@ pub struct LlmClient {
     pub tools: Vec<Box<dyn crate::llm::tool::LlmTool>>,
     pub subagent: String,
     pub session: Session,
-    pub mock_queue: Option<
-        std::sync::Arc<
-            std::sync::Mutex<
-                crate::llm::mock::builder::MockQueue
-            >,
-        >,
-    >,
+    pub mock_queue: Option<std::sync::Arc<std::sync::Mutex<crate::llm::mock::builder::MockQueue>>>,
     pub created_at: std::time::Instant,
     pub shared_deadline: Option<std::sync::Arc<AtomicU64>>,
     pub loop_event_tx: Option<tokio::sync::mpsc::UnboundedSender<LoopEvent>>,
@@ -62,9 +58,7 @@ pub struct LlmClient {
 
 fn should_retry(err: &crate::llm::api::GeminiError) -> Option<Duration> {
     match err {
-        crate::llm::api::GeminiError::ResourceExhausted => {
-            Some(Duration::from_secs(10))
-        }
+        crate::llm::api::GeminiError::ResourceExhausted => Some(Duration::from_secs(10)),
         crate::llm::api::GeminiError::ApiStatus { status, .. } => {
             if status.contains("429") {
                 Some(Duration::from_secs(10))
@@ -141,7 +135,10 @@ impl LlmClient {
         }
     }
 
-    pub(crate) async fn handle_tool_calls(&self, resp: &GeminiResponse) -> Vec<(String, serde_json::Value)> {
+    pub(crate) async fn handle_tool_calls(
+        &self,
+        resp: &GeminiResponse,
+    ) -> Vec<(String, serde_json::Value)> {
         let mut responses = Vec::new();
 
         for fc in resp.get_function_calls() {
@@ -267,7 +264,10 @@ impl LlmClient {
         responses
     }
 
-    pub async fn ask<T: DeserializeOwned + JsonSchema + 'static>(&mut self, question: &str) -> anyhow::Result<T> {
+    pub async fn ask<T: DeserializeOwned + JsonSchema + 'static>(
+        &mut self,
+        question: &str,
+    ) -> anyhow::Result<T> {
         let frame_name = format!("LLM Agent: {}", self.subagent);
         let sys_prompt: String = self.system_prompt.join("\n\n");
         let question_clone = question.to_string();
@@ -276,23 +276,32 @@ impl LlmClient {
             crate::introspection::data_log("user_prompt", serde_json::json!(question_clone));
             crate::introspection::set_frame_status("Thinking... 💭 ✨");
             self.ask_internal::<T>(&question_clone).await
-        }).await
+        })
+        .await
     }
 
-    async fn ask_internal<T: DeserializeOwned + JsonSchema + 'static>(&mut self, question: &str) -> anyhow::Result<T> {
+    async fn ask_internal<T: DeserializeOwned + JsonSchema + 'static>(
+        &mut self,
+        question: &str,
+    ) -> anyhow::Result<T> {
         let runtime = self.created_at.elapsed().as_secs();
         let dt: time::OffsetDateTime = std::time::SystemTime::now().into();
-        let time_str = dt.format(&time::format_description::well_known::Rfc3339).unwrap_or_else(|_| "Unknown".to_string());
-        
+        let time_str = dt
+            .format(&time::format_description::well_known::Rfc3339)
+            .unwrap_or_else(|_| "Unknown".to_string());
+
         let mut remaining_secs = 0;
         if let Some(deadline) = &self.shared_deadline {
             let d = deadline.load(Ordering::SeqCst);
             if d > 0 {
-                let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs();
                 remaining_secs = d.saturating_sub(now);
             }
         }
-        
+
         let mut loop_warning_text = None;
         if let Some(is_looping_mutex) = &self.is_looping {
             let mut extracted_desc = None;
@@ -302,7 +311,10 @@ impl LlmClient {
                 }
             }
             if let Some(desc) = extracted_desc {
-                let warning = format!("LOOP DETECTED: TRY DOING SOMETHING ELSE. Detected pattern: {}", desc);
+                let warning = format!(
+                    "LOOP DETECTED: TRY DOING SOMETHING ELSE. Detected pattern: {}",
+                    desc
+                );
                 self.system_prompt.push(warning);
             }
             for line in self.system_prompt.iter().rev() {
@@ -312,14 +324,16 @@ impl LlmClient {
                 }
             }
         }
-        
+
         let tmpl = SystemHeaderTemplate {
             time: &time_str,
             remaining_secs,
             runtime,
             loop_warning: loop_warning_text,
         };
-        let header = tmpl.render().context("Failed to render system notice template")?;
+        let header = tmpl
+            .render()
+            .context("Failed to render system notice template")?;
         let final_question = format!("{}\n\n{}", header, question);
 
         if let Some(tx) = &self.loop_event_tx {
@@ -330,19 +344,28 @@ impl LlmClient {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs();
-        
-        let peek = if final_question.len() > 100 { format!("{}...", &final_question[..100]) } else { final_question.to_string() };
-        crate::introspection::log(&format!("LLM Ask ({}): {}", self.subagent, peek.replace("\n", " ")));
-            
+
+        let peek = if final_question.len() > 100 {
+            format!("{}...", &final_question[..100])
+        } else {
+            final_question.to_string()
+        };
+        crate::introspection::log(&format!(
+            "LLM Ask ({}): {}",
+            self.subagent,
+            peek.replace("\n", " ")
+        ));
+
         self.emit_trace_event(crate::schema::registry::EventPayload::LlmPrompt(
             crate::schema::llm::LlmPromptPayload {
                 subagent: self.subagent.clone(),
                 timestamp,
                 prompt: final_question.clone(),
             },
-        )).await;
+        ))
+        .await;
         self.session.ask(final_question.clone());
-        
+
         let is_string = std::any::TypeId::of::<T>() == std::any::TypeId::of::<String>();
         let version = if is_string {
             crate::llm::builder::Version::V2_5
@@ -359,17 +382,24 @@ impl LlmClient {
         };
 
         let coord_sock = crate::agent::get_coordinator_socket_path(None);
-        
+
         let mut target_model = model.clone();
 
         if coord_sock.exists() {
-            if let Ok(client) = reqwest::Client::builder().unix_socket(coord_sock.clone()).http2_prior_knowledge().build() {
+            if let Ok(client) = reqwest::Client::builder()
+                .unix_socket(coord_sock.clone())
+                .http2_prior_knowledge()
+                .build()
+            {
                 let priority_val = (self.task_priority)().await;
                 let k = priority_val * self.local_market_weight;
-                
+
                 let choices = match self.kind {
                     crate::llm::builder::Kind::Flexible(weight) => {
-                        let flash_model = crate::llm::builder::LlmBuilder::resolve_model(&crate::llm::builder::Kind::Fast, &version);
+                        let flash_model = crate::llm::builder::LlmBuilder::resolve_model(
+                            &crate::llm::builder::Kind::Fast,
+                            &version,
+                        );
                         vec![
                             crate::schema::ipc::ModelChoice {
                                 name: model.clone(), // pro
@@ -378,15 +408,13 @@ impl LlmClient {
                             crate::schema::ipc::ModelChoice {
                                 name: flash_model,
                                 bid_value: k * weight,
-                            }
+                            },
                         ]
-                    },
-                    _ => vec![
-                        crate::schema::ipc::ModelChoice {
-                            name: model.clone(),
-                            bid_value: k,
-                        }
-                    ]
+                    }
+                    _ => vec![crate::schema::ipc::ModelChoice {
+                        name: model.clone(),
+                        bid_value: k,
+                    }],
                 };
 
                 let payload = crate::schema::ipc::RequestModelPayload {
@@ -394,14 +422,20 @@ impl LlmClient {
                     choices,
                 };
                 crate::introspection::set_frame_status("Waiting for Spot Market lease... ⏳");
-                match client.post("http://localhost/request-model")
+                match client
+                    .post("http://localhost/request-model")
                     .json(&payload)
-                    .send().await {
+                    .send()
+                    .await
+                {
                     Ok(resp) => {
-                        if let Ok(res_data) = resp.json::<crate::schema::ipc::RequestModelResponse>().await {
+                        if let Ok(res_data) = resp
+                            .json::<crate::schema::ipc::RequestModelResponse>()
+                            .await
+                        {
                             target_model = res_data.granted_model;
                         }
-                    },
+                    }
                     Err(e) => {
                         tracing::warn!("Spot Market lease request failed fundamentally: {}", e);
                     }
@@ -425,21 +459,21 @@ impl LlmClient {
 
         let mut function_decls = Vec::new();
         for tool in &self.tools {
-            let decl: crate::llm::api::FunctionDeclaration = serde_json::from_value(tool.declaration())?;
+            let decl: crate::llm::api::FunctionDeclaration =
+                serde_json::from_value(tool.declaration())?;
             function_decls.push(decl);
         }
         if !function_decls.is_empty() {
-            gemini = gemini.set_tools(vec![
-                Tool::FunctionDeclarations(
-                    function_decls,
-                ),
-            ]);
+            gemini = gemini.set_tools(vec![Tool::FunctionDeclarations(function_decls)]);
         }
 
         self.run_loop::<T>(&mut gemini).await
     }
 
-    pub(crate) async fn run_loop<T: DeserializeOwned + 'static>(&mut self, gemini: &mut Gemini) -> anyhow::Result<T> {
+    pub(crate) async fn run_loop<T: DeserializeOwned + 'static>(
+        &mut self,
+        gemini: &mut Gemini,
+    ) -> anyhow::Result<T> {
         loop {
             // Loop for retries
             let mut retry_count = 0;
@@ -463,16 +497,23 @@ impl LlmClient {
                     }
                     mock_resp.unwrap()
                 } else {
-                    tracing::info!("==== [LLM Client] Sending request to Gemini API. Waiting... ====");
+                    tracing::info!(
+                        "==== [LLM Client] Sending request to Gemini API. Waiting... ===="
+                    );
                     let timeout_res = tokio::time::timeout(
                         std::time::Duration::from_secs(120),
-                        gemini.ask(self.session.get_history())
-                    ).await;
-                    
+                        gemini.ask(self.session.get_history()),
+                    )
+                    .await;
+
                     tracing::info!("==== [LLM Client] Received response successfully! ====");
                     match timeout_res {
                         Ok(res) => res,
-                        Err(_) => return Err(anyhow::anyhow!("Gemini API network request timed out (120s deadline exceeded) organically stopping indefinitely suspended tasks.")),
+                        Err(_) => {
+                            return Err(anyhow::anyhow!(
+                                "Gemini API network request timed out (120s deadline exceeded) organically stopping indefinitely suspended tasks."
+                            ));
+                        }
                     }
                 };
 
@@ -484,7 +525,12 @@ impl LlmClient {
                                 bail!("Max retries exceeded for Gemini API: {}", e)
                             }
                             retry_count += 1;
-                            crate::introspection::log(&format!("⚠️ API Error: {}. Retrying in {}s (Attempt {}/5)", e, duration.as_secs(), retry_count));
+                            crate::introspection::log(&format!(
+                                "⚠️ API Error: {}. Retrying in {}s (Attempt {}/5)",
+                                e,
+                                duration.as_secs(),
+                                retry_count
+                            ));
                             sleep(duration).await;
                         } else {
                             bail!("Gemini API error: {}", e)
@@ -494,37 +540,55 @@ impl LlmClient {
             };
 
             let chat = resp;
-            
+
             let mut input_tokens = 0;
             let mut output_tokens = 0;
             if let Some(usage) = &chat.usage_metadata {
                 if let Some(prompt) = usage.get("promptTokenCount").and_then(|t| t.as_u64()) {
                     input_tokens = prompt;
                 }
-                if let Some(candidates) = usage.get("candidatesTokenCount").and_then(|t| t.as_u64()) {
+                if let Some(candidates) = usage.get("candidatesTokenCount").and_then(|t| t.as_u64())
+                {
                     output_tokens = candidates;
                 }
             }
-            
+
             let coord_sock = crate::agent::get_coordinator_socket_path(None);
             if coord_sock.exists() {
-                if let Ok(client) = reqwest::Client::builder().unix_socket(coord_sock.clone()).http2_prior_knowledge().build() {
+                if let Ok(client) = reqwest::Client::builder()
+                    .unix_socket(coord_sock.clone())
+                    .http2_prior_knowledge()
+                    .build()
+                {
                     let payload = crate::schema::ipc::LlmUsagePayload {
-                        model: serde_json::from_value(serde_json::Value::String(gemini.model.clone())).unwrap_or(schema::LlmModel::TestMockModel),
+                        model: serde_json::from_value(serde_json::Value::String(
+                            gemini.model.clone(),
+                        ))
+                        .unwrap_or(schema::LlmModel::TestMockModel),
                         input_tokens,
                         output_tokens,
                         agent_path: self.subagent.clone(),
                         task_name: String::new(),
                     };
-                    if let Ok(res) = client.post("http://localhost/llm-usage").json(&payload).send().await {
-                        if let Ok(usage_res) = res.json::<crate::schema::ipc::LlmUsageResponse>().await {
+                    if let Ok(res) = client
+                        .post("http://localhost/llm-usage")
+                        .json(&payload)
+                        .send()
+                        .await
+                    {
+                        if let Ok(usage_res) =
+                            res.json::<crate::schema::ipc::LlmUsageResponse>().await
+                        {
                             if let Ok(task_ref) = std::env::var("NANCY_TASK_ID") {
-                                self.emit_trace_event(crate::schema::registry::EventPayload::TaskSpend(
-                                    crate::schema::task::TaskSpendPayload {
-                                        task_ref,
-                                        cost_usd: usage_res.cost_usd,
-                                    }
-                                )).await;
+                                self.emit_trace_event(
+                                    crate::schema::registry::EventPayload::TaskSpend(
+                                        crate::schema::task::TaskSpendPayload {
+                                            task_ref,
+                                            cost_usd: usage_res.cost_usd,
+                                        },
+                                    ),
+                                )
+                                .await;
                             }
                         }
                     }
@@ -538,7 +602,7 @@ impl LlmClient {
                 }
             } else {
                 let text = chat.get_text_no_think("\n");
-                
+
                 if let Some(tx) = &self.loop_event_tx {
                     let _ = tx.send(LoopEvent::Response(text.clone()));
                 }
@@ -547,14 +611,15 @@ impl LlmClient {
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap()
                     .as_secs();
-                    
+
                 self.emit_trace_event(crate::schema::registry::EventPayload::LlmResponse(
                     crate::schema::llm::LlmResponsePayload {
                         subagent: self.subagent.clone(),
                         timestamp,
                         response: text.clone(),
                     },
-                )).await;
+                ))
+                .await;
                 crate::introspection::data_log("response", serde_json::json!(text.clone()));
                 crate::introspection::set_frame_status("Done ✓");
                 return parse_response(&text);
@@ -567,11 +632,10 @@ impl LlmClient {
 mod tests {
     use super::*;
 
-    
-    use serde::{Deserialize, Serialize};
     use sealed_test::prelude::*;
+    use serde::{Deserialize, Serialize};
     use std::sync::Arc;
-    
+
     #[tokio::test]
     #[sealed_test(env = [("NANCY_NO_TRACE_EVENTS", "")])]
     async fn test_emit_trace_event_success() {
@@ -581,10 +645,12 @@ mod tests {
         std::env::set_current_dir(&td_path).unwrap();
 
         let repo = git2::Repository::init(&td_path).unwrap();
-        crate::commands::init::init(td_path.clone(), 1).await.unwrap();
+        crate::commands::init::init(td_path.clone(), 1)
+            .await
+            .unwrap();
 
         let _gemini = Gemini::new("xxx", "test_model".to_string(), None);
-        
+
         let json_resp = serde_json::json!({
             "candidates": [{
                 "content": {
@@ -611,10 +677,12 @@ mod tests {
             subagent: "test".to_string(),
             tools: vec![],
             session: Session::new(10),
-            mock_queue: Some(Arc::new(std::sync::Mutex::new(crate::llm::mock::builder::MockQueue {
-                responses: vec![Ok(resp)],
-                hang_on_exhaustion: false,
-            }))),
+            mock_queue: Some(Arc::new(std::sync::Mutex::new(
+                crate::llm::mock::builder::MockQueue {
+                    responses: vec![Ok(resp)],
+                    hang_on_exhaustion: false,
+                },
+            ))),
             created_at: std::time::Instant::now(),
             shared_deadline: None,
             loop_event_tx: None,
@@ -625,9 +693,11 @@ mod tests {
 
         // This should trigger `emit_trace_event` recursively securely
         let _ = client.ask::<String>("test trace emit").await.unwrap();
-        
+
         // Verify event was appended
-        let id_obj = crate::schema::identity_config::Identity::load(&td_path).await.unwrap();
+        let id_obj = crate::schema::identity_config::Identity::load(&td_path)
+            .await
+            .unwrap();
         let reader = crate::events::reader::Reader::new(&repo, id_obj.get_did_owner().did.clone());
         let mut found = false;
         for ev in reader.iter_events().unwrap().flatten() {
@@ -757,7 +827,10 @@ mod tests {
 
         // test_tool success
         assert_eq!(responses[0].0, "test_tool");
-        assert_eq!(responses[0].1.get("success").unwrap().as_bool().unwrap(), true);
+        assert_eq!(
+            responses[0].1.get("success").unwrap().as_bool().unwrap(),
+            true
+        );
         assert!(responses[0].1.get("__system_notice__").is_some());
 
         // test_tool failure
@@ -821,9 +894,7 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn test_run_loop_max_retries() {
-        let make_err = || {
-            Err(crate::llm::api::GeminiError::ResourceExhausted)
-        };
+        let make_err = || Err(crate::llm::api::GeminiError::ResourceExhausted);
 
         let mut responses = Vec::new();
         for _ in 0..7 {

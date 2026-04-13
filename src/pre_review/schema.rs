@@ -1,4 +1,3 @@
-
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -50,7 +49,6 @@ pub struct ReviewOutput {
     pub task_feedback: Vec<TaskReview>,
 }
 
-
 /// The structured payload the Coordinator maintains and broadcasts to the panel each round.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct DissentLog {
@@ -60,13 +58,14 @@ pub struct DissentLog {
     pub coordinator_justifications: Vec<String>,
 }
 
-/// The state of the active review session, capturing the entire dialog graph 
+/// The state of the active review session, capturing the entire dialog graph
 /// of all reviewers on the panel.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReviewSessionState {
     pub task_ref: String,
     pub active_review_round: u32,
-    pub session_logs: std::collections::HashMap<String, gemini_client_api::gemini::types::sessions::Session>,
+    pub session_logs:
+        std::collections::HashMap<String, gemini_client_api::gemini::types::sessions::Session>,
 }
 
 #[cfg(test)]

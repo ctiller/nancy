@@ -98,10 +98,10 @@ impl<'a> Writer<'a> {
     }
     pub fn attach_incident_log(&self, filename: &str, content: &str) {
         self.pending_incident_logs
-            .lock().unwrap()
+            .lock()
+            .unwrap()
             .insert(filename.to_string(), content.to_string());
     }
-
 
     pub fn commit_batch(&self) -> Result<bool> {
         let mut rx = self.trace_rx.lock().unwrap();
@@ -251,11 +251,12 @@ impl<'a> Writer<'a> {
             root_tb.write()?
         };
 
-
         let new_root_tree = self.repo.find_tree(root_tree_id)?;
         let parents_refs: Vec<&git2::Commit> = parents.iter().collect();
 
-        let sig = self.repo.signature().unwrap_or_else(|_| git2::Signature::now("Nancy Orchestrator", "nancy@localhost").unwrap());
+        let sig = self.repo.signature().unwrap_or_else(|_| {
+            git2::Signature::now("Nancy Orchestrator", "nancy@localhost").unwrap()
+        });
 
         self.repo.commit(
             Some(&format!("refs/heads/nancy/{}", safe_did)),
@@ -286,7 +287,6 @@ mod tests {
     use crate::schema::identity::IdentityPayload;
     use crate::schema::identity_config::DidOwner;
     use did_key::{Ed25519KeyPair, Fingerprint, KeyMaterial};
-    
 
     #[test]
     fn test_writer_creates_events() -> Result<()> {

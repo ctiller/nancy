@@ -11,11 +11,11 @@ use crate::schema::registry::EventPayload;
 use crate::schema::task::{BlockedByPayload, TaskAction, TaskPayload};
 
 pub fn process_app_view_events(
-    repo: &Repository, 
-    appview: &AppView, 
-    identity: &Identity, 
-    processed_completed_tasks: &mut HashSet<String>, 
-    processed_request_ids: &mut HashSet<String>
+    repo: &Repository,
+    appview: &AppView,
+    identity: &Identity,
+    processed_completed_tasks: &mut HashSet<String>,
+    processed_request_ids: &mut HashSet<String>,
 ) -> Result<bool> {
     let writer = Writer::new(repo, identity.clone())?;
     let mut logged_any = false;
@@ -33,11 +33,14 @@ pub fn process_app_view_events(
         if workers.is_empty() {
             tracing::warn!("Coordinator has no workers provisioned!");
         } else {
-            logged_any |= handle_work_assignments(repo, appview, &writer, workers, processed_request_ids).unwrap_or(false);
-            logged_any |= handle_task_requests(repo, appview, &writer, processed_request_ids).unwrap_or(false);
+            logged_any |=
+                handle_work_assignments(repo, appview, &writer, workers, processed_request_ids)
+                    .unwrap_or(false);
+            logged_any |= handle_task_requests(repo, appview, &writer, processed_request_ids)
+                .unwrap_or(false);
         }
     }
-    
+
     if logged_any {
         writer.commit_batch()?;
     }
@@ -89,7 +92,7 @@ fn handle_work_assignments(
                 ensure_task_branch(repo, appview, task_id);
             }
         }
-        
+
         let assignment = crate::schema::task::CoordinatorAssignmentPayload {
             task_ref: task_id.clone(),
             assignee_did: target.did.clone(),
@@ -108,7 +111,9 @@ fn handle_task_requests(
 ) -> Result<bool> {
     let mut logged_any = false;
     for (request_id, req_payload) in &appview.requests {
-        if appview.handled_requests.contains(request_id) || processed_request_ids.contains(request_id) {
+        if appview.handled_requests.contains(request_id)
+            || processed_request_ids.contains(request_id)
+        {
             continue;
         }
         processed_request_ids.insert(request_id.clone());
@@ -124,18 +129,22 @@ fn handle_task_requests(
             "refs/heads/master".to_string()
         };
 
-        let mut target_branch = repo.head()
+        let mut target_branch = repo
+            .head()
             .map(|h| h.name().unwrap_or(&default_fallback).to_string())
             .unwrap_or_else(|_| default_fallback.clone());
-            
-        if target_branch.starts_with("refs/heads/nancy/") 
+
+        if target_branch.starts_with("refs/heads/nancy/")
             && !target_branch.starts_with("refs/heads/nancy/tasks/")
-            && !target_branch.starts_with("refs/heads/nancy/features/") 
+            && !target_branch.starts_with("refs/heads/nancy/features/")
         {
-            tracing::warn!("Task target branch resolved to a protected control branch: {}. Falling back dynamically.", target_branch);
+            tracing::warn!(
+                "Task target branch resolved to a protected control branch: {}. Falling back dynamically.",
+                target_branch
+            );
             target_branch = default_fallback;
         }
-            
+
         let plan_task = EventPayload::Task(TaskPayload {
             description: r.description.clone(),
             preconditions: "User Request".to_string(),
@@ -145,21 +154,18 @@ fn handle_task_requests(
             branch: target_branch,
             plan: None,
         });
-        
+
         let task_ev_id = writer.log_event(plan_task)?;
         writer.log_event(EventPayload::BlockedBy(BlockedByPayload {
-            source: task_ev_id, target: request_id.clone(),
+            source: task_ev_id,
+            target: request_id.clone(),
         }))?;
         logged_any = true;
     }
     Ok(logged_any)
 }
 
-fn handle_review_rejection(
-    appview: &AppView,
-    writer: &Writer,
-    task_id: &String,
-) -> bool {
+fn handle_review_rejection(appview: &AppView, writer: &Writer, task_id: &String) -> bool {
     let report_str = match appview.completed_reports.get(task_id) {
         Some(s) => s,
         None => return false,
@@ -175,9 +181,12 @@ fn handle_review_rejection(
         Some(id) => id,
         None => return false,
     };
-    
+
     let rework_task = EventPayload::Task(TaskPayload {
-        description: format!("Address review feedback structurally physically on {}", implement_id),
+        description: format!(
+            "Address review feedback structurally physically on {}",
+            implement_id
+        ),
         preconditions: "Review Dissent Documented".to_string(),
         postconditions: "Feedback addressed entirely".to_string(),
         validation_strategy: "Unit Tests + Native DAG Flow".to_string(),
@@ -187,7 +196,8 @@ fn handle_review_rejection(
     });
     if let Ok(rework_id) = writer.log_event(rework_task) {
         let _ = writer.log_event(EventPayload::BlockedBy(BlockedByPayload {
-            source: rework_id, target: task_id.clone()
+            source: rework_id,
+            target: task_id.clone(),
         }));
     }
     true
@@ -207,7 +217,7 @@ fn handle_review_approval(
         Some(id) => id,
         None => return false,
     };
-    
+
     let task_branch = format!("refs/heads/nancy/tasks/{}", implement_id);
     let feat_ref = match repo.find_reference(&feature_ref_name) {
         Ok(r) => r,
@@ -220,10 +230,18 @@ fn handle_review_approval(
     let feat_commit = feat_ref.peel_to_commit().unwrap();
     let task_commit = task_ref.peel_to_commit().unwrap();
 
-    if repo.graph_descendant_of(task_commit.id(), feat_commit.id()).unwrap_or(false) {
-        tracing::info!("Coordinator fast-forwarding {} to {}", feature_ref_name, task_commit.id());
+    if repo
+        .graph_descendant_of(task_commit.id(), feat_commit.id())
+        .unwrap_or(false)
+    {
+        tracing::info!(
+            "Coordinator fast-forwarding {} to {}",
+            feature_ref_name,
+            task_commit.id()
+        );
         let mut mutable_feat = feat_ref;
-        let res = mutable_feat.set_target(task_commit.id(), "Nancy Coordinator: --ff-only acceptance");
+        let res =
+            mutable_feat.set_target(task_commit.id(), "Nancy Coordinator: --ff-only acceptance");
         tracing::debug!("Set target result is_ok: {}", res.is_ok());
         false
     } else {
@@ -314,21 +332,36 @@ mod tests {
         let rt = tokio::runtime::Runtime::new().unwrap();
         rt.block_on(async {
             let mut coord = Coordinator::new(temp_dir.path()).await.unwrap();
-            coord.run_until(0, None, |appview| {
-                if appview.tasks.values().any(|ev| {
-                    if let EventPayload::Task(t) = ev { t.action == TaskAction::Plan } else { false }
-                }) { true } else { false }
-            }).await
+            coord
+                .run_until(0, None, |appview| {
+                    if appview.tasks.values().any(|ev| {
+                        if let EventPayload::Task(t) = ev {
+                            t.action == TaskAction::Plan
+                        } else {
+                            false
+                        }
+                    }) {
+                        true
+                    } else {
+                        false
+                    }
+                })
+                .await
         })?;
 
         let root_reader = Reader::new(&repo, coordinator_did);
         for ev_res in root_reader.iter_events()? {
             let env = ev_res?;
             if let EventPayload::Task(t) = env.payload {
-                if t.action == TaskAction::Plan { condition_met = true; }
+                if t.action == TaskAction::Plan {
+                    condition_met = true;
+                }
             }
         }
-        assert!(condition_met, "Coordinator failed to generate TaskAction::Plan!");
+        assert!(
+            condition_met,
+            "Coordinator failed to generate TaskAction::Plan!"
+        );
         Ok(())
     }
 
@@ -341,49 +374,84 @@ mod tests {
         fs::create_dir_all(&nancy_dir)?;
 
         let coord_identity = Identity::Coordinator {
-            did: DidOwner { did: "mock1".to_string(), public_key_hex: "00".to_string(), private_key_hex: "00".to_string() },
+            did: DidOwner {
+                did: "mock1".to_string(),
+                public_key_hex: "00".to_string(),
+                private_key_hex: "00".to_string(),
+            },
             workers: vec![],
             dreamer: crate::schema::identity_config::DidOwner::generate(),
             human: Some(crate::schema::identity_config::DidOwner::generate()),
         };
-        fs::write(nancy_dir.join("identity.json"), serde_json::to_string(&coord_identity)?)?;
+        fs::write(
+            nancy_dir.join("identity.json"),
+            serde_json::to_string(&coord_identity)?,
+        )?;
         let writer = Writer::new(&repo, coord_identity)?;
 
         let implement_id = writer.log_event(EventPayload::Task(TaskPayload {
-            action: TaskAction::Implement, description: "".to_string(), preconditions: "".to_string(),
-            postconditions: "".to_string(), validation_strategy: "".to_string(), branch: "TBD".to_string(), plan: None
+            action: TaskAction::Implement,
+            description: "".to_string(),
+            preconditions: "".to_string(),
+            postconditions: "".to_string(),
+            validation_strategy: "".to_string(),
+            branch: "TBD".to_string(),
+            plan: None,
         }))?;
         let review_id = writer.log_event(EventPayload::Task(TaskPayload {
-            action: TaskAction::ReviewImplementation, description: "".to_string(), preconditions: "".to_string(),
-            postconditions: "".to_string(), validation_strategy: "".to_string(), branch: "TBD".to_string(), plan: None
+            action: TaskAction::ReviewImplementation,
+            description: "".to_string(),
+            preconditions: "".to_string(),
+            postconditions: "".to_string(),
+            validation_strategy: "".to_string(),
+            branch: "TBD".to_string(),
+            plan: None,
         }))?;
-        writer.log_event(EventPayload::BlockedBy(BlockedByPayload { source: implement_id.clone(), target: review_id.clone() }))?;
+        writer.log_event(EventPayload::BlockedBy(BlockedByPayload {
+            source: implement_id.clone(),
+            target: review_id.clone(),
+        }))?;
 
-        let assignment_id = writer.log_event(EventPayload::CoordinatorAssignment(crate::schema::task::CoordinatorAssignmentPayload {
-            task_ref: review_id.clone(), assignee_did: "mock1".to_string(),
-        }))?;
+        let assignment_id = writer.log_event(EventPayload::CoordinatorAssignment(
+            crate::schema::task::CoordinatorAssignmentPayload {
+                task_ref: review_id.clone(),
+                assignee_did: "mock1".to_string(),
+            },
+        ))?;
 
         let review_output = crate::pre_review::schema::ReviewOutput {
-            vote: crate::pre_review::schema::ReviewVote::ChangesRequired, agree_notes: String::new(), disagree_notes: String::new(),
-            task_feedback: vec![], tdd_feedback: None,
+            vote: crate::pre_review::schema::ReviewVote::ChangesRequired,
+            agree_notes: String::new(),
+            disagree_notes: String::new(),
+            task_feedback: vec![],
+            tdd_feedback: None,
         };
-        writer.log_event(EventPayload::AssignmentComplete(AssignmentCompletePayload {
-            assignment_ref: assignment_id, report: serde_json::to_string(&review_output)?,
-        }))?;
+        writer.log_event(EventPayload::AssignmentComplete(
+            AssignmentCompletePayload {
+                assignment_ref: assignment_id,
+                report: serde_json::to_string(&review_output)?,
+            },
+        ))?;
         writer.commit_batch()?;
 
         let rt = tokio::runtime::Runtime::new().unwrap();
         rt.block_on(async {
             let _ = tokio::time::timeout(std::time::Duration::from_secs(5), async {
                 let mut coord = Coordinator::new(temp_dir.path()).await.unwrap();
-                coord.run_until(0, None, |appview| {
-                    appview.tasks.iter().any(|(id, payload)| {
-                        if let EventPayload::Task(t) = payload {
-                             t.action == TaskAction::Implement && id != &implement_id
-                        } else { false }
+                coord
+                    .run_until(0, None, |appview| {
+                        appview.tasks.iter().any(|(id, payload)| {
+                            if let EventPayload::Task(t) = payload {
+                                t.action == TaskAction::Implement && id != &implement_id
+                            } else {
+                                false
+                            }
+                        })
                     })
-                }).await
-            }).await.expect("Test deadlocked and timed out! Check diagnostic print traces!");
+                    .await
+            })
+            .await
+            .expect("Test deadlocked and timed out! Check diagnostic print traces!");
         });
         Ok(())
     }
@@ -397,12 +465,19 @@ mod tests {
         fs::create_dir_all(&nancy_dir)?;
 
         let coord_identity = Identity::Coordinator {
-            did: DidOwner { did: "mock1".to_string(), public_key_hex: "00".to_string(), private_key_hex: "00".to_string() },
+            did: DidOwner {
+                did: "mock1".to_string(),
+                public_key_hex: "00".to_string(),
+                private_key_hex: "00".to_string(),
+            },
             workers: vec![],
             dreamer: crate::schema::identity_config::DidOwner::generate(),
             human: Some(crate::schema::identity_config::DidOwner::generate()),
         };
-        fs::write(nancy_dir.join("identity.json"), serde_json::to_string(&coord_identity)?)?;
+        fs::write(
+            nancy_dir.join("identity.json"),
+            serde_json::to_string(&coord_identity)?,
+        )?;
 
         let mut index = repo.index()?;
         let tree_id = index.write_tree()?;
@@ -414,49 +489,98 @@ mod tests {
 
         let writer = Writer::new(&repo, coord_identity)?;
         let implement_id = writer.log_event(EventPayload::Task(TaskPayload {
-            action: TaskAction::Implement, description: "".to_string(), preconditions: "".to_string(),
-            postconditions: "".to_string(), validation_strategy: "".to_string(), branch: "TBD".to_string(), plan: None
+            action: TaskAction::Implement,
+            description: "".to_string(),
+            preconditions: "".to_string(),
+            postconditions: "".to_string(),
+            validation_strategy: "".to_string(),
+            branch: "TBD".to_string(),
+            plan: None,
         }))?;
-        repo.branch(&format!("nancy/tasks/{}", implement_id), &commit1_obj, false)?;
+        repo.branch(
+            &format!("nancy/tasks/{}", implement_id),
+            &commit1_obj,
+            false,
+        )?;
         let review_plan_id = writer.log_event(EventPayload::Task(TaskPayload {
-            action: TaskAction::Plan, description: "".to_string(), preconditions: "".to_string(),
-            postconditions: "".to_string(), validation_strategy: "".to_string(), branch: "TBD".to_string(), plan: None
+            action: TaskAction::Plan,
+            description: "".to_string(),
+            preconditions: "".to_string(),
+            postconditions: "".to_string(),
+            validation_strategy: "".to_string(),
+            branch: "TBD".to_string(),
+            plan: None,
         }))?;
-        repo.branch(&format!("nancy/features/{}", review_plan_id), &commit1_obj, false)?;
-        repo.reference(&format!("refs/heads/nancy/features/{}", review_plan_id), commit2, true, "Advance")?;
-        writer.log_event(EventPayload::BlockedBy(BlockedByPayload { source: review_plan_id.clone(), target: implement_id.clone() }))?;
+        repo.branch(
+            &format!("nancy/features/{}", review_plan_id),
+            &commit1_obj,
+            false,
+        )?;
+        repo.reference(
+            &format!("refs/heads/nancy/features/{}", review_plan_id),
+            commit2,
+            true,
+            "Advance",
+        )?;
+        writer.log_event(EventPayload::BlockedBy(BlockedByPayload {
+            source: review_plan_id.clone(),
+            target: implement_id.clone(),
+        }))?;
 
         let review_id = writer.log_event(EventPayload::Task(TaskPayload {
-            action: TaskAction::ReviewImplementation, description: "".to_string(), preconditions: "".to_string(),
-            postconditions: "".to_string(), validation_strategy: "".to_string(), branch: "TBD".to_string(), plan: None
+            action: TaskAction::ReviewImplementation,
+            description: "".to_string(),
+            preconditions: "".to_string(),
+            postconditions: "".to_string(),
+            validation_strategy: "".to_string(),
+            branch: "TBD".to_string(),
+            plan: None,
         }))?;
-        writer.log_event(EventPayload::BlockedBy(BlockedByPayload { source: implement_id.clone(), target: review_id.clone() }))?;
+        writer.log_event(EventPayload::BlockedBy(BlockedByPayload {
+            source: implement_id.clone(),
+            target: review_id.clone(),
+        }))?;
 
-        let assignment_id = writer.log_event(EventPayload::CoordinatorAssignment(crate::schema::task::CoordinatorAssignmentPayload {
-            task_ref: review_id.clone(), assignee_did: "mock1".to_string()
-        }))?;
+        let assignment_id = writer.log_event(EventPayload::CoordinatorAssignment(
+            crate::schema::task::CoordinatorAssignmentPayload {
+                task_ref: review_id.clone(),
+                assignee_did: "mock1".to_string(),
+            },
+        ))?;
 
         let review_output = crate::pre_review::schema::ReviewOutput {
-            vote: crate::pre_review::schema::ReviewVote::Approve, agree_notes: "".to_string(), disagree_notes: "".to_string(),
-            task_feedback: vec![], tdd_feedback: None,
+            vote: crate::pre_review::schema::ReviewVote::Approve,
+            agree_notes: "".to_string(),
+            disagree_notes: "".to_string(),
+            task_feedback: vec![],
+            tdd_feedback: None,
         };
-        writer.log_event(EventPayload::AssignmentComplete(AssignmentCompletePayload {
-            assignment_ref: assignment_id, report: serde_json::to_string(&review_output)?
-        }))?;
+        writer.log_event(EventPayload::AssignmentComplete(
+            AssignmentCompletePayload {
+                assignment_ref: assignment_id,
+                report: serde_json::to_string(&review_output)?,
+            },
+        ))?;
         writer.commit_batch()?;
 
         let rt = tokio::runtime::Runtime::new().unwrap();
         rt.block_on(async {
             let _ = tokio::time::timeout(std::time::Duration::from_secs(5), async {
                 let mut coord = Coordinator::new(temp_dir.path()).await.unwrap();
-                coord.run_until(0, None, |appview| {
-                    appview.tasks.values().any(|payload| {
-                        if let EventPayload::Task(t) = payload {
-                            t.description.contains("Resolve merge conflict on")
-                        } else { false }
+                coord
+                    .run_until(0, None, |appview| {
+                        appview.tasks.values().any(|payload| {
+                            if let EventPayload::Task(t) = payload {
+                                t.description.contains("Resolve merge conflict on")
+                            } else {
+                                false
+                            }
+                        })
                     })
-                }).await
-            }).await.expect("Test completely timed out via timeout boundary!");
+                    .await
+            })
+            .await
+            .expect("Test completely timed out via timeout boundary!");
         });
         Ok(())
     }
@@ -469,47 +593,81 @@ mod tests {
         let nancy_dir = temp_dir.path().join(".nancy");
         fs::create_dir_all(&nancy_dir)?;
         let coord_identity = Identity::Coordinator {
-            did: DidOwner { did: "mock1".to_string(), public_key_hex: "00".to_string(), private_key_hex: "00".to_string() },
+            did: DidOwner {
+                did: "mock1".to_string(),
+                public_key_hex: "00".to_string(),
+                private_key_hex: "00".to_string(),
+            },
             workers: vec![],
             dreamer: crate::schema::identity_config::DidOwner::generate(),
             human: Some(crate::schema::identity_config::DidOwner::generate()),
         };
-        fs::write(nancy_dir.join("identity.json"), serde_json::to_string(&coord_identity)?)?;
+        fs::write(
+            nancy_dir.join("identity.json"),
+            serde_json::to_string(&coord_identity)?,
+        )?;
         let writer = Writer::new(&repo, coord_identity)?;
         let mut appview = AppView::new();
         let implement_payload = EventPayload::Task(TaskPayload {
-            action: TaskAction::Implement, description: "".to_string(), preconditions: "".to_string(),
-            postconditions: "".to_string(), validation_strategy: "".to_string(), branch: "TBD".to_string(), plan: None
+            action: TaskAction::Implement,
+            description: "".to_string(),
+            preconditions: "".to_string(),
+            postconditions: "".to_string(),
+            validation_strategy: "".to_string(),
+            branch: "TBD".to_string(),
+            plan: None,
         });
         let implement_id = writer.log_event(implement_payload.clone())?;
         appview.apply_event(&implement_payload, &implement_id);
         let review_payload = EventPayload::Task(TaskPayload {
-            action: TaskAction::ReviewImplementation, description: "".to_string(), preconditions: "".to_string(),
-            postconditions: "".to_string(), validation_strategy: "".to_string(), branch: "TBD".to_string(), plan: None
+            action: TaskAction::ReviewImplementation,
+            description: "".to_string(),
+            preconditions: "".to_string(),
+            postconditions: "".to_string(),
+            validation_strategy: "".to_string(),
+            branch: "TBD".to_string(),
+            plan: None,
         });
         let review_id = writer.log_event(review_payload.clone())?;
         appview.apply_event(&review_payload, &review_id);
-        let blocked_by_payload = EventPayload::BlockedBy(BlockedByPayload { source: implement_id.clone(), target: review_id.clone() });
+        let blocked_by_payload = EventPayload::BlockedBy(BlockedByPayload {
+            source: implement_id.clone(),
+            target: review_id.clone(),
+        });
         writer.log_event(blocked_by_payload.clone())?;
-        appview.apply_event(&blocked_by_payload, "ev_block_id"); 
+        appview.apply_event(&blocked_by_payload, "ev_block_id");
         let report = crate::pre_review::schema::ReviewOutput {
             vote: crate::pre_review::schema::ReviewVote::ChangesRequired,
-            agree_notes: "".to_string(), disagree_notes: "".to_string(), task_feedback: vec![], tdd_feedback: None,
+            agree_notes: "".to_string(),
+            disagree_notes: "".to_string(),
+            task_feedback: vec![],
+            tdd_feedback: None,
         };
-        appview.completed_reports.insert(review_id.clone(), serde_json::to_string(&report)?);
+        appview
+            .completed_reports
+            .insert(review_id.clone(), serde_json::to_string(&report)?);
         let handled = handle_review_rejection(&appview, &writer, &review_id);
-        assert!(handled, "Direct unit test for review rejection failed: returned false");
+        assert!(
+            handled,
+            "Direct unit test for review rejection failed: returned false"
+        );
         writer.commit_batch()?;
         let mut rework_logged = false;
         let reader = Reader::new(&repo, "mock1".to_string());
         for ev in reader.iter_events()? {
             if let EventPayload::Task(t) = ev?.payload {
-                if t.description.contains(&implement_id) && t.action == TaskAction::Implement && t.preconditions.contains("Review Dissent") {
+                if t.description.contains(&implement_id)
+                    && t.action == TaskAction::Implement
+                    && t.preconditions.contains("Review Dissent")
+                {
                     rework_logged = true;
                 }
             }
         }
-        assert!(rework_logged, "Rework task not logged during test boundaries!");
+        assert!(
+            rework_logged,
+            "Rework task not logged during test boundaries!"
+        );
         Ok(())
     }
 
@@ -521,13 +679,20 @@ mod tests {
         let nancy_dir = temp_dir.path().join(".nancy");
         fs::create_dir_all(&nancy_dir)?;
         let coord_identity = Identity::Coordinator {
-            did: DidOwner { did: "mock1".to_string(), public_key_hex: "00".to_string(), private_key_hex: "00".to_string() },
+            did: DidOwner {
+                did: "mock1".to_string(),
+                public_key_hex: "00".to_string(),
+                private_key_hex: "00".to_string(),
+            },
             workers: vec![],
             dreamer: crate::schema::identity_config::DidOwner::generate(),
             human: Some(crate::schema::identity_config::DidOwner::generate()),
         };
-        fs::write(nancy_dir.join("identity.json"), serde_json::to_string(&coord_identity)?)?;
-        
+        fs::write(
+            nancy_dir.join("identity.json"),
+            serde_json::to_string(&coord_identity)?,
+        )?;
+
         let mut index = repo.index()?;
         let tree_id = index.write_tree()?;
         let tree = repo.find_tree(tree_id)?;
@@ -540,47 +705,89 @@ mod tests {
         let mut appview = AppView::new();
 
         let implement_payload = EventPayload::Task(TaskPayload {
-            action: TaskAction::Implement, description: "".to_string(), preconditions: "".to_string(),
-            postconditions: "".to_string(), validation_strategy: "".to_string(), branch: "TBD".to_string(), plan: None
+            action: TaskAction::Implement,
+            description: "".to_string(),
+            preconditions: "".to_string(),
+            postconditions: "".to_string(),
+            validation_strategy: "".to_string(),
+            branch: "TBD".to_string(),
+            plan: None,
         });
         let implement_id = writer.log_event(implement_payload.clone())?;
-        repo.branch(&format!("nancy/tasks/{}", implement_id), &commit1_obj, false)?;
+        repo.branch(
+            &format!("nancy/tasks/{}", implement_id),
+            &commit1_obj,
+            false,
+        )?;
         appview.apply_event(&implement_payload, &implement_id);
 
         let review_plan_payload = EventPayload::Task(TaskPayload {
-            action: TaskAction::Plan, description: "".to_string(), preconditions: "".to_string(),
-            postconditions: "".to_string(), validation_strategy: "".to_string(), branch: "TBD".to_string(), plan: None
+            action: TaskAction::Plan,
+            description: "".to_string(),
+            preconditions: "".to_string(),
+            postconditions: "".to_string(),
+            validation_strategy: "".to_string(),
+            branch: "TBD".to_string(),
+            plan: None,
         });
         let review_plan_id = writer.log_event(review_plan_payload.clone())?;
-        repo.branch(&format!("nancy/features/{}", review_plan_id), &commit1_obj, false)?;
-        repo.reference(&format!("refs/heads/nancy/features/{}", review_plan_id), commit2, true, "Advance")?;
+        repo.branch(
+            &format!("nancy/features/{}", review_plan_id),
+            &commit1_obj,
+            false,
+        )?;
+        repo.reference(
+            &format!("refs/heads/nancy/features/{}", review_plan_id),
+            commit2,
+            true,
+            "Advance",
+        )?;
         appview.apply_event(&review_plan_payload, &review_plan_id);
-        
-        let plan_block = EventPayload::BlockedBy(BlockedByPayload { source: review_plan_id.clone(), target: implement_id.clone() });
-        appview.apply_event(&plan_block, "plan_block_id"); 
+
+        let plan_block = EventPayload::BlockedBy(BlockedByPayload {
+            source: review_plan_id.clone(),
+            target: implement_id.clone(),
+        });
+        appview.apply_event(&plan_block, "plan_block_id");
         let review_payload = EventPayload::Task(TaskPayload {
-            action: TaskAction::ReviewImplementation, description: "".to_string(), preconditions: "".to_string(),
-            postconditions: "".to_string(), validation_strategy: "".to_string(), branch: "TBD".to_string(), plan: None
+            action: TaskAction::ReviewImplementation,
+            description: "".to_string(),
+            preconditions: "".to_string(),
+            postconditions: "".to_string(),
+            validation_strategy: "".to_string(),
+            branch: "TBD".to_string(),
+            plan: None,
         });
         let review_id = writer.log_event(review_payload.clone())?;
         appview.apply_event(&review_payload, &review_id);
-        let blocked_by_payload = EventPayload::BlockedBy(BlockedByPayload { source: implement_id.clone(), target: review_id.clone() });
+        let blocked_by_payload = EventPayload::BlockedBy(BlockedByPayload {
+            source: implement_id.clone(),
+            target: review_id.clone(),
+        });
         appview.apply_event(&blocked_by_payload, "ev_block_id");
 
         let handled = handle_review_approval(&repo, &appview, &writer, &review_id);
-        assert!(handled, "Direct unit test for review approval failed mapping conflict boundaries");
+        assert!(
+            handled,
+            "Direct unit test for review approval failed mapping conflict boundaries"
+        );
         writer.commit_batch()?;
 
         let mut conflict_logged = false;
         let reader = Reader::new(&repo, "mock1".to_string());
         for ev in reader.iter_events()? {
             if let EventPayload::Task(t) = ev?.payload {
-                if t.description.contains(&format!("Resolve merge conflict on {}", implement_id)) {
+                if t.description
+                    .contains(&format!("Resolve merge conflict on {}", implement_id))
+                {
                     conflict_logged = true;
                 }
             }
         }
-        assert!(conflict_logged, "Conflict task not successfully emitted into ledger structurally!");
+        assert!(
+            conflict_logged,
+            "Conflict task not successfully emitted into ledger structurally!"
+        );
         Ok(())
     }
 
@@ -592,20 +799,28 @@ mod tests {
         let nancy_dir = temp_dir.path().join(".nancy");
         fs::create_dir_all(&nancy_dir)?;
         let coord_identity = Identity::Coordinator {
-            did: DidOwner { did: "mock1".to_string(), public_key_hex: "00".to_string(), private_key_hex: "00".to_string() },
+            did: DidOwner {
+                did: "mock1".to_string(),
+                public_key_hex: "00".to_string(),
+                private_key_hex: "00".to_string(),
+            },
             workers: vec![],
             dreamer: crate::schema::identity_config::DidOwner::generate(),
             human: Some(crate::schema::identity_config::DidOwner::generate()),
         };
-        fs::write(nancy_dir.join("identity.json"), serde_json::to_string(&coord_identity)?)?;
+        fs::write(
+            nancy_dir.join("identity.json"),
+            serde_json::to_string(&coord_identity)?,
+        )?;
         let writer = Writer::new(&repo, coord_identity)?;
         let mut appview = AppView::new();
 
         let req_payload = EventPayload::TaskRequest(TaskRequestPayload {
-            description: "Test Request".to_string(), requestor: "test_user".to_string(),
+            description: "Test Request".to_string(),
+            requestor: "test_user".to_string(),
         });
         appview.apply_event(&req_payload, "req1");
-        
+
         let mut processed = HashSet::new();
         let handled = handle_task_requests(&repo, &appview, &writer, &mut processed)?;
         assert!(handled, "Task requests should log Plan events");
@@ -615,10 +830,15 @@ mod tests {
         let reader = Reader::new(&repo, "mock1".to_string());
         for ev in reader.iter_events()? {
             if let EventPayload::Task(t) = ev?.payload {
-                if t.action == TaskAction::Plan && t.description == "Test Request" { plan_found = true; }
+                if t.action == TaskAction::Plan && t.description == "Test Request" {
+                    plan_found = true;
+                }
             }
         }
-        assert!(plan_found, "Plan event not produced for request boundary mapping limits!");
+        assert!(
+            plan_found,
+            "Plan event not produced for request boundary mapping limits!"
+        );
         Ok(())
     }
 
@@ -629,36 +849,66 @@ mod tests {
         let repo = &_tr.repo;
         let nancy_dir = temp_dir.path().join(".nancy");
         fs::create_dir_all(&nancy_dir)?;
-        let worker = DidOwner { did: "mockworker".to_string(), public_key_hex: "00".to_string(), private_key_hex: "00".to_string() };
+        let worker = DidOwner {
+            did: "mockworker".to_string(),
+            public_key_hex: "00".to_string(),
+            private_key_hex: "00".to_string(),
+        };
         let coord_identity = Identity::Coordinator {
-            did: DidOwner { did: "mock1".to_string(), public_key_hex: "00".to_string(), private_key_hex: "00".to_string() },
+            did: DidOwner {
+                did: "mock1".to_string(),
+                public_key_hex: "00".to_string(),
+                private_key_hex: "00".to_string(),
+            },
             workers: vec![worker.clone()],
             dreamer: crate::schema::identity_config::DidOwner::generate(),
             human: Some(crate::schema::identity_config::DidOwner::generate()),
         };
-        fs::write(nancy_dir.join("identity.json"), serde_json::to_string(&coord_identity)?)?;
+        fs::write(
+            nancy_dir.join("identity.json"),
+            serde_json::to_string(&coord_identity)?,
+        )?;
         let writer = Writer::new(&repo, coord_identity)?;
         let mut appview = AppView::new();
 
         let implement_payload = EventPayload::Task(TaskPayload {
-            action: TaskAction::Implement, description: "".to_string(), preconditions: "".to_string(),
-            postconditions: "".to_string(), validation_strategy: "".to_string(), branch: "TBD".to_string(), plan: None
+            action: TaskAction::Implement,
+            description: "".to_string(),
+            preconditions: "".to_string(),
+            postconditions: "".to_string(),
+            validation_strategy: "".to_string(),
+            branch: "TBD".to_string(),
+            plan: None,
         });
         appview.apply_event(&implement_payload, "impl1");
-        
+
         let mut processed = HashSet::new();
-        let handled = handle_work_assignments(&repo, &appview, &writer, &vec![worker.clone()], &mut processed)?;
-        assert!(handled, "Work assignments skipped cleanly without assigning bounds!");
+        let handled = handle_work_assignments(
+            &repo,
+            &appview,
+            &writer,
+            &vec![worker.clone()],
+            &mut processed,
+        )?;
+        assert!(
+            handled,
+            "Work assignments skipped cleanly without assigning bounds!"
+        );
         writer.commit_batch()?;
 
         let mut assigned = false;
         let reader = Reader::new(&repo, "mock1".to_string());
         for ev in reader.iter_events()? {
             if let EventPayload::CoordinatorAssignment(a) = ev?.payload {
-                if a.assignee_did == "mockworker" && a.task_ref == "impl1" { assigned = true; }
+                if a.assignee_did == "mockworker" && a.task_ref == "impl1" {
+                    assigned = true;
+                }
             }
         }
-        assert!(assigned, "CoordinatorAssignmentPayload structurally missing from the evaluation harness limits!");
+        assert!(
+            assigned,
+            "CoordinatorAssignmentPayload structurally missing from the evaluation harness limits!"
+        );
         Ok(())
     }
 }

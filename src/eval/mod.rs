@@ -52,7 +52,14 @@ impl EvalDefinition {
 
         if self.commits.is_empty() {
             let empty_tree = repo.find_tree(empty_tree_id)?;
-            repo.commit(Some("HEAD"), &sig, &sig, "Initial empty commit", &empty_tree, &[])?;
+            repo.commit(
+                Some("HEAD"),
+                &sig,
+                &sig,
+                "Initial empty commit",
+                &empty_tree,
+                &[],
+            )?;
         }
 
         Ok((temp_dir, repo))
@@ -116,12 +123,16 @@ impl EvalRunner {
         #[allow(deprecated)]
         let temp_dir = temp_dir_obj.into_path();
         let repo_path = temp_dir.as_path();
-        
-        tracing::info!("Eval test harness provisioned cleanly at: {}", repo_path.display());
+
+        tracing::info!(
+            "Eval test harness provisioned cleanly at: {}",
+            repo_path.display()
+        );
 
         crate::commands::init::init(&repo_path, 1).await?;
 
-        let identity_content = tokio::fs::read_to_string(repo_path.join(".nancy/identity.json")).await?;
+        let identity_content =
+            tokio::fs::read_to_string(repo_path.join(".nancy/identity.json")).await?;
         let id_obj: crate::schema::identity_config::Identity =
             serde_json::from_str(&identity_content)?;
         let coord = id_obj.get_did_owner().did.clone();
@@ -152,13 +163,12 @@ impl EvalRunner {
         Ok(())
     }
 
-
-
     pub async fn wait_for_completion<F>(&mut self, condition: F) -> anyhow::Result<()>
     where
         F: FnMut(&crate::coordinator::appview::AppView) -> bool,
     {
-        let mut coordinator = crate::commands::coordinator::Coordinator::new(self.temp_dir.as_path()).await?;
+        let mut coordinator =
+            crate::commands::coordinator::Coordinator::new(self.temp_dir.as_path()).await?;
         coordinator.run_until(0, None, condition).await?;
         Ok(())
     }
@@ -168,7 +178,11 @@ impl EvalRunner {
     }
 
     pub fn get_appview(&self) -> anyhow::Result<crate::coordinator::appview::AppView> {
-        Ok(crate::coordinator::appview::AppView::hydrate(&self.repo, &self.id_obj, None))
+        Ok(crate::coordinator::appview::AppView::hydrate(
+            &self.repo,
+            &self.id_obj,
+            None,
+        ))
     }
 
     pub fn get_request_hash(&self) -> anyhow::Result<String> {
@@ -209,12 +223,18 @@ mod tests {
         // Provision with virtual files and initial branch setup
         def.commits.push(CommitDef {
             message: "init".to_string(),
-            files: std::collections::HashMap::from([("test.rs".to_string(), "fn main() {}".to_string())]),
+            files: std::collections::HashMap::from([(
+                "test.rs".to_string(),
+                "fn main() {}".to_string(),
+            )]),
         });
 
         let (temp_dir_2, repo_2) = def.provision_repo().unwrap();
         let head = repo_2.head().unwrap();
-        assert_eq!(head.target().unwrap(), repo_2.revparse_single("HEAD").unwrap().id());
+        assert_eq!(
+            head.target().unwrap(),
+            repo_2.revparse_single("HEAD").unwrap().id()
+        );
 
         let head_commit = head.peel_to_commit().unwrap();
         assert_eq!(head_commit.message().unwrap(), "init");
@@ -227,9 +247,13 @@ mod tests {
 
         let mut _tr = crate::debug::test_repo::TestRepo::new().unwrap();
         let repo = &_tr.repo;
-        
+
         let id_obj = Identity::Coordinator {
-            did: DidOwner { did: "coord".into(), public_key_hex: "00".into(), private_key_hex: "00".into() },
+            did: DidOwner {
+                did: "coord".into(),
+                public_key_hex: "00".into(),
+                private_key_hex: "00".into(),
+            },
             workers: vec![],
             dreamer: crate::schema::identity_config::DidOwner::generate(),
             human: Some(crate::schema::identity_config::DidOwner::generate()),
@@ -237,7 +261,10 @@ mod tests {
 
         // When no extra workers exist, extraction skips fast naturally securely.
         let traces = extract_traces(&repo, &id_obj);
-        assert!(traces.is_empty(), "Traces mapping failed to handle 0 worker constraints safely");
+        assert!(
+            traces.is_empty(),
+            "Traces mapping failed to handle 0 worker constraints safely"
+        );
     }
 
     #[tokio::test]
@@ -250,19 +277,25 @@ mod tests {
 
         // Create the setup environment mapping successfully naturally
         let mut runner = EvalRunner::setup(&def).await?;
-        
+
         let condition_met = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let condition_met_clone = condition_met.clone();
-        
+
         // Timeout safe validation mapping inherently cleanly
         let res = tokio::time::timeout(std::time::Duration::from_millis(500), async move {
-            runner.wait_for_completion(move |_| {
-                condition_met_clone.store(true, std::sync::atomic::Ordering::SeqCst);
-                true // Satisfy the wait loop immediately to assert cleanly
-            }).await
-        }).await;
-        
-        assert!(res.is_ok(), "Native wait loop failed or deadlocked structurally");
+            runner
+                .wait_for_completion(move |_| {
+                    condition_met_clone.store(true, std::sync::atomic::Ordering::SeqCst);
+                    true // Satisfy the wait loop immediately to assert cleanly
+                })
+                .await
+        })
+        .await;
+
+        assert!(
+            res.is_ok(),
+            "Native wait loop failed or deadlocked structurally"
+        );
         assert!(condition_met.load(std::sync::atomic::Ordering::SeqCst));
         Ok(())
     }
@@ -271,10 +304,14 @@ mod tests {
     async fn test_get_request_hash_resolves_request_id_not_task_id() -> anyhow::Result<()> {
         let tr = crate::debug::test_repo::TestRepo::new().unwrap();
         let target_repo = &tr.repo;
-        
+
         use crate::schema::identity_config::*;
         let coord_identity = Identity::Coordinator {
-            did: DidOwner { did: "mock_test_1".to_string(), public_key_hex: "00".to_string(), private_key_hex: "00".to_string() },
+            did: DidOwner {
+                did: "mock_test_1".to_string(),
+                public_key_hex: "00".to_string(),
+                private_key_hex: "00".to_string(),
+            },
             workers: vec![],
             dreamer: crate::schema::identity_config::DidOwner::generate(),
             human: Some(crate::schema::identity_config::DidOwner::generate()),
@@ -282,10 +319,12 @@ mod tests {
 
         let writer = crate::events::writer::Writer::new(target_repo, coord_identity.clone())?;
 
-        let task_req = crate::schema::registry::EventPayload::TaskRequest(crate::schema::task::TaskRequestPayload {
-            requestor: "User".to_string(),
-            description: "Test Request Workflow".to_string(),
-        });
+        let task_req = crate::schema::registry::EventPayload::TaskRequest(
+            crate::schema::task::TaskRequestPayload {
+                requestor: "User".to_string(),
+                description: "Test Request Workflow".to_string(),
+            },
+        );
         let req_id = writer.log_event(task_req).unwrap();
 
         let task = crate::schema::registry::EventPayload::Task(crate::schema::task::TaskPayload {
@@ -310,9 +349,13 @@ mod tests {
         };
 
         let resolved_hash = runner.get_request_hash()?;
-        
-        assert_eq!(resolved_hash, req_id, "get_request_hash should resolve the request ID, but returned something else (possibly the task ID: {})", task_id);
-        
+
+        assert_eq!(
+            resolved_hash, req_id,
+            "get_request_hash should resolve the request ID, but returned something else (possibly the task ID: {})",
+            task_id
+        );
+
         Ok(())
     }
 }

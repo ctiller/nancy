@@ -5,8 +5,13 @@ use tokio::sync::watch;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SerializedElement {
-    Log { message: String },
-    Data { key: String, value: serde_json::Value },
+    Log {
+        message: String,
+    },
+    Data {
+        key: String,
+        value: serde_json::Value,
+    },
     Frame(SerializedFrame),
 }
 
@@ -29,13 +34,17 @@ pub enum StateElement {
 
 impl StateElement {
     pub fn snapshot(&self) -> SerializedElement {
+        self.snapshot_depth(usize::MAX)
+    }
+
+    pub fn snapshot_depth(&self, depth: usize) -> SerializedElement {
         match self {
             StateElement::Log(m) => SerializedElement::Log { message: m.clone() },
             StateElement::Data(k, v) => SerializedElement::Data {
                 key: k.clone(),
                 value: v.clone(),
             },
-            StateElement::Frame(f) => SerializedElement::Frame(f.snapshot()),
+            StateElement::Frame(f) => SerializedElement::Frame(f.snapshot_depth(depth)),
         }
     }
 }
@@ -59,15 +68,58 @@ impl FrameNode {
     }
 
     pub fn snapshot(&self) -> SerializedFrame {
-        let elements = self.elements.lock().unwrap();
+        self.snapshot_depth(usize::MAX)
+    }
+
+    pub fn snapshot_depth(&self, depth: usize) -> SerializedFrame {
         let status = self.status.lock().unwrap().clone();
         let rollup = self.rollup.lock().unwrap().clone();
+        let elements = if depth == 0 {
+            Vec::new() // Omit elements at depth 0
+        } else {
+            let elements_lock = self.elements.lock().unwrap();
+            elements_lock
+                .iter()
+                .map(|e| e.snapshot_depth(depth - 1))
+                .collect()
+        };
+
         SerializedFrame {
             name: self.name.clone(),
             status,
             rollup,
-            elements: elements.iter().map(|e| e.snapshot()).collect(),
+            elements,
         }
+    }
+
+    pub fn find_frame_by_path(&self, path: &[String]) -> Option<FrameNode> {
+        if path.is_empty() {
+            return Some(self.clone());
+        }
+        if path[0] == self.name {
+            if path.len() == 1 {
+                return Some(self.clone());
+            }
+            let elements = self.elements.lock().unwrap();
+            for el in elements.iter() {
+                if let StateElement::Frame(child) = el {
+                    if let Some(found) = child.find_frame_by_path(&path[1..]) {
+                        return Some(found);
+                    }
+                }
+            }
+        } else if self.name == "root" && path[0] != "root" {
+            // Implicitly allow paths starting below root when searching from root
+            let elements = self.elements.lock().unwrap();
+            for el in elements.iter() {
+                if let StateElement::Frame(child) = el {
+                    if let Some(found) = child.find_frame_by_path(path) {
+                        return Some(found);
+                    }
+                }
+            }
+        }
+        None
     }
 }
 
@@ -172,21 +224,23 @@ mod tests {
         let rx = tree_root.receiver.clone();
         assert_eq!(*rx.borrow(), 0);
 
-        INTROSPECTION_CTX.scope(ctx, async {
-            log("hello world");
-            data_log("my_key", serde_json::json!({"foo": "bar"}));
+        INTROSPECTION_CTX
+            .scope(ctx, async {
+                log("hello world");
+                data_log("my_key", serde_json::json!({"foo": "bar"}));
 
-            frame("child_task", async {
-                log("inside child");
-            }).await;
-
-        }).await;
+                frame("child_task", async {
+                    log("inside child");
+                })
+                .await;
+            })
+            .await;
 
         assert_eq!(*rx.borrow(), 4); // 4 updates total
 
         let snap2 = tree_root.root_frame.snapshot();
         assert_eq!(snap2.elements.len(), 3);
-        
+
         match &snap2.elements[0] {
             SerializedElement::Log { message } => assert_eq!(message, "hello world"),
             _ => panic!("Expected log"),
@@ -215,9 +269,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_frame_outside_context_runs_but_does_not_panic() {
-        let res = frame("orphaned", async {
-            42
-        }).await;
+        let res = frame("orphaned", async { 42 }).await;
         assert_eq!(res, 42);
         // logs outside should not panic (they use try_with and swallow Err)
         log("orphaned log");

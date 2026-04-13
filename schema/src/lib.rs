@@ -3,8 +3,13 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SerializedElement {
-    Log { message: String },
-    Data { key: String, value: serde_json::Value },
+    Log {
+        message: String,
+    },
+    Data {
+        key: String,
+        value: serde_json::Value,
+    },
     Frame(SerializedFrame),
 }
 
@@ -130,13 +135,20 @@ pub struct ReviewPlanPayload {
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Hash, Copy, PartialOrd, Ord)]
 pub enum LlmModel {
-    #[serde(rename = "gemini-2.5-flash-lite")] Gemini25FlashLite,
-    #[serde(rename = "gemini-2.5-flash")] Gemini25Flash,
-    #[serde(rename = "gemini-2.5-pro")] Gemini25Pro,
-    #[serde(rename = "gemini-3-flash-preview")] Gemini30FlashPreview,
-    #[serde(rename = "gemini-3.1-flash-lite-preview")] Gemini31FlashLitePreview,
-    #[serde(rename = "gemini-3.1-pro-preview")] Gemini31ProPreview,
-    #[serde(rename = "test_mock_model")] TestMockModel,
+    #[serde(rename = "gemini-2.5-flash-lite")]
+    Gemini25FlashLite,
+    #[serde(rename = "gemini-2.5-flash")]
+    Gemini25Flash,
+    #[serde(rename = "gemini-2.5-pro")]
+    Gemini25Pro,
+    #[serde(rename = "gemini-3-flash-preview")]
+    Gemini30FlashPreview,
+    #[serde(rename = "gemini-3.1-flash-lite-preview")]
+    Gemini31FlashLitePreview,
+    #[serde(rename = "gemini-3.1-pro-preview")]
+    Gemini31ProPreview,
+    #[serde(rename = "test_mock_model")]
+    TestMockModel,
 }
 
 impl LlmModel {

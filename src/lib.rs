@@ -2,6 +2,7 @@
 
 pub mod commands;
 pub mod coordinator;
+pub mod dreamer;
 pub mod eval;
 pub mod events;
 pub mod grind;
@@ -12,8 +13,7 @@ pub mod pre_review;
 pub mod schema;
 pub mod tasks;
 pub mod tools;
-pub mod dreamer;
 
+pub mod agent;
 #[cfg(test)]
 pub mod debug;
-pub mod agent;

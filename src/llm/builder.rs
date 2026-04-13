@@ -49,9 +49,8 @@ impl LlmBuilder {
         let uuid = uuid::Uuid::new_v4().to_string()[..8].to_string();
         let subagent = format!("{}_{}", name, uuid);
 
-        let default_fn: crate::llm::client::TaskPriorityFn = std::sync::Arc::new(|| {
-            Box::pin(std::future::ready(0.5))
-        });
+        let default_fn: crate::llm::client::TaskPriorityFn =
+            std::sync::Arc::new(|| Box::pin(std::future::ready(0.5)));
 
         Self {
             kind,
@@ -87,7 +86,10 @@ impl LlmBuilder {
         self
     }
 
-    pub fn with_shared_deadline(mut self, deadline: std::sync::Arc<std::sync::atomic::AtomicU64>) -> Self {
+    pub fn with_shared_deadline(
+        mut self,
+        deadline: std::sync::Arc<std::sync::atomic::AtomicU64>,
+    ) -> Self {
         self.shared_deadline = Some(deadline);
         self
     }
@@ -117,7 +119,9 @@ impl LlmBuilder {
 
     pub fn build(self) -> anyhow::Result<LlmClient> {
         if crate::llm::is_llm_banned() {
-            panic!("LLM Execution is explicitly banned in this process context bounding the system isolation!");
+            panic!(
+                "LLM Execution is explicitly banned in this process context bounding the system isolation!"
+            );
         }
 
         let api_key = std::env::var("GEMINI_API_KEY")
@@ -129,7 +133,8 @@ impl LlmBuilder {
         let is_looping = std::sync::Arc::new(std::sync::Mutex::new(None::<String>));
 
         if self.loop_detection {
-            let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<crate::llm::client::LoopEvent>();
+            let (tx, mut rx) =
+                tokio::sync::mpsc::unbounded_channel::<crate::llm::client::LoopEvent>();
             loop_event_tx = Some(tx);
             let is_looping_clone = is_looping.clone();
             let subagent_name = self.subagent.clone();
@@ -138,10 +143,17 @@ impl LlmBuilder {
                 let mut history = String::new();
                 while let Some(event) = rx.recv().await {
                     match event {
-                        crate::llm::client::LoopEvent::Prompt(p) => history.push_str(&format!("Prompt: {}\n", p)),
-                        crate::llm::client::LoopEvent::Response(r) => history.push_str(&format!("Response: {}\n", r)),
-                        crate::llm::client::LoopEvent::ToolCall { name, args } => history.push_str(&format!("ToolCall: {} args: {}\n", name, args)),
-                        crate::llm::client::LoopEvent::ToolResponse { name, response } => history.push_str(&format!("ToolResponse: {} resp: {}\n", name, response)),
+                        crate::llm::client::LoopEvent::Prompt(p) => {
+                            history.push_str(&format!("Prompt: {}\n", p))
+                        }
+                        crate::llm::client::LoopEvent::Response(r) => {
+                            history.push_str(&format!("Response: {}\n", r))
+                        }
+                        crate::llm::client::LoopEvent::ToolCall { name, args } => {
+                            history.push_str(&format!("ToolCall: {} args: {}\n", name, args))
+                        }
+                        crate::llm::client::LoopEvent::ToolResponse { name, response } => history
+                            .push_str(&format!("ToolResponse: {} resp: {}\n", name, response)),
                     }
 
                     let history_len = history.len();
@@ -151,9 +163,17 @@ impl LlmBuilder {
                         &history
                     };
 
-                    let prompt_text = format!("SYSTEM PROMPT: Analyze the trace to determine if the agent is stuck in a repetitive loop doing the exact same thing without making progress. If it is looping, provide a short description of the specific loop pattern detected. Return your answer as a JSON object matching the requested schema.\n\nTRACE:\n{}", trimmed_history);
-                    
-                    if let Ok(mut checker) = fast_llm(&format!("{}_loop_detector", subagent_name)).system_prompt("You are a loop detector. Extract the loop details structurally.").build() {
+                    let prompt_text = format!(
+                        "SYSTEM PROMPT: Analyze the trace to determine if the agent is stuck in a repetitive loop doing the exact same thing without making progress. If it is looping, provide a short description of the specific loop pattern detected. Return your answer as a JSON object matching the requested schema.\n\nTRACE:\n{}",
+                        trimmed_history
+                    );
+
+                    if let Ok(mut checker) = fast_llm(&format!("{}_loop_detector", subagent_name))
+                        .system_prompt(
+                            "You are a loop detector. Extract the loop details structurally.",
+                        )
+                        .build()
+                    {
                         if let Ok(status) = checker.ask::<LoopDetectionStatus>(&prompt_text).await {
                             if status.is_looping {
                                 if let Some(desc) = status.loop_description {
@@ -187,7 +207,11 @@ impl LlmBuilder {
             created_at: std::time::Instant::now(),
             shared_deadline: self.shared_deadline,
             loop_event_tx,
-            is_looping: if self.loop_detection { Some(is_looping) } else { None },
+            is_looping: if self.loop_detection {
+                Some(is_looping)
+            } else {
+                None
+            },
             task_priority: self.task_priority,
             local_market_weight: self.local_market_weight,
         })
@@ -197,8 +221,12 @@ impl LlmBuilder {
         match (kind, version) {
             (Kind::Fast, Version::V2_5) => schema::LlmModel::Gemini25Flash,
             (Kind::Fast, Version::V3_1) => schema::LlmModel::Gemini30FlashPreview,
-            (Kind::Thinking, Version::V2_5) | (Kind::Flexible(_), Version::V2_5) => schema::LlmModel::Gemini25Pro,
-            (Kind::Thinking, Version::V3_1) | (Kind::Flexible(_), Version::V3_1) => schema::LlmModel::Gemini31ProPreview,
+            (Kind::Thinking, Version::V2_5) | (Kind::Flexible(_), Version::V2_5) => {
+                schema::LlmModel::Gemini25Pro
+            }
+            (Kind::Thinking, Version::V3_1) | (Kind::Flexible(_), Version::V3_1) => {
+                schema::LlmModel::Gemini31ProPreview
+            }
         }
     }
 }
@@ -206,7 +234,6 @@ impl LlmBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
 
     #[test]
     fn test_resolve_model() {

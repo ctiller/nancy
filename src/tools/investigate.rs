@@ -11,73 +11,102 @@ pub struct AskHuman {
 
 impl AskHuman {
     pub async fn start(question: &str, task_name: &str, agent_path: &str) -> Option<Self> {
-        if std::env::var("NANCY_HUMAN_DID").is_err() { return None; }
-        
+        if std::env::var("NANCY_HUMAN_DID").is_err() {
+            return None;
+        }
+
         let repo_path = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
         let r = git2::Repository::discover(&repo_path).ok()?;
         let wd = r.workdir().unwrap_or(&repo_path);
-        let id_obj = crate::schema::identity_config::Identity::load(wd).await.ok()?;
+        let id_obj = crate::schema::identity_config::Identity::load(wd)
+            .await
+            .ok()?;
         let writer = crate::events::writer::Writer::new(&r, id_obj).ok()?;
-        
-        let aref = format!("ask_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos());
-        
-        let payload = crate::schema::registry::EventPayload::Ask(
-            crate::schema::task::AskPayload {
-                item_ref: aref.clone(),
-                question: question.to_string(),
-                agent_path: agent_path.to_string(),
-                task_name: task_name.to_string(),
-            }
+
+        let aref = format!(
+            "ask_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
         );
+
+        let payload = crate::schema::registry::EventPayload::Ask(crate::schema::task::AskPayload {
+            item_ref: aref.clone(),
+            question: question.to_string(),
+            agent_path: agent_path.to_string(),
+            task_name: task_name.to_string(),
+        });
         let _ = writer.log_event(payload);
         let _ = writer.commit_batch();
-        
-        Some(Self { item_ref: aref, repo_path })
+
+        Some(Self {
+            item_ref: aref,
+            repo_path,
+        })
     }
 
     pub async fn wait_for_response(&self) -> String {
-        let Ok(human_did) = std::env::var("NANCY_HUMAN_DID") else { return String::new() };
-        
+        let Ok(human_did) = std::env::var("NANCY_HUMAN_DID") else {
+            return String::new();
+        };
+
         let mut human_appended_response = String::new();
         let mut should_wait = false;
-        
+
         if let Ok(r) = git2::Repository::discover(&self.repo_path) {
             let reader = crate::events::reader::Reader::new(&r, human_did.clone());
             if let Ok(iter) = reader.iter_events() {
                 for ev in iter.flatten() {
                     if let crate::schema::registry::EventPayload::Seen(s) = &ev.payload {
-                        if s.item_ref == self.item_ref { should_wait = true; }
-                    } else if let crate::schema::registry::EventPayload::HumanResponse(hr) = &ev.payload {
+                        if s.item_ref == self.item_ref {
+                            should_wait = true;
+                        }
+                    } else if let crate::schema::registry::EventPayload::HumanResponse(hr) =
+                        &ev.payload
+                    {
                         if hr.item_ref == self.item_ref {
-                            human_appended_response = format!("\n\n[HUMAN RESPONSE TO YOUR ASK]: {}", hr.text_response);
+                            human_appended_response =
+                                format!("\n\n[HUMAN RESPONSE TO YOUR ASK]: {}", hr.text_response);
                             should_wait = false;
                         }
                     }
                 }
             }
         }
-        
+
         if should_wait && human_appended_response.is_empty() {
-            let sleep_time = if std::env::var("NANCY_TEST_POLL_TIMEOUT").is_ok() { 50 } else { 1000 };
+            let sleep_time = if std::env::var("NANCY_TEST_POLL_TIMEOUT").is_ok() {
+                50
+            } else {
+                1000
+            };
             for _ in 0..30 {
                 tokio::time::sleep(std::time::Duration::from_millis(sleep_time)).await;
                 if let Ok(r) = git2::Repository::discover(&self.repo_path) {
                     let reader2 = crate::events::reader::Reader::new(&r, human_did.clone());
                     if let Ok(iter) = reader2.iter_events() {
                         for ev in iter.flatten() {
-                            if let crate::schema::registry::EventPayload::HumanResponse(hr) = &ev.payload {
+                            if let crate::schema::registry::EventPayload::HumanResponse(hr) =
+                                &ev.payload
+                            {
                                 if hr.item_ref == self.item_ref {
-                                    human_appended_response = format!("\n\n[HUMAN RESPONSE TO YOUR ASK]: {}", hr.text_response);
+                                    human_appended_response = format!(
+                                        "\n\n[HUMAN RESPONSE TO YOUR ASK]: {}",
+                                        hr.text_response
+                                    );
                                     break;
                                 }
                             }
                         }
                     }
                 }
-                if !human_appended_response.is_empty() { break; }
+                if !human_appended_response.is_empty() {
+                    break;
+                }
             }
         }
-        
+
         human_appended_response
     }
 
@@ -89,7 +118,7 @@ impl AskHuman {
                     let payload = crate::schema::registry::EventPayload::CancelItem(
                         crate::schema::task::CancelItemPayload {
                             item_ref: self.item_ref.clone(),
-                        }
+                        },
                     );
                     let _ = writer.log_event(payload);
                 }
@@ -99,10 +128,10 @@ impl AskHuman {
 }
 
 pub async fn investigate_impl(
-    perms: Arc<crate::tools::filesystem::Permissions>, 
+    perms: Arc<crate::tools::filesystem::Permissions>,
     question: String,
     task_name: String,
-    agent_path: String
+    agent_path: String,
 ) -> anyhow::Result<String> {
     let system_prompt = r#"You are an expert forensic programmer and autonomous system investigator.
 Your objective is to comprehensively map, diagnose, and answer the given question by actively exploring the system using your available toolkit.
@@ -145,48 +174,54 @@ Follow these critical principles:
 
 /// A parallelism helper to run multiple investigate tools simultaneously.
 pub async fn multi_investigate_impl(
-    perms: Arc<crate::tools::filesystem::Permissions>, 
+    perms: Arc<crate::tools::filesystem::Permissions>,
     questions: Vec<String>,
     task_name: String,
-    agent_path: String
+    agent_path: String,
 ) -> anyhow::Result<Vec<String>> {
-    let futures = questions
-        .into_iter()
-        .map(|q| {
-            let p = Arc::clone(&perms);
-            let t = task_name.clone();
-            let a = agent_path.clone();
-            async move { investigate_impl(p, q, t, a).await }
-        });
+    let futures = questions.into_iter().map(|q| {
+        let p = Arc::clone(&perms);
+        let t = task_name.clone();
+        let a = agent_path.clone();
+        async move { investigate_impl(p, q, t, a).await }
+    });
     try_join_all(futures).await
 }
 
 pub fn create_investigate_tools(
     permissions: Arc<crate::tools::filesystem::Permissions>,
     task_name: String,
-    agent_path: String
+    agent_path: String,
 ) -> Vec<Box<dyn crate::llm::tool::LlmTool>> {
     let p_inv = Arc::clone(&permissions);
     let t_inv = task_name.clone();
     let a_inv = agent_path.clone();
-    
-    let inv = llm_macros::make_tool!("investigate", "This is the swiss army knife of investigation. Use this to find answers recursively.", move |question: String| {
-        let perms = Arc::clone(&p_inv);
-        let t = t_inv.clone();
-        let a = a_inv.clone();
-        async move { investigate_impl(perms, question, t, a).await }
-    });
+
+    let inv = llm_macros::make_tool!(
+        "investigate",
+        "This is the swiss army knife of investigation. Use this to find answers recursively.",
+        move |question: String| {
+            let perms = Arc::clone(&p_inv);
+            let t = t_inv.clone();
+            let a = a_inv.clone();
+            async move { investigate_impl(perms, question, t, a).await }
+        }
+    );
 
     let p_mul = Arc::clone(&permissions);
     let t_mul = task_name.clone();
     let a_mul = agent_path.clone();
-    
-    let mul = llm_macros::make_tool!("multi_investigate", "A parallelism helper to run multiple investigate tools simultaneously.", move |questions: Vec<String>| {
-        let perms = Arc::clone(&p_mul);
-        let t = t_mul.clone();
-        let a = a_mul.clone();
-        async move { multi_investigate_impl(perms, questions, t, a).await }
-    });
+
+    let mul = llm_macros::make_tool!(
+        "multi_investigate",
+        "A parallelism helper to run multiple investigate tools simultaneously.",
+        move |questions: Vec<String>| {
+            let perms = Arc::clone(&p_mul);
+            let t = t_mul.clone();
+            let a = a_mul.clone();
+            async move { multi_investigate_impl(perms, questions, t, a).await }
+        }
+    );
 
     vec![inv, mul]
 }
@@ -197,14 +232,27 @@ mod tests {
 
     #[tokio::test]
     async fn test_investigate_coverage() {
-        let perms = Arc::new(crate::tools::filesystem::Permissions { read_dirs: vec![], write_dirs: vec![] });
-        let _ = investigate_impl(perms, "hello".to_string(), "t".to_string(), "a".to_string()).await;
+        let perms = Arc::new(crate::tools::filesystem::Permissions {
+            read_dirs: vec![],
+            write_dirs: vec![],
+        });
+        let _ =
+            investigate_impl(perms, "hello".to_string(), "t".to_string(), "a".to_string()).await;
     }
 
     #[tokio::test]
     async fn test_multi_investigate_coverage() {
-        let perms = Arc::new(crate::tools::filesystem::Permissions { read_dirs: vec![], write_dirs: vec![] });
-        let _ = multi_investigate_impl(perms, vec!["q1".to_string(), "q2".to_string()], "t".to_string(), "a".to_string()).await;
+        let perms = Arc::new(crate::tools::filesystem::Permissions {
+            read_dirs: vec![],
+            write_dirs: vec![],
+        });
+        let _ = multi_investigate_impl(
+            perms,
+            vec!["q1".to_string(), "q2".to_string()],
+            "t".to_string(),
+            "a".to_string(),
+        )
+        .await;
     }
 
     use sealed_test::prelude::*;
@@ -222,7 +270,9 @@ mod tests {
         std::env::set_current_dir(&td_path).unwrap();
 
         let repo = git2::Repository::init(&td_path).unwrap();
-        crate::commands::init::init(td_path.clone(), 1).await.unwrap();
+        crate::commands::init::init(td_path.clone(), 1)
+            .await
+            .unwrap();
 
         // Spawn async human responder securely
         tokio::spawn(async move {
@@ -230,19 +280,29 @@ mod tests {
             if let Ok(r) = git2::Repository::discover(".") {
                 let test_human = crate::schema::identity_config::DidOwner {
                     did: "z6MkiuexGTCjkPmnT4jv1JNAmeV7UnBoMh1rsxLoYYCQ8Txs".to_string(),
-                    public_key_hex: "4231c04a3dd5b64700018aa7cffe4ad35cf9bad05ec2fa21c3dbf5c0339872f8".to_string(),
-                    private_key_hex: "839ce4cc3dc57e147f119a6999c16230ea2d7b47c85ddc2714d25cb202b5023b".to_string(),
+                    public_key_hex:
+                        "4231c04a3dd5b64700018aa7cffe4ad35cf9bad05ec2fa21c3dbf5c0339872f8"
+                            .to_string(),
+                    private_key_hex:
+                        "839ce4cc3dc57e147f119a6999c16230ea2d7b47c85ddc2714d25cb202b5023b"
+                            .to_string(),
                 };
-                
+
                 // Using Grinder namespace wrapper to allow writer instantiation since Human variant doesn't independently exist
-                if let Ok(writer) = crate::events::writer::Writer::new(&r, crate::schema::identity_config::Identity::Grinder(test_human)) {
+                if let Ok(writer) = crate::events::writer::Writer::new(
+                    &r,
+                    crate::schema::identity_config::Identity::Grinder(test_human),
+                ) {
                     // Iterate and pick up the item_ref organically to respond correctly
-                    let _reader = crate::events::reader::Reader::new(&r, "did:key:z6MkiuexGTCjkPmnT4jv1JNAmeV7UnBoMh1rsxLoYYCQ8Txs".to_string());
+                    let _reader = crate::events::reader::Reader::new(
+                        &r,
+                        "did:key:z6MkiuexGTCjkPmnT4jv1JNAmeV7UnBoMh1rsxLoYYCQ8Txs".to_string(),
+                    );
                     let _ = writer.log_event(crate::schema::registry::EventPayload::Seen(
                         crate::schema::task::SeenPayload {
                             item_ref: "a".to_string(),
-                            timestamp: 0
-                        }
+                            timestamp: 0,
+                        },
                     ));
                     let _ = writer.commit_batch();
                 }
@@ -254,12 +314,18 @@ mod tests {
             .commit();
 
         // Run Investigate Tool inside context
-        let perms = Arc::new(crate::tools::filesystem::Permissions { read_dirs: vec![], write_dirs: vec![] });
-        let res = investigate_impl(perms, "test".to_string(), "t".to_string(), "a".to_string()).await;
+        let perms = Arc::new(crate::tools::filesystem::Permissions {
+            read_dirs: vec![],
+            write_dirs: vec![],
+        });
+        let res =
+            investigate_impl(perms, "test".to_string(), "t".to_string(), "a".to_string()).await;
         assert!(res.is_ok());
 
         // Validate traces got injected natively on the main agent branch
-        let id_obj = crate::schema::identity_config::Identity::load(&td_path).await.unwrap();
+        let id_obj = crate::schema::identity_config::Identity::load(&td_path)
+            .await
+            .unwrap();
         let reader = crate::events::reader::Reader::new(&repo, id_obj.get_did_owner().did.clone());
         let mut found_ask = false;
         let mut found_cancel = false;
@@ -287,9 +353,13 @@ mod tests {
         std::env::set_current_dir(&td_path).unwrap();
 
         let _repo = git2::Repository::init(&td_path).unwrap();
-        crate::commands::init::init(td_path.clone(), 1).await.unwrap();
+        crate::commands::init::init(td_path.clone(), 1)
+            .await
+            .unwrap();
 
-        let ask = AskHuman::start("isolated_q", "task1", "agent1").await.expect("Failed to initialize AskHuman");
+        let ask = AskHuman::start("isolated_q", "task1", "agent1")
+            .await
+            .expect("Failed to initialize AskHuman");
 
         let item_ref_clone = ask.item_ref.clone();
         tokio::spawn(async move {
@@ -297,23 +367,30 @@ mod tests {
             if let Ok(r) = git2::Repository::discover(".") {
                 let test_human = crate::schema::identity_config::DidOwner {
                     did: "z6MkiuexGTCjkPmnT4jv1JNAmeV7UnBoMh1rsxLoYYCQ8Txs".to_string(),
-                    public_key_hex: "4231c04a3dd5b64700018aa7cffe4ad35cf9bad05ec2fa21c3dbf5c0339872f8".to_string(),
-                    private_key_hex: "839ce4cc3dc57e147f119a6999c16230ea2d7b47c85ddc2714d25cb202b5023b".to_string(),
+                    public_key_hex:
+                        "4231c04a3dd5b64700018aa7cffe4ad35cf9bad05ec2fa21c3dbf5c0339872f8"
+                            .to_string(),
+                    private_key_hex:
+                        "839ce4cc3dc57e147f119a6999c16230ea2d7b47c85ddc2714d25cb202b5023b"
+                            .to_string(),
                 };
-                
-                if let Ok(writer) = crate::events::writer::Writer::new(&r, crate::schema::identity_config::Identity::Grinder(test_human.clone())) {
+
+                if let Ok(writer) = crate::events::writer::Writer::new(
+                    &r,
+                    crate::schema::identity_config::Identity::Grinder(test_human.clone()),
+                ) {
                     let _ = writer.log_event(crate::schema::registry::EventPayload::Seen(
                         crate::schema::task::SeenPayload {
                             item_ref: item_ref_clone.clone(),
-                            timestamp: 0
-                        }
+                            timestamp: 0,
+                        },
                     ));
-                    
+
                     let _ = writer.log_event(crate::schema::registry::EventPayload::HumanResponse(
                         crate::schema::task::ResponsePayload {
                             item_ref: item_ref_clone,
-                            text_response: "Module Mock Human Response".to_string()
-                        }
+                            text_response: "Module Mock Human Response".to_string(),
+                        },
                     ));
                     let _ = writer.commit_batch();
                 }

@@ -1,7 +1,4 @@
-use axum::{
-    routing::post,
-    Router, Json, extract::State,
-};
+use axum::{Json, Router, extract::State, routing::post};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -34,7 +31,10 @@ async fn handle_generate_content(
     State(state): State<MockState>,
     Json(body): Json<serde_json::Value>,
 ) -> Json<serde_json::Value> {
-    println!("MOCK REQUEST: {}", serde_json::to_string(&body).unwrap_or_default());
+    println!(
+        "MOCK REQUEST: {}",
+        serde_json::to_string(&body).unwrap_or_default()
+    );
     let mut lock = state.responses.lock().await;
     if !lock.is_empty() {
         let resp = lock.remove(0);
@@ -74,7 +74,11 @@ pub async fn push_text_response(queue: &Arc<Mutex<Vec<serde_json::Value>>>, text
     }));
 }
 
-pub async fn push_tool_call_response(queue: &Arc<Mutex<Vec<serde_json::Value>>>, function_name: &str, args: serde_json::Value) {
+pub async fn push_tool_call_response(
+    queue: &Arc<Mutex<Vec<serde_json::Value>>>,
+    function_name: &str,
+    args: serde_json::Value,
+) {
     let mut lock = queue.lock().await;
     lock.push(serde_json::json!({
         "candidates": [{

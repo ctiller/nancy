@@ -1,5 +1,5 @@
-use yew::prelude::*;
 use schema::MarketStateResponse;
+use yew::prelude::*;
 
 #[function_component(LogsView)]
 pub fn logs_view() -> Html {
@@ -7,7 +7,7 @@ pub fn logs_view() -> Html {
 
     {
         let market_state = market_state.clone();
-        
+
         use_effect_with((), move |_| {
             let cancelled = std::rc::Rc::new(std::cell::Cell::new(false));
             let cancel_clone = cancelled.clone();
@@ -16,8 +16,10 @@ pub fn logs_view() -> Html {
 
             wasm_bindgen_futures::spawn_local(async move {
                 loop {
-                    if cancel_clone.get() { break; }
-                    
+                    if cancel_clone.get() {
+                        break;
+                    }
+
                     let mut req = gloo_net::http::Request::get("/api/market/state");
                     if let Some(sig) = &signal {
                         req = req.abort_signal(Some(sig));
@@ -30,7 +32,9 @@ pub fn logs_view() -> Html {
                         }
                     }
 
-                    if cancel_clone.get() { break; }
+                    if cancel_clone.get() {
+                        break;
+                    }
                     gloo_timers::future::sleep(std::time::Duration::from_millis(1000)).await;
                 }
             });
@@ -82,7 +86,7 @@ pub fn logs_view() -> Html {
                                             <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
                                                 <td style="padding: 10px; font-family: monospace;">{ model.to_string() }</td>
                                                 <td style="padding: 10px;" >
-                                                    { format!("{} / {} / {}", 
+                                                    { format!("{} / {} / {}",
                                                         stats.active_quotas.rpm.map(|v| format!("{:.0}", v)).unwrap_or_else(|| "Inf".to_string()),
                                                         stats.active_quotas.tpm.map(|v| if v >= 1_000_000.0 { format!("{:.1}M", v/1_000_000.0) } else if v >= 1000.0 { format!("{:.0}k", v/1000.0) } else { format!("{:.0}", v) }).unwrap_or_else(|| "Inf".to_string()),
                                                         stats.active_quotas.rpd.map(|v| if v >= 1_000_000.0 { format!("{:.1}M", v/1_000_000.0) } else if v >= 1000.0 { format!("{:.0}k", v/1000.0) } else { format!("{:.0}", v) }).unwrap_or_else(|| "Inf".to_string())
@@ -92,7 +96,7 @@ pub fn logs_view() -> Html {
                                                     { format!("{:.1} / {} / ${:.4}",
                                                         stats.expected_lease_requests,
                                                         fmt_tok(stats.expected_lease_tokens as u64),
-                                                        stats.expected_lease_cost) 
+                                                        stats.expected_lease_cost)
                                                     }
                                                 </td>
                                                 <td style="padding: 10px;">{ format!("{} / {} / ${:.4}", fmt_tok(stats.trailing_1m.input_tokens + stats.trailing_1m.output_tokens), stats.trailing_1m.requests, stats.trailing_1m.cost_usd) }</td>
@@ -106,7 +110,7 @@ pub fn logs_view() -> Html {
                                     </tbody>
                                 </table>
                             </div>
-                            
+
                             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 24px;">
                                 <div class="glass-panel" style="padding: 20px;">
                                     <h3>{ format!("Pending Bids ({})", state.pending_bids.len()) }</h3>
@@ -129,7 +133,7 @@ pub fn logs_view() -> Html {
                                         }})}
                                     </div>
                                 </div>
-                                
+
                                 <div class="glass-panel" style="padding: 20px;">
                                     <h3>{ format!("Active Leases ({})", state.active_leases.len()) }</h3>
                                     <div style="display: flex; flex-direction: column; gap: 10px; max-height: 400px; overflow-y: auto;">

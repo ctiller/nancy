@@ -1,11 +1,11 @@
+use wasm_bindgen::prelude::*;
 use yew::prelude::*;
 use yew_router::prelude::*;
-use wasm_bindgen::prelude::*;
 
-pub mod repo;
 pub mod agents;
-pub mod tasks;
 pub mod logs;
+pub mod repo;
+pub mod tasks;
 
 #[derive(Clone, Routable, PartialEq)]
 enum Route {
@@ -32,7 +32,7 @@ fn navbar() -> Html {
                 <img src="/nancy-avatar.png" alt="Nancy Logo" class="brand-logo" />
                 <span>{"NANCY"}</span>
             </div>
-            
+
             <div class="nav-links">
                 <Link<Route> to={Route::Command} classes="nav-item">{"Command"}</Link<Route>>
                 <Link<Route> to={Route::Tasks} classes="nav-item">{"Tasks"}</Link<Route>>
@@ -40,7 +40,7 @@ fn navbar() -> Html {
                 <Link<Route> to={Route::Repo} classes="nav-item">{"Repo"}</Link<Route>>
                 <Link<Route> to={Route::Logs} classes="nav-item">{"Settings & Logs"}</Link<Route>>
             </div>
-            
+
             <div class="status-indicator">
                 <div class="status-dot"></div>
                 <span>{"Coordinator Active"}</span>
@@ -73,13 +73,16 @@ enum ActionSelection {
 
 #[function_component(CommandView)]
 fn command_view() -> Html {
-    let pending_actions = use_state(|| PendingActions { asks: vec![], plan_reviews: vec![] });
+    let pending_actions = use_state(|| PendingActions {
+        asks: vec![],
+        plan_reviews: vec![],
+    });
     let selected_action = use_state(|| ActionSelection::None);
-    
+
     // Main polling loop for Pending Actions
     {
         let pending_actions = pending_actions.clone();
-        
+
         use_effect_with((), move |_| {
             let cancelled = std::rc::Rc::new(std::cell::Cell::new(false));
             let cancel_clone = cancelled.clone();
@@ -88,8 +91,10 @@ fn command_view() -> Html {
 
             wasm_bindgen_futures::spawn_local(async move {
                 loop {
-                    if cancel_clone.get() { break; }
-                    
+                    if cancel_clone.get() {
+                        break;
+                    }
+
                     let mut req_pending = gloo_net::http::Request::get("/api/human/pending");
                     if let Some(sig) = &signal {
                         req_pending = req_pending.abort_signal(Some(sig));
@@ -102,7 +107,9 @@ fn command_view() -> Html {
                         }
                     }
 
-                    if cancel_clone.get() { break; }
+                    if cancel_clone.get() {
+                        break;
+                    }
                     gloo_timers::future::sleep(std::time::Duration::from_millis(500)).await;
                 }
             });
@@ -146,7 +153,8 @@ fn command_view() -> Html {
                     .json(&payload)
                     .unwrap()
                     .send()
-                    .await {
+                    .await
+                {
                     if resp.ok() {
                         selected_action.set(ActionSelection::None);
                     }
@@ -174,7 +182,8 @@ fn command_view() -> Html {
                     .json(&req_body)
                     .unwrap()
                     .send()
-                    .await {
+                    .await
+                {
                     if resp.ok() {
                         sel_clone.set(ActionSelection::None);
                     }
@@ -188,11 +197,11 @@ fn command_view() -> Html {
             // Left Pane: Needs Action Menu
             <div class="glass-panel" style="padding: 20px; position: relative; overflow-y: auto; display: flex; flex-direction: column;">
                 <h3>{"Needs Action"}</h3>
-                
+
                 <button class="btn-glow" style="margin-bottom: 20px; width: 100%;" onclick={on_new_task}>
                     {"+ Start a New Task"}
                 </button>
-                
+
                 <div style="flex: 1; overflow-y: auto;">
                     if pending_actions.asks.is_empty() && pending_actions.plan_reviews.is_empty() {
                         <p class="text-muted" style="text-align: center; margin-top: 40px;">{"No pending actions at this time."}</p>
@@ -220,7 +229,7 @@ fn command_view() -> Html {
                                     }
                                 })}
                             }
-                            
+
                             if !pending_actions.asks.is_empty() {
                                 <h4 style="margin: 10px 0 0 0; color: var(--accent-orange, #ff9800);">{"Agent Asks"}</h4>
                                 { for pending_actions.asks.iter().map(|ask| {
@@ -247,7 +256,7 @@ fn command_view() -> Html {
                     }
                 </div>
             </div>
-            
+
             // Right Pane: Interaction Content
             <div class="glass-panel" style="padding: 30px; display: flex; flex-direction: column; overflow-y: auto;">
                 { match &*selected_action {
@@ -276,9 +285,9 @@ fn command_view() -> Html {
                                 <div style="font-weight: bold; color: var(--text-muted); margin-bottom: 8px;">{"Question context:"}</div>
                                 <div style="font-size: 1.1rem;">{ask.question.clone()}</div>
                             </div>
-                            
+
                             <div id="monaco-container" style="flex: 1; width: 100%; border-radius: 8px; overflow: hidden; border: 1px solid var(--panel-border); box-shadow: inset 0 0 10px rgba(0,0,0,0.5);"></div>
-                            
+
                             <div style="display: flex; justify-content: flex-end; align-items: center; gap: 12px; margin-top: 20px;">
                                 <button class="btn-secondary" onclick={
                                     let sel = selected_action.clone();
@@ -296,29 +305,29 @@ fn command_view() -> Html {
                             <div style="flex: 1; overflow-y: auto; background: rgba(0,0,0,0.2); padding: 20px; border-radius: 6px; margin-bottom: 20px;">
                                 <h2 style="margin-top: 0;">{plan.document.title.clone()}</h2>
                                 <p style="font-size: 1.1rem;">{plan.document.summary.clone()}</p>
-                                
+
                                 <h4 style="margin-top: 24px; color: var(--accent);">{"Goals"}</h4>
                                 <ul>
                                     { for plan.document.goals.iter().map(|g| html!{ <li>{g}</li> }) }
                                 </ul>
-                                
+
                                 <h4 style="margin-top: 24px; color: var(--accent);">{"Proposed Design"}</h4>
                                 <ul>
                                     { for plan.document.proposed_design.iter().map(|d| html!{ <li>{d}</li> }) }
                                 </ul>
                             </div>
-                            
+
                             <div style="flex: 0 0 120px; overflow: hidden; margin-bottom: 16px; border-radius: 6px; border: 1px solid var(--panel-border); box-shadow: inset 0 0 10px rgba(0,0,0,0.5);">
                                 <div id="monaco-container" style="width: 100%; height: 100%;"></div>
                             </div>
-                            
+
                             <div style="display: flex; justify-content: flex-end; gap: 12px;">
                                 <button class="btn-secondary" onclick={
                                     let sel = selected_action.clone();
                                     Callback::from(move |_| sel.set(ActionSelection::None))
                                 }>{"Close"}</button>
-                                
-                                <button style="background: rgba(200, 50, 50, 0.4); border: 1px solid rgba(255,100,100,0.5); border-radius: 4px; padding: 10px 20px; color: white; cursor: pointer;" 
+
+                                <button style="background: rgba(200, 50, 50, 0.4); border: 1px solid rgba(255,100,100,0.5); border-radius: 4px; padding: 10px 20px; color: white; cursor: pointer;"
                                     onclick={
                                         let sel = selected_action.clone();
                                         Callback::from(move |_| {
@@ -350,7 +359,7 @@ fn command_view() -> Html {
                                     }>
                                     {"Request Changes"}
                                 </button>
-                                
+
                                 <button class="btn-primary" onclick={
                                     let sel = selected_action.clone();
                                     Callback::from(move |_| {

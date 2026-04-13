@@ -71,7 +71,6 @@ mod tests {
     use crate::schema::identity::IdentityPayload;
     use crate::schema::identity_config::{DidOwner, Identity};
     use did_key::{Ed25519KeyPair, Fingerprint, KeyMaterial};
-    
 
     #[test]
     fn test_task_manager() -> Result<()> {

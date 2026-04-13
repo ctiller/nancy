@@ -30,15 +30,16 @@ pub fn md_defined(_attr: TokenStream, item: TokenStream) -> TokenStream {
         let mut is_string = false;
         let mut is_option = false;
         if let Type::Path(type_path) = &field.ty
-            && let Some(segment) = type_path.path.segments.last() {
-                if segment.ident == "String" || segment.ident == "string" {
-                    is_string = true;
-                } else if segment.ident == "Option" {
-                    is_option = true;
-                } else if segment.ident == "PersonaCategory" {
-                    default_fields.push(quote! { #field_ident: PersonaCategory::Technical });
-                }
+            && let Some(segment) = type_path.path.segments.last()
+        {
+            if segment.ident == "String" || segment.ident == "string" {
+                is_string = true;
+            } else if segment.ident == "Option" {
+                is_option = true;
+            } else if segment.ident == "PersonaCategory" {
+                default_fields.push(quote! { #field_ident: PersonaCategory::Technical });
             }
+        }
 
         if is_string {
             default_fields.push(quote! { #field_ident: "" });
@@ -51,9 +52,10 @@ pub fn md_defined(_attr: TokenStream, item: TokenStream) -> TokenStream {
             let mut is_cat = false;
             if let Type::Path(type_path) = &field.ty
                 && let Some(segment) = type_path.path.segments.last()
-                    && segment.ident == "PersonaCategory" {
-                        is_cat = true;
-                    }
+                && segment.ident == "PersonaCategory"
+            {
+                is_cat = true;
+            }
             if !is_cat {
                 default_fields.push(quote! { #field_ident: Default::default() });
             }
@@ -171,7 +173,10 @@ pub fn include_md(input: TokenStream) -> TokenStream {
                             if k == "category" {
                                 let variant_ident = format_ident!("{}", s);
                                 fields.push(quote! { #key_ident: crate::personas::PersonaCategory::#variant_ident });
-                            } else if k == "plan_review" || k == "code_review" || k == "plan_ideation" {
+                            } else if k == "plan_review"
+                                || k == "code_review"
+                                || k == "plan_ideation"
+                            {
                                 let role_variant = match k.as_str() {
                                     "plan_review" => "PlanReview",
                                     "code_review" => "CodeReview",
@@ -179,14 +184,14 @@ pub fn include_md(input: TokenStream) -> TokenStream {
                                     _ => unreachable!(),
                                 };
                                 let role_variant_ident = format_ident!("{}", role_variant);
-                                
+
                                 let state_variant = match s.as_str() {
                                     "mandatory" => "Mandatory",
                                     "never" => "Never",
                                     _ => "Optional",
                                 };
                                 let state_variant_ident = format_ident!("{}", state_variant);
-                                
+
                                 role_inserts.push(quote! {
                                     (crate::personas::PersonaRole::#role_variant_ident, crate::personas::RequirementState::#state_variant_ident)
                                 });
@@ -216,7 +221,7 @@ pub fn include_md(input: TokenStream) -> TokenStream {
                 }
             }
         }
-        
+
         if !role_inserts.is_empty() {
             fields.push(quote! {
                 roles: std::collections::HashMap::from([

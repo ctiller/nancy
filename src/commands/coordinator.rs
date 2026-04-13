@@ -1,21 +1,19 @@
 use anyhow::{Context, Result, bail};
 use git2::Repository;
-use tokio::fs;
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-
+use std::sync::atomic::{AtomicBool, Ordering};
+use tokio::fs;
 
 use crate::coordinator::appview::AppView;
 use crate::coordinator::grinder::GrinderSyncEngine;
-use crate::coordinator::ipc::{spawn_ipc_server, IpcState};
+use crate::coordinator::ipc::{IpcState, spawn_ipc_server};
 use crate::coordinator::web::spawn_web_server;
 use crate::coordinator::workflow::process_app_view_events;
 use crate::schema::identity_config::Identity;
 
 pub static SHUTDOWN: AtomicBool = AtomicBool::new(false);
 pub static SHUTDOWN_NOTIFY: tokio::sync::Notify = tokio::sync::Notify::const_new();
-
 
 pub struct Coordinator {
     workdir: std::path::PathBuf,
@@ -51,10 +49,19 @@ impl Coordinator {
         let listener = std::os::unix::net::UnixListener::bind(&socket_path)?;
         listener.set_nonblocking(true)?;
 
-        Ok(Self { workdir, identity, listener: Some(listener) })
+        Ok(Self {
+            workdir,
+            identity,
+            listener: Some(listener),
+        })
     }
 
-    pub async fn run_until<F>(&mut self, port: u16, bind_cb: Option<tokio::sync::oneshot::Sender<u16>>, mut condition: F) -> Result<()>
+    pub async fn run_until<F>(
+        &mut self,
+        port: u16,
+        bind_cb: Option<tokio::sync::oneshot::Sender<u16>>,
+        mut condition: F,
+    ) -> Result<()>
     where
         F: FnMut(&AppView) -> bool,
     {
@@ -74,10 +81,11 @@ impl Coordinator {
         let shared_tx_ready = Arc::new(tx_ready);
         let (tx_updates, mut rx_updates) = tokio::sync::mpsc::unbounded_channel();
         let shared_identity = Arc::new(tokio::sync::RwLock::new(self.identity.clone()));
-        let coord_config = match crate::schema::coordinator_config::CoordinatorConfig::load(&self.workdir).await {
-            Ok(c) => c,
-            Err(_) => crate::schema::coordinator_config::CoordinatorConfig::default(),
-        };
+        let coord_config =
+            match crate::schema::coordinator_config::CoordinatorConfig::load(&self.workdir).await {
+                Ok(c) => c,
+                Err(_) => crate::schema::coordinator_config::CoordinatorConfig::default(),
+            };
 
         let ipc_state = IpcState {
             tx_ready: shared_tx_ready.clone(),
@@ -86,22 +94,33 @@ impl Coordinator {
             token_market: crate::coordinator::market::ArbitrationMarket::new(coord_config),
         };
 
-        let listener = tokio::net::UnixListener::from_std(self.listener.take().expect("UnixListener was missing from Coordinator struct mapping!"))?;
+        let listener = tokio::net::UnixListener::from_std(
+            self.listener
+                .take()
+                .expect("UnixListener was missing from Coordinator struct mapping!"),
+        )?;
         let _axum_server_task = spawn_ipc_server(listener, ipc_state.clone());
 
-        let tcp_listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", port)).await.unwrap();
+        let tcp_listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", port))
+            .await
+            .unwrap();
         let actual_port = tcp_listener.local_addr().unwrap().port();
         eprintln!("Web server started at https://0.0.0.0:{}", actual_port);
         let web_server_task = spawn_web_server(tcp_listener, ipc_state.clone());
-        
+
         if let Some(tx) = bind_cb {
             let _ = tx.send(actual_port);
         }
 
-        let mut docker_orch = match crate::coordinator::docker::DockerOrchestrator::new(self.workdir.clone()) {
+        let mut docker_orch = match crate::coordinator::docker::DockerOrchestrator::new(
+            self.workdir.clone(),
+        ) {
             Ok(orch) => Some(orch),
             Err(e) => {
-                tracing::warn!("Docker daemon unavailable! Coordinator will register assignments but Grinders will NOT be provisioned: {}", e);
+                tracing::warn!(
+                    "Docker daemon unavailable! Coordinator will register assignments but Grinders will NOT be provisioned: {}",
+                    e
+                );
                 None
             }
         };
@@ -112,30 +131,43 @@ impl Coordinator {
             // Ensure git resource descriptors drop each loop native avoiding OS handle exhaustion entirely seamlessly natively!
             let active_repo = git2::Repository::open(&self.workdir)?;
 
-            let appview = AppView::hydrate(&active_repo, &active_identity, sync_engine.target_sync_grinder.as_deref());
+            let appview = AppView::hydrate(
+                &active_repo,
+                &active_identity,
+                sync_engine.target_sync_grinder.as_deref(),
+            );
             sync_engine.target_sync_grinder = None;
 
             // Test loop condition against synced view
             if condition(&appview) {
-                let _ = shared_tx_ready.send(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs());
+                let _ = shared_tx_ready.send(
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap()
+                        .as_secs(),
+                );
                 break;
             }
 
             let mut logged_any = process_app_view_events(
-                &active_repo, 
-                &appview, 
-                &active_identity, 
-                &mut processed_completed_tasks, 
-                &mut processed_request_ids
+                &active_repo,
+                &appview,
+                &active_identity,
+                &mut processed_completed_tasks,
+                &mut processed_request_ids,
             )?;
 
             if let Some(ref mut d) = docker_orch {
                 let crashes = d.sync_deployments(&appview, &active_identity).await;
                 if !crashes.is_empty() {
-                    let writer = crate::events::writer::Writer::new(&active_repo, active_identity.clone()).expect("Failed to init writer");
+                    let writer =
+                        crate::events::writer::Writer::new(&active_repo, active_identity.clone())
+                            .expect("Failed to init writer");
                     for (report, logs) in crashes {
                         writer.attach_incident_log(&report.log_ref, &logs);
-                        let _ = writer.log_event(crate::schema::registry::EventPayload::AgentCrashReport(report));
+                        let _ = writer.log_event(
+                            crate::schema::registry::EventPayload::AgentCrashReport(report),
+                        );
                     }
                     if writer.commit_batch().unwrap_or(false) {
                         logged_any = true;
@@ -144,14 +176,16 @@ impl Coordinator {
             }
 
             if logged_any {
-                tracing::debug!("[Coordinator] Successfully processed and committed Grinder events. Broadcasting tx_ready to unblock...");
+                tracing::debug!(
+                    "[Coordinator] Successfully processed and committed Grinder events. Broadcasting tx_ready to unblock..."
+                );
                 shared_tx_ready.send_modify(|val| *val += 1); // increment state boundary safely
             } else if sync_engine.force_sync_broadcast {
                 shared_tx_ready.send_modify(|val| *val += 1); // increment state boundary cleanly
             } else {
                 sync_engine.wait_for_events(&mut rx_updates).await;
             }
-            
+
             sync_engine.force_sync_broadcast = false;
         }
 

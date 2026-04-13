@@ -1,8 +1,8 @@
-use crate::schema::registry::EventPayload;
-use crate::schema::identity_config::Identity;
 use crate::events::reader::Reader;
-use std::collections::{HashMap, HashSet};
+use crate::schema::identity_config::Identity;
+use crate::schema::registry::EventPayload;
 use git2::Repository;
+use std::collections::{HashMap, HashSet};
 
 pub struct AppView {
     pub tasks: HashMap<String, EventPayload>,
@@ -41,7 +41,11 @@ impl AppView {
         }
     }
 
-    pub fn hydrate(repo: &Repository, identity: &Identity, restricted_grinder_did: Option<&str>) -> Self {
+    pub fn hydrate(
+        repo: &Repository,
+        identity: &Identity,
+        restricted_grinder_did: Option<&str>,
+    ) -> Self {
         let mut appview = Self::new();
         let did = identity.get_did_owner().did.clone();
 
@@ -72,14 +76,16 @@ impl AppView {
 
             for branch_did in dynamic_dids {
                 // Skip the coordinator/own did since it was already identically hydrated above
-                if branch_did == did { continue; }
-                
+                if branch_did == did {
+                    continue;
+                }
+
                 if let Some(r_did) = restricted_grinder_did {
                     if branch_did != r_did {
                         continue;
                     }
                 }
-                
+
                 let local_reader = Reader::new(repo, branch_did);
                 if let Ok(iter) = local_reader.iter_events() {
                     for ev_res in iter {
@@ -130,10 +136,12 @@ impl AppView {
                     .insert(event_id.to_string(), task_ref.clone());
             }
             EventPayload::AgentCrashReport(p) => {
-                self.agent_crashes.insert(p.crashing_agent_did.clone(), p.clone());
+                self.agent_crashes
+                    .insert(p.crashing_agent_did.clone(), p.clone());
             }
             EventPayload::TaskEvaluation(e) => {
-                self.task_evaluations.insert(e.evaluated_event_id.clone(), e.clone());
+                self.task_evaluations
+                    .insert(e.evaluated_event_id.clone(), e.clone());
             }
             EventPayload::Ask(a) => {
                 if !self.handled_items.contains(&a.item_ref) {
@@ -142,7 +150,8 @@ impl AppView {
             }
             EventPayload::ReviewPlan(p) => {
                 if !self.handled_items.contains(&p.plan_ref) {
-                    self.active_plan_reviews.insert(p.plan_ref.clone(), p.clone());
+                    self.active_plan_reviews
+                        .insert(p.plan_ref.clone(), p.clone());
                 }
             }
             EventPayload::CancelItem(c) => {
@@ -305,7 +314,7 @@ impl AppView {
                 } else {
                     schema::NodeType::Task
                 };
-                
+
                 let active_agent = self.assignments.get(id).cloned();
                 let is_completed = self.task_completions.contains(id);
                 let cost_usd = *self.task_costs.get(id).unwrap_or(&0.0);
@@ -345,7 +354,7 @@ impl AppView {
                 cost_usd: 0.0,
             });
         }
-        
+
         for (id, payload) in &self.active_plan_reviews {
             nodes.push(schema::TopologyNode {
                 id: id.clone(),
@@ -382,11 +391,14 @@ impl AppView {
         const NODE_HEIGHT: f64 = 120.0;
 
         for node in &nodes {
-            g.set_node(&node.id, NodeLabel {
-                width: NODE_WIDTH,
-                height: NODE_HEIGHT,
-                ..Default::default()
-            });
+            g.set_node(
+                &node.id,
+                NodeLabel {
+                    width: NODE_WIDTH,
+                    height: NODE_HEIGHT,
+                    ..Default::default()
+                },
+            );
         }
 
         for edge in &edges {
@@ -436,10 +448,7 @@ impl AppView {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::schema::task::{
-        BlockedByPayload, TaskAction,
-        TaskPayload, TaskRequestPayload,
-    };
+    use crate::schema::task::{BlockedByPayload, TaskAction, TaskPayload, TaskRequestPayload};
 
     #[test]
     fn test_appview_request_task_separation() {

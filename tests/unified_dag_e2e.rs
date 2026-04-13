@@ -19,7 +19,7 @@ async fn test_coordinator_generates_plan_from_task_request() -> Result<()> {
     nancy::llm::mock::builder::MockChatBuilder::new()
         .respond(r#"{"vote": "approve", "agree_notes": "Good", "disagree_notes": ""}"#)
         .commit();
-        
+
     // -------------------------------------------------------------------------
     // Phase 1: Context & Identities
     // -------------------------------------------------------------------------
@@ -44,7 +44,7 @@ async fn test_coordinator_generates_plan_from_task_request() -> Result<()> {
             private_key_hex: "00".to_string(),
         }],
         dreamer: nancy::schema::identity_config::DidOwner::generate(),
-            human: Some(nancy::schema::identity_config::DidOwner::generate()),
+        human: Some(nancy::schema::identity_config::DidOwner::generate()),
     };
     fs::write(
         nancy_dir.join("identity.json"),
@@ -93,8 +93,6 @@ async fn test_coordinator_generates_plan_from_task_request() -> Result<()> {
     Ok(())
 }
 
-
-
 #[tokio::test]
 #[sealed_test(env = [
     ("GEMINI_API_KEY", "mock")
@@ -122,7 +120,7 @@ async fn test_coordinator_generates_review_plan_task_upon_plan_completion() -> R
             private_key_hex: "00".into(),
         }],
         dreamer: nancy::schema::identity_config::DidOwner::generate(),
-            human: Some(nancy::schema::identity_config::DidOwner::generate()),
+        human: Some(nancy::schema::identity_config::DidOwner::generate()),
     };
     fs::write(
         nancy_dir.join("identity.json"),
@@ -178,7 +176,6 @@ async fn test_coordinator_generates_review_plan_task_upon_plan_completion() -> R
     Ok(())
 }
 
-
 #[tokio::test]
 #[sealed_test(env = [
     ("GEMINI_API_KEY", "mock")
@@ -206,7 +203,7 @@ async fn test_coordinator_inherits_task_parent_from_feature_branch() -> Result<(
             private_key_hex: "00".into(),
         }],
         dreamer: nancy::schema::identity_config::DidOwner::generate(),
-            human: Some(nancy::schema::identity_config::DidOwner::generate()),
+        human: Some(nancy::schema::identity_config::DidOwner::generate()),
     };
     fs::write(
         nancy_dir.join("identity.json"),
@@ -256,23 +253,29 @@ async fn test_coordinator_inherits_task_parent_from_feature_branch() -> Result<(
         source: "parent_feat".into(),
         target: "work_088".into(),
     }))?;
-    
+
     // Unblock the execution boundary mock cleanly
     let pre_review = nancy::schema::task::AssignmentCompletePayload {
         assignment_ref: "dummy_assign".into(),
         report: r#"{"vote":"approve","agree_notes":"","disagree_notes":""}"#.into(),
     };
     // Mock the assignment then completion to clear the block
-    writer.log_event_with_id_override(EventPayload::CoordinatorAssignment(nancy::schema::task::CoordinatorAssignmentPayload {
-        task_ref: "parent_feat".into(), assignee_did: "worker".into()
-    }), "dummy_assign".into())?;
+    writer.log_event_with_id_override(
+        EventPayload::CoordinatorAssignment(nancy::schema::task::CoordinatorAssignmentPayload {
+            task_ref: "parent_feat".into(),
+            assignee_did: "worker".into(),
+        }),
+        "dummy_assign".into(),
+    )?;
     writer.log_event(EventPayload::AssignmentComplete(pre_review))?;
-    
+
     writer.commit_batch()?;
 
     let mut coord = Coordinator::new(temp_dir.path()).await?;
     coord
-        .run_until(0, None, |appview| appview.assignments.contains_key("work_088"))
+        .run_until(0, None, |appview| {
+            appview.assignments.contains_key("work_088")
+        })
         .await?;
 
     // Ensure Task execution naturally spans dynamically bounds
@@ -324,7 +327,6 @@ async fn test_appview_pagerank_drops_blocked_tasks() -> Result<()> {
     Ok(())
 }
 
-
 #[tokio::test]
 #[sealed_test(env = [
     ("GEMINI_API_KEY", "mock"),
@@ -353,7 +355,7 @@ async fn test_coordinator_generates_rework_implementation_upon_dissent() -> Resu
             private_key_hex: "00".into(),
         }],
         dreamer: nancy::schema::identity_config::DidOwner::generate(),
-            human: Some(nancy::schema::identity_config::DidOwner::generate()),
+        human: Some(nancy::schema::identity_config::DidOwner::generate()),
     };
     fs::write(
         nancy_dir.join("identity.json"),
@@ -422,8 +424,9 @@ async fn test_coordinator_generates_rework_implementation_upon_dissent() -> Resu
 
     // Evaluating conflict generative fallback bounding
     let mut generated_implement_rework = false;
-    tokio::time::timeout(std::time::Duration::from_secs(20), coord
-        .run_until(0, None, |appview| {
+    tokio::time::timeout(
+        std::time::Duration::from_secs(20),
+        coord.run_until(0, None, |appview| {
             for (_id, payload) in &appview.tasks {
                 if let EventPayload::Task(t) = payload {
                     if t.action == TaskAction::Implement
@@ -435,9 +438,10 @@ async fn test_coordinator_generates_rework_implementation_upon_dissent() -> Resu
                 }
             }
             false
-        }))
-        .await
-        .expect("Test timed out!")?;
+        }),
+    )
+    .await
+    .expect("Test timed out!")?;
 
     assert!(
         generated_implement_rework,
@@ -473,7 +477,7 @@ async fn test_coordinator_applies_fast_forward_merge_to_feature_branch() -> Resu
             private_key_hex: "00".into(),
         }],
         dreamer: nancy::schema::identity_config::DidOwner::generate(),
-            human: Some(nancy::schema::identity_config::DidOwner::generate()),
+        human: Some(nancy::schema::identity_config::DidOwner::generate()),
     };
     fs::write(
         nancy_dir.join("identity.json"),
@@ -556,8 +560,9 @@ async fn test_coordinator_applies_fast_forward_merge_to_feature_branch() -> Resu
     writer.commit_batch()?;
 
     let mut coord = Coordinator::new(temp_dir.path()).await?;
-    tokio::time::timeout(std::time::Duration::from_secs(20), coord
-        .run_until(0, None, |_appview| {
+    tokio::time::timeout(
+        std::time::Duration::from_secs(20),
+        coord.run_until(0, None, |_appview| {
             if let Ok(feat_ref) = repo.find_reference("refs/heads/nancy/features/root_plan_id") {
                 if let Ok(c) = feat_ref.peel_to_commit() {
                     let is_match = c.id() == task_commit_id;
@@ -568,9 +573,10 @@ async fn test_coordinator_applies_fast_forward_merge_to_feature_branch() -> Resu
                 }
             }
             false
-        }))
-        .await
-        .expect("Test timed out!")?;
+        }),
+    )
+    .await
+    .expect("Test timed out!")?;
 
     // Verify FF updates native root completely structurally
     let feat_ref = repo.find_reference("refs/heads/nancy/features/root_plan_id")?;
@@ -635,7 +641,8 @@ async fn test_worktree_extermination_and_ledger_consistency() -> Result<()> {
 
     // Invoke Worktree allocation! Map to task
     let writer = nancy::events::writer::Writer::new(&repo, id_obj.clone())?;
-    nancy::grind::execute_task::execute(&repo, &id_obj, "t_10", "t_ref_10", &payload, &writer).await?;
+    nancy::grind::execute_task::execute(&repo, &id_obj, "t_10", "t_ref_10", &payload, &writer)
+        .await?;
 
     // Verify Worktree Exterminated over Rust bounds terminating explicitly safely
     let task_worktree_path = temp_dir.path().join(".nancy").join("tasks").join("t_10");

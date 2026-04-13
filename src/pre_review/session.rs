@@ -1,10 +1,10 @@
-use std::collections::{HashMap, HashSet};
 use anyhow::Result;
 use futures_util::StreamExt;
+use std::collections::{HashMap, HashSet};
 
 use crate::llm::client::LlmClient;
 use crate::llm::thinking_llm;
-use crate::personas::{get_all_personas, PersonaCategory};
+use crate::personas::{PersonaCategory, get_all_personas};
 use crate::pre_review::runner::reviewer_system_prompt;
 
 pub struct ReviewSession {
@@ -22,7 +22,11 @@ impl ReviewSession {
         }
     }
 
-    pub fn enforce_role_bounds(&self, requested_experts: &[String], role: crate::personas::PersonaRole) -> Vec<String> {
+    pub fn enforce_role_bounds(
+        &self,
+        requested_experts: &[String],
+        role: crate::personas::PersonaRole,
+    ) -> Vec<String> {
         let all_personas = get_all_personas();
         let mut panel: HashSet<String> = HashSet::new();
 
@@ -36,18 +40,30 @@ impl ReviewSession {
 
         for req in requested_experts {
             if let Some(p) = all_personas.iter().find(|p| &p.name == req) {
-                let state = p.roles.get(&role).copied().unwrap_or(crate::personas::RequirementState::Optional);
+                let state = p
+                    .roles
+                    .get(&role)
+                    .copied()
+                    .unwrap_or(crate::personas::RequirementState::Optional);
                 if state != crate::personas::RequirementState::Never {
                     panel.insert(p.name.to_string());
                 } else {
-                    tracing::info!("Dropped {} due to Never requirement for role {:?}", req, role);
+                    tracing::info!(
+                        "Dropped {} due to Never requirement for role {:?}",
+                        req,
+                        role
+                    );
                 }
             }
         }
         panel.into_iter().collect()
     }
 
-    pub fn enforce_quorum(&mut self, requested_experts: &[String], role: crate::personas::PersonaRole) -> Vec<String> {
+    pub fn enforce_quorum(
+        &mut self,
+        requested_experts: &[String],
+        role: crate::personas::PersonaRole,
+    ) -> Vec<String> {
         let role_bounded = self.enforce_role_bounds(requested_experts, role);
         let all_personas = get_all_personas();
         let mut panel: HashSet<String> = role_bounded.into_iter().collect();
@@ -73,7 +89,8 @@ impl ReviewSession {
             return panel.into_iter().collect();
         }
 
-        let is_stagnant = !self.previous_invalid_panel.is_empty() && &panel == &self.previous_invalid_panel;
+        let is_stagnant =
+            !self.previous_invalid_panel.is_empty() && &panel == &self.previous_invalid_panel;
 
         if !is_stagnant {
             // Grace round granted
@@ -81,12 +98,20 @@ impl ReviewSession {
             return panel.into_iter().collect();
         }
 
-        tracing::warn!("Coordinator stagnated on an invalid quorum. Backend forcefully establishing K=2 requirements.");
+        tracing::warn!(
+            "Coordinator stagnated on an invalid quorum. Backend forcefully establishing K=2 requirements."
+        );
 
         let mut add_missing = |cat: PersonaCategory, current: &mut usize| {
             while *current < 2 {
                 if let Some(p) = all_personas.iter().find(|p| {
-                    p.category == cat && !panel.contains(p.name) && p.roles.get(&role).copied().unwrap_or(crate::personas::RequirementState::Optional) != crate::personas::RequirementState::Never
+                    p.category == cat
+                        && !panel.contains(p.name)
+                        && p.roles
+                            .get(&role)
+                            .copied()
+                            .unwrap_or(crate::personas::RequirementState::Optional)
+                            != crate::personas::RequirementState::Never
                 }) {
                     panel.insert(p.name.to_string());
                     *current += 1;
@@ -95,7 +120,7 @@ impl ReviewSession {
                 }
             }
         };
-        
+
         add_missing(PersonaCategory::Technical, &mut current_tech);
         add_missing(PersonaCategory::Paradigm, &mut current_paradigm);
         add_missing(PersonaCategory::Orchestration, &mut current_orch);
@@ -104,7 +129,9 @@ impl ReviewSession {
         panel.into_iter().collect()
     }
 
-    pub async fn ask_reviewers<T: serde::de::DeserializeOwned + serde::Serialize + Send + 'static + schemars::JsonSchema>(
+    pub async fn ask_reviewers<
+        T: serde::de::DeserializeOwned + serde::Serialize + Send + 'static + schemars::JsonSchema,
+    >(
         &mut self,
         experts: &[String],
         prompt: &str,
@@ -120,7 +147,8 @@ impl ReviewSession {
                 };
 
                 let sys_prompt = reviewer_system_prompt(persona, &self.workspace);
-                let client_name = format!("reviewer_{}", persona.name.replace(" ", "_").to_lowercase());
+                let client_name =
+                    format!("reviewer_{}", persona.name.replace(" ", "_").to_lowercase());
 
                 let tools = crate::tools::AgentToolsBuilder::new()
                     .with_read_path(&self.workspace)
@@ -133,7 +161,7 @@ impl ReviewSession {
                     .with_loop_detection()
                     .with_max_history(3)
                     .build()?;
-                    
+
                 self.reviewers.insert(expert_id.clone(), new_client);
             }
         }
@@ -146,28 +174,33 @@ impl ReviewSession {
                 client.shared_deadline = Some(deadline_state.clone());
                 let prompt = prompt.to_string();
                 let expert_id = id.clone();
-                futures.push(async move {
-                    (expert_id, client.ask::<T>(&prompt).await)
-                });
+                futures.push(async move { (expert_id, client.ask::<T>(&prompt).await) });
             }
         }
 
         let required_half = (experts.len() + 1) / 2;
         let mut completed_count = 0;
         let mut results = Vec::new();
-        
+
         let mut approve_count = 0;
         let mut changes_required_count = 0;
 
-        use tokio::time::{timeout, Duration};
-        
-        let initial_status = format!("{} : 0 agents finished, {} in progress", status_label, started_experts.len());
+        use tokio::time::{Duration, timeout};
+
+        let initial_status = format!(
+            "{} : 0 agents finished, {} in progress",
+            status_label,
+            started_experts.len()
+        );
         crate::introspection::set_frame_status(&initial_status);
-        
+
         loop {
             let current_deadline = deadline_state.load(std::sync::atomic::Ordering::SeqCst);
             let time_limit = if current_deadline > 0 {
-                let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs();
                 let remain = current_deadline.saturating_sub(now);
                 Duration::from_secs(remain)
             } else {
@@ -177,7 +210,7 @@ impl ReviewSession {
             match timeout(time_limit, futures.next()).await {
                 Ok(Some((expert_id, res))) => {
                     completed_count += 1;
-                    
+
                     if let Ok(value) = &res {
                         if let Ok(json_val) = serde_json::to_value(value) {
                             if let Some(vote) = json_val.get("vote").and_then(|v| v.as_str()) {
@@ -189,37 +222,59 @@ impl ReviewSession {
                             }
                         }
                     }
-                    
+
                     results.push((expert_id, res));
-                    
-                    let mut new_status = format!("{} : {} agents finished, {} in progress", status_label, completed_count, started_experts.len().saturating_sub(completed_count));
+
+                    let mut new_status = format!(
+                        "{} : {} agents finished, {} in progress",
+                        status_label,
+                        completed_count,
+                        started_experts.len().saturating_sub(completed_count)
+                    );
                     if approve_count > 0 || changes_required_count > 0 {
-                        new_status.push_str(&format!(" ({} approve, {} needs changes)", approve_count, changes_required_count));
+                        new_status.push_str(&format!(
+                            " ({} approve, {} needs changes)",
+                            approve_count, changes_required_count
+                        ));
                     }
                     crate::introspection::set_frame_status(&new_status);
 
-                    if completed_count >= required_half && deadline_state.load(std::sync::atomic::Ordering::SeqCst) == 0 {
+                    if completed_count >= required_half
+                        && deadline_state.load(std::sync::atomic::Ordering::SeqCst) == 0
+                    {
                         let timeout_epoch = std::time::SystemTime::now()
                             .duration_since(std::time::UNIX_EPOCH)
                             .unwrap()
-                            .as_secs() + 300;
+                            .as_secs()
+                            + 300;
                         deadline_state.store(timeout_epoch, std::sync::atomic::Ordering::SeqCst);
-                        crate::introspection::log("50% agent quorum reached. Hard 5-minute maximum completion constraint triggered.");
+                        crate::introspection::log(
+                            "50% agent quorum reached. Hard 5-minute maximum completion constraint triggered.",
+                        );
                     }
                 }
                 Ok(None) => break,
                 Err(_) => {
-                    crate::introspection::log("Evaluation timeout triggered! Dropping remaining reviewers aggressively.");
+                    crate::introspection::log(
+                        "Evaluation timeout triggered! Dropping remaining reviewers aggressively.",
+                    );
                     break;
                 }
             }
         }
-        
+
         // Add fake error results for those who didn't finish
-        let completed_ids: std::collections::HashSet<_> = results.iter().map(|(id, _)| id.clone()).collect();
+        let completed_ids: std::collections::HashSet<_> =
+            results.iter().map(|(id, _)| id.clone()).collect();
         for expert_id in started_experts {
             if !completed_ids.contains(&expert_id) {
-                results.push((expert_id.clone(), Err(anyhow::anyhow!("Agent {} did not respond in a timely manner", expert_id))));
+                results.push((
+                    expert_id.clone(),
+                    Err(anyhow::anyhow!(
+                        "Agent {} did not respond in a timely manner",
+                        expert_id
+                    )),
+                ));
             }
         }
 
@@ -234,34 +289,52 @@ mod tests {
     #[test]
     fn test_quorum_valid_initial_state() {
         let mut session = ReviewSession::new(std::path::PathBuf::from("/tmp/nancy"));
-        
+
         // Dynamically extract K=2 valid permutations bounds directly from compiler
         let all = crate::personas::get_all_personas();
         let mut initial_experts = vec![];
-        initial_experts.extend(all.iter().filter(|p| p.category == crate::personas::PersonaCategory::Technical).take(2).map(|p| p.name.to_string()));
-        initial_experts.extend(all.iter().filter(|p| p.category == crate::personas::PersonaCategory::Paradigm).take(2).map(|p| p.name.to_string()));
-        initial_experts.extend(all.iter().filter(|p| p.category == crate::personas::PersonaCategory::Orchestration).take(2).map(|p| p.name.to_string()));
-        
-        let final_panel = session.enforce_quorum(&initial_experts, crate::personas::PersonaRole::PlanReview);
+        initial_experts.extend(
+            all.iter()
+                .filter(|p| p.category == crate::personas::PersonaCategory::Technical)
+                .take(2)
+                .map(|p| p.name.to_string()),
+        );
+        initial_experts.extend(
+            all.iter()
+                .filter(|p| p.category == crate::personas::PersonaCategory::Paradigm)
+                .take(2)
+                .map(|p| p.name.to_string()),
+        );
+        initial_experts.extend(
+            all.iter()
+                .filter(|p| p.category == crate::personas::PersonaCategory::Orchestration)
+                .take(2)
+                .map(|p| p.name.to_string()),
+        );
+
+        let final_panel =
+            session.enforce_quorum(&initial_experts, crate::personas::PersonaRole::PlanReview);
         assert!(final_panel.len() >= 6);
     }
 
     #[test]
     fn test_quorum_enforcement_backfill() {
         let mut session = ReviewSession::new(std::path::PathBuf::from("/tmp/nancy"));
-        
+
         let initial_experts = vec!["The Pedant".to_string()]; // 1 Paradigm
-        let final_panel = session.enforce_quorum(&initial_experts, crate::personas::PersonaRole::PlanReview);
+        let final_panel =
+            session.enforce_quorum(&initial_experts, crate::personas::PersonaRole::PlanReview);
         assert_eq!(final_panel.len(), 2); // Grace Period iteration (Pedant + Default Mandatory Team Player)
 
-        let final_panel = session.enforce_quorum(&initial_experts, crate::personas::PersonaRole::PlanReview);
-        
+        let final_panel =
+            session.enforce_quorum(&initial_experts, crate::personas::PersonaRole::PlanReview);
+
         assert_eq!(final_panel.len(), 6);
         assert!(final_panel.contains(&"The Pedant".to_string())); // Pedant must be retained
     }
 
     use sealed_test::prelude::*;
-    
+
     #[tokio::test]
     #[sealed_test(env = [
         ("GEMINI_API_KEY", "mock")
@@ -269,20 +342,28 @@ mod tests {
     async fn test_ask_reviewers_mock() {
         let mut mock_chat = crate::llm::mock::builder::MockChatBuilder::new();
         for _ in 0..6 {
-            mock_chat = mock_chat.respond(r#"{"vote": "approve", "agree_notes": "Good", "disagree_notes": ""}"#);
+            mock_chat = mock_chat
+                .respond(r#"{"vote": "approve", "agree_notes": "Good", "disagree_notes": ""}"#);
         }
         mock_chat.commit();
-        
+
         let mut session = ReviewSession::new(std::path::PathBuf::from("/tmp/nancy"));
         let experts = vec!["The Pedant".to_string()];
-        
+
         let _ = session.enforce_quorum(&experts, crate::personas::PersonaRole::PlanReview);
-        let active_panel = session.enforce_quorum(&experts, crate::personas::PersonaRole::PlanReview);
-        let res = session.ask_reviewers::<crate::pre_review::schema::ReviewOutput>(&active_panel, "Prompt test", "test").await;
-        
+        let active_panel =
+            session.enforce_quorum(&experts, crate::personas::PersonaRole::PlanReview);
+        let res = session
+            .ask_reviewers::<crate::pre_review::schema::ReviewOutput>(
+                &active_panel,
+                "Prompt test",
+                "test",
+            )
+            .await;
+
         let outputs = res.expect("ask_reviewers failed internally");
         assert_eq!(outputs.len(), 6);
-        
+
         for (expert_id, p) in outputs {
             let out = p.expect("ReviewOutput parse failed");
             assert_eq!(serde_json::to_string(&out.vote).unwrap(), "\"approve\"");
@@ -302,10 +383,19 @@ mod tests {
             .respond(r#"{"vote": "approve", "agree_notes": "Good", "disagree_notes": ""}"#)
             .commit();
 
-        let experts = vec!["Invalid Name That Drops Off Coverage".to_string(), "The Pedant".to_string()];
-        
-        let res = session.ask_reviewers::<crate::pre_review::schema::ReviewOutput>(&experts, "Prompt test", "test").await;
-        
+        let experts = vec![
+            "Invalid Name That Drops Off Coverage".to_string(),
+            "The Pedant".to_string(),
+        ];
+
+        let res = session
+            .ask_reviewers::<crate::pre_review::schema::ReviewOutput>(
+                &experts,
+                "Prompt test",
+                "test",
+            )
+            .await;
+
         assert!(res.is_ok());
         let outputs = res.unwrap();
         assert_eq!(outputs.len(), 1);
@@ -325,9 +415,15 @@ mod tests {
             .commit();
 
         let experts = vec!["The Pedant".to_string(), "The Team Player".to_string()];
-        
-        let res = session.ask_reviewers::<crate::pre_review::schema::ReviewOutput>(&experts, "Prompt test", "test").await;
-        
+
+        let res = session
+            .ask_reviewers::<crate::pre_review::schema::ReviewOutput>(
+                &experts,
+                "Prompt test",
+                "test",
+            )
+            .await;
+
         assert!(res.is_ok());
         let outputs = res.unwrap();
         assert_eq!(outputs.len(), 2);
@@ -342,10 +438,15 @@ mod tests {
     #[test]
     fn test_enforce_role_bounds_drops_never() {
         let session = ReviewSession::new(std::path::PathBuf::from("/tmp/nancy"));
-        let requested = vec!["The Team Player".to_string(), "The Pedant".to_string(), "Fake Persona".to_string()];
-        
-        let bounded = session.enforce_role_bounds(&requested, crate::personas::PersonaRole::PlanIdeation);
-        
+        let requested = vec![
+            "The Team Player".to_string(),
+            "The Pedant".to_string(),
+            "Fake Persona".to_string(),
+        ];
+
+        let bounded =
+            session.enforce_role_bounds(&requested, crate::personas::PersonaRole::PlanIdeation);
+
         assert!(!bounded.contains(&"The Team Player".to_string()));
         assert!(bounded.contains(&"The Pedant".to_string()));
     }

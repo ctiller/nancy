@@ -1,10 +1,10 @@
 use anyhow::{Context, Result, bail};
 // Unused did_key footprint cleared safely
 use git2::Repository;
-use tokio::fs::{self, OpenOptions};
-use tokio::io::AsyncWriteExt;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
+use tokio::fs::{self, OpenOptions};
+use tokio::io::AsyncWriteExt;
 
 pub async fn init<P: AsRef<Path>>(dir: P, grinders: usize) -> Result<()> {
     let dir = dir.as_ref();
@@ -25,7 +25,9 @@ pub async fn init<P: AsRef<Path>>(dir: P, grinders: usize) -> Result<()> {
 
     // Ensure `.nancy` is in `.gitignore`
     let gitignore_path = workdir.join(".gitignore");
-    let gitignore_contents = fs::read_to_string(&gitignore_path).await.unwrap_or_default();
+    let gitignore_contents = fs::read_to_string(&gitignore_path)
+        .await
+        .unwrap_or_default();
     let mut has_nancy = false;
     for line in gitignore_contents.lines() {
         if line.trim() == ".nancy" || line.trim() == "/.nancy" || line.trim() == ".nancy/" {
@@ -42,9 +44,13 @@ pub async fn init<P: AsRef<Path>>(dir: P, grinders: usize) -> Result<()> {
             .await
             .expect("Failed to open .gitignore for appending");
         if !gitignore_contents.ends_with('\n') && !gitignore_contents.is_empty() {
-            file.write_all(b"\n").await.expect("Failed to write to .gitignore");
+            file.write_all(b"\n")
+                .await
+                .expect("Failed to write to .gitignore");
         }
-        file.write_all(b".nancy\n").await.expect("Failed to write to .gitignore");
+        file.write_all(b".nancy\n")
+            .await
+            .expect("Failed to write to .gitignore");
         println!("Added .nancy to .gitignore");
     }
 
@@ -75,7 +81,7 @@ pub async fn init<P: AsRef<Path>>(dir: P, grinders: usize) -> Result<()> {
     for i in 0..grinders {
         let worker_owner = crate::schema::identity_config::DidOwner::generate();
         let worker_did = worker_owner.did.clone();
-        
+
         workers.push(worker_owner.clone());
 
         println!("Provisioned grinder {} DID: {}", i + 1, worker_did);
@@ -140,7 +146,6 @@ pub async fn init<P: AsRef<Path>>(dir: P, grinders: usize) -> Result<()> {
 mod tests {
     use super::*;
     use serde_json::Value;
-    
 
     #[test]
     fn test_init_command() -> Result<()> {
