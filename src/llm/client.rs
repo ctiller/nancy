@@ -475,9 +475,13 @@ impl LlmClient {
         gemini: &mut Gemini,
     ) -> anyhow::Result<T> {
         loop {
+            let mut thought_str = String::new();
             // Loop for retries
             let mut retry_count = 0;
             let resp: GeminiResponse = loop {
+                let stream_handle = std::sync::Arc::new(std::sync::Mutex::new(None::<crate::introspection::StreamHandle>));
+                let ts_locked = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+
                 let ask_res = if let Some(queue) = &self.mock_queue {
                     let (should_hang, mock_resp) = {
                         let mut lock = queue.lock().unwrap();
@@ -500,15 +504,32 @@ impl LlmClient {
                     tracing::info!(
                         "==== [LLM Client] Sending request to Gemini API. Waiting... ===="
                     );
+                    
+                    let sh_clone = stream_handle.clone();
+                    let t_clone = ts_locked.clone();
+                    
                     let timeout_res = tokio::time::timeout(
                         std::time::Duration::from_secs(120),
-                        gemini.ask(self.session.get_history()),
+                        gemini.ask_stream(self.session.get_history(), move |chunk: &str, is_thought: bool| {
+                            if is_thought {
+                                let mut sh_lock = sh_clone.lock().unwrap();
+                                if let Some(handle) = sh_lock.as_ref() {
+                                    handle.append(chunk);
+                                } else {
+                                    *sh_lock = crate::introspection::stream_log(chunk);
+                                }
+                                t_clone.lock().unwrap().push_str(chunk);
+                            }
+                        }),
                     )
                     .await;
 
                     tracing::info!("==== [LLM Client] Received response successfully! ====");
                     match timeout_res {
-                        Ok(res) => res,
+                        Ok(res) => {
+                            thought_str = ts_locked.lock().unwrap().clone();
+                            res
+                        },
                         Err(_) => {
                             return Err(anyhow::anyhow!(
                                 "Gemini API network request timed out (120s deadline exceeded) organically stopping indefinitely suspended tasks."
@@ -538,6 +559,21 @@ impl LlmClient {
                     }
                 }
             };
+
+            if !thought_str.is_empty() {
+                let timestamp = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs();
+                self.emit_trace_event(crate::schema::registry::EventPayload::LlmThought(
+                    crate::schema::llm::LlmThoughtPayload {
+                        subagent: self.subagent.clone(),
+                        timestamp,
+                        thought_content: thought_str,
+                    },
+                ))
+                .await;
+            }
 
             let chat = resp;
 

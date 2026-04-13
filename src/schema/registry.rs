@@ -2,7 +2,8 @@ use serde::{Deserialize, Serialize};
 
 use super::identity::IdentityPayload;
 use super::llm::{
-    LlmPromptPayload, LlmResponsePayload, LlmToolCallPayload, LlmToolResponsePayload,
+    LlmPromptPayload, LlmResponsePayload, LlmThoughtPayload, LlmToolCallPayload,
+    LlmToolResponsePayload,
 };
 use super::task::{
     AskPayload, AssignmentCompletePayload, BlockedByPayload, CancelItemPayload,
@@ -41,6 +42,8 @@ pub enum EventPayload {
     AgentCrashReport(crate::schema::task::AgentCrashReportPayload),
     #[serde(rename = "task_evaluation")]
     TaskEvaluation(crate::schema::task::TaskEvaluationPayload),
+    #[serde(rename = "llm_thought")]
+    LlmThought(LlmThoughtPayload),
     #[serde(rename = "ask")]
     Ask(AskPayload),
     #[serde(rename = "seen")]

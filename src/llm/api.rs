@@ -20,6 +20,7 @@ impl Session {
             parts: vec![Part {
                 text: Some(text),
                 function_call: None,
+                thought: None,
             }],
         });
         if self.history.len() > self.max_history {
@@ -40,6 +41,7 @@ impl Session {
                     name: name.to_string(),
                     args: response,
                 }),
+                thought: None,
             }],
         });
         if self.history.len() > self.max_history {
@@ -60,6 +62,7 @@ impl From<String> for SystemInstruction {
             parts: vec![Part {
                 text: Some(s),
                 function_call: None,
+                thought: None,
             }],
         }
     }
@@ -79,6 +82,8 @@ pub struct Part {
     pub text: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub function_call: Option<FunctionCall>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thought: Option<bool>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -192,6 +197,9 @@ impl GeminiResponse {
         if let Some(cands) = &self.candidates {
             for cand in cands {
                 for part in &cand.content.parts {
+                    if part.thought.unwrap_or(false) {
+                        continue;
+                    }
                     if let Some(txt) = &part.text {
                         res.push_str(txt);
                     }
@@ -221,6 +229,7 @@ impl Default for GeminiResponse {
                     parts: vec![Part {
                         text: Some("{}".to_string()),
                         function_call: None,
+                        thought: None,
                     }],
                 },
                 finish_reason: Some("STOP".to_string()),
@@ -307,5 +316,115 @@ impl Gemini {
 
         let resp: GeminiResponse = serde_json::from_str(&text)?;
         Ok(resp)
+    }
+
+    pub async fn ask_stream<F>(
+        &self,
+        contents: &[Content],
+        mut on_chunk: F,
+    ) -> Result<GeminiResponse, GeminiError>
+    where
+        F: FnMut(&str, bool),
+    {
+        let mut req_contents = Vec::new();
+        for item in contents {
+            req_contents.push(item.clone());
+        }
+
+        let request = GeminiRequest {
+            contents: req_contents,
+            system_instruction: self.system_instruction.clone(),
+            tools: self.tools.clone(),
+            generation_config: if self.generation_config.is_object()
+                && !self.generation_config.as_object().unwrap().is_empty()
+            {
+                Some(self.generation_config.clone())
+            } else {
+                None
+            },
+        };
+
+        let url = format!(
+            "{}/v1beta/models/{}:streamGenerateContent?alt=sse&key={}",
+            self.base_url, self.model, self.api_key
+        );
+        let client = reqwest::Client::new();
+        let mut res = client.post(&url).json(&request).send().await?;
+
+        let status = res.status();
+        let is_json = res
+            .headers()
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .contains("application/json");
+
+        if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+            return Err(GeminiError::ResourceExhausted);
+        }
+
+        if !status.is_success() {
+            let text = res.text().await?;
+            return Err(GeminiError::ApiStatus {
+                status: status.to_string(),
+                message: text,
+            });
+        }
+
+        if is_json {
+            let text = res.text().await.map_err(GeminiError::Reqwest)?;
+            let resp: GeminiResponse = serde_json::from_str(&text)?;
+            if let Some(cands) = &resp.candidates {
+                for cand in cands {
+                    for part in &cand.content.parts {
+                        if let Some(txt) = &part.text {
+                            let is_thought = part.thought.unwrap_or(false);
+                            on_chunk(txt, is_thought);
+                        }
+                    }
+                }
+            }
+            return Ok(resp);
+        }
+
+        let mut aggregated_response = GeminiResponse::default();
+        aggregated_response.candidates = Some(Vec::new());
+
+        while let Some(chunk) = res.chunk().await.map_err(GeminiError::Reqwest)? {
+            let chunk_str = String::from_utf8_lossy(&chunk);
+            for line in chunk_str.lines() {
+                if let Some(data) = line.strip_prefix("data: ") {
+                    if data == "[DONE]" {
+                        continue;
+                    }
+                    if let Ok(parsed_chunk) = serde_json::from_str::<GeminiResponse>(data) {
+                        if let Some(cands) = &parsed_chunk.candidates {
+                            for cand in cands {
+                                if aggregated_response.candidates.as_ref().unwrap().is_empty() {
+                                    aggregated_response.candidates.as_mut().unwrap().push(cand.clone());
+                                } else {
+                                    let agg_cand = &mut aggregated_response.candidates.as_mut().unwrap()[0];
+                                    if cand.finish_reason.is_some() {
+                                        agg_cand.finish_reason = cand.finish_reason.clone();
+                                    }
+                                    for part in &cand.content.parts {
+                                        agg_cand.content.parts.push(part.clone());
+                                    }
+                                }
+
+                                for part in &cand.content.parts {
+                                    if let Some(txt) = &part.text {
+                                        let is_thought = part.thought.unwrap_or(false);
+                                        on_chunk(txt, is_thought);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(aggregated_response)
     }
 }

@@ -38,11 +38,14 @@ async fn test_e2e_crash_recovery() {
 
     // Acquire the dynamic local port published via the socket bind callback
     let port = rx.await.expect("Coordinator boot dropped callback!");
-    
+
     // Wait for HTTPS asynchronous socket rebinding to finish dynamically natively
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
-    let client = reqwest::Client::builder().danger_accept_invalid_certs(true).build().unwrap();
+    let client = reqwest::Client::builder()
+        .danger_accept_invalid_certs(true)
+        .build()
+        .unwrap();
     let url = format!("https://127.0.0.1:{}/api/grinders", port);
 
     // Wait for the single grinder to come online natively

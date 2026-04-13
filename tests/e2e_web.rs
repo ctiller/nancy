@@ -43,7 +43,10 @@ async fn test_e2e_web_grinder_list() {
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
     // 4. reqwest the agent list
-    let client = reqwest::Client::builder().danger_accept_invalid_certs(true).build().unwrap();
+    let client = reqwest::Client::builder()
+        .danger_accept_invalid_certs(true)
+        .build()
+        .unwrap();
     let url = format!("https://127.0.0.1:{}/api/grinders", local_addr.port());
     println!("Requesting: {}", url);
 
@@ -111,7 +114,10 @@ async fn test_e2e_web_grinders_online() {
     let port = rx.await.expect("Coordinator boot dropped callback!");
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
-    let client = reqwest::Client::builder().danger_accept_invalid_certs(true).build().unwrap();
+    let client = reqwest::Client::builder()
+        .danger_accept_invalid_certs(true)
+        .build()
+        .unwrap();
     let url = format!("https://127.0.0.1:{}/api/grinders", port);
 
     // 6. Poll reqwest agent list until 4 agents (3 grinders + 1 dreamer) are officially recorded ONLINE dynamically natively
@@ -180,7 +186,10 @@ async fn test_e2e_web_add_remove_grinder() {
     let port = rx.await.expect("Coordinator boot dropped callback!");
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
-    let client = reqwest::Client::builder().danger_accept_invalid_certs(true).build().unwrap();
+    let client = reqwest::Client::builder()
+        .danger_accept_invalid_certs(true)
+        .build()
+        .unwrap();
     let base_url = format!("https://127.0.0.1:{}", port);
 
     // 3. POST /api/add-grinder
@@ -311,7 +320,10 @@ async fn test_e2e_web_tasks_topology() {
 
     let port = rx.await.expect("Coordinator boot dropped callback!");
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-    let client = reqwest::Client::builder().danger_accept_invalid_certs(true).build().unwrap();
+    let client = reqwest::Client::builder()
+        .danger_accept_invalid_certs(true)
+        .build()
+        .unwrap();
 
     // Post authentic task payload securely resolving orchestrator loops natively!
     let task_payload =
@@ -414,7 +426,10 @@ async fn test_e2e_web_incident_logs() {
 
     let port = rx.await.expect("Coordinator boot dropped callback!");
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-    let client = reqwest::Client::builder().danger_accept_invalid_certs(true).build().unwrap();
+    let client = reqwest::Client::builder()
+        .danger_accept_invalid_certs(true)
+        .build()
+        .unwrap();
 
     let mut found = false;
     let mut attempts = 0;
@@ -507,7 +522,10 @@ async fn test_e2e_web_tasks_evaluations() {
 
     let port = rx.await.expect("Coordinator boot dropped callback!");
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-    let client = reqwest::Client::builder().danger_accept_invalid_certs(true).build().unwrap();
+    let client = reqwest::Client::builder()
+        .danger_accept_invalid_certs(true)
+        .build()
+        .unwrap();
 
     let task_payload =
         serde_json::json!({ "requestor": "tester", "description": "Test Topology Request" });
@@ -622,7 +640,10 @@ async fn test_e2e_web_human_pending_standalone_grinder_hydration() {
 
     let port = rx.await.expect("Coordinator boot dropped callback!");
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-    let client = reqwest::Client::builder().danger_accept_invalid_certs(true).build().unwrap();
+    let client = reqwest::Client::builder()
+        .danger_accept_invalid_certs(true)
+        .build()
+        .unwrap();
     let base_url = format!("https://127.0.0.1:{}", port);
 
     // Call /api/human/pending
@@ -679,7 +700,10 @@ async fn test_e2e_web_market_state() {
 
     let port = rx.await.expect("Coordinator boot dropped callback!");
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-    let client = reqwest::Client::builder().danger_accept_invalid_certs(true).build().unwrap();
+    let client = reqwest::Client::builder()
+        .danger_accept_invalid_certs(true)
+        .build()
+        .unwrap();
     let base_url = format!("https://127.0.0.1:{}", port);
 
     // Request market state

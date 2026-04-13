@@ -30,3 +30,11 @@ pub struct LlmResponsePayload {
     pub timestamp: u64,
     pub response: String,
 }
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct LlmThoughtPayload {
+    pub subagent: String,
+    pub timestamp: u64,
+    pub thought_content: String,
+}
+

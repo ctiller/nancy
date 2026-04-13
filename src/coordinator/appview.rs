@@ -3,6 +3,18 @@ use crate::schema::identity_config::Identity;
 use crate::schema::registry::EventPayload;
 use git2::Repository;
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicBool, Ordering};
+
+static APPVIEW_BANNED: AtomicBool = AtomicBool::new(false);
+
+pub fn ban_appview() {
+    APPVIEW_BANNED.store(true, Ordering::SeqCst);
+}
+
+#[cfg(test)]
+pub fn unban_appview() {
+    APPVIEW_BANNED.store(false, Ordering::SeqCst);
+}
 
 pub struct AppView {
     pub tasks: HashMap<String, EventPayload>,
@@ -23,6 +35,10 @@ pub struct AppView {
 
 impl AppView {
     pub fn new() -> Self {
+        if APPVIEW_BANNED.load(Ordering::SeqCst) {
+            panic!("FATAL: AppView instantiation is strictly banned in this process. Grinders must use IPC endpoints to discover tasks cleanly avoiding concurrent DAG reads.");
+        }
+
         Self {
             tasks: HashMap::new(),
             requests: HashMap::new(),
@@ -546,8 +562,6 @@ mod tests {
             Some("refs/heads/nancy/features/review-id".to_string())
         );
     }
-
-
 
     #[test]
     fn test_pagerank_highest_impact() {

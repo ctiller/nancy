@@ -143,21 +143,50 @@ pub fn identify_assigned_task(
     }
 
     let completed = get_completed_tasks(repo, worker_did);
-
+    
+    let mut pending_assignments = Vec::new();
     for (task_id, assignment) in tasks_assigned {
         if !completed.contains(&task_id) {
-            if let Some(crate::schema::registry::EventPayload::Task(payload)) =
-                appview.tasks.get(&assignment.task_ref)
-            {
-                return Some((task_id, assignment, payload.clone()));
-            } else {
-                tracing::warn!(
-                    "Warning: Assignment task_ref {} not found in ledger.",
-                    assignment.task_ref
-                );
-            }
+            pending_assignments.push((task_id, assignment));
         }
     }
+    
+    if pending_assignments.is_empty() {
+        return None;
+    }
+
+    let root = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let local_index = match crate::events::index::LocalIndex::new(&root.join(".nancy")) {
+        Ok(idx) => idx,
+        Err(e) => {
+            tracing::error!("Failed to instantiate LocalIndex: {}", e);
+            return None;
+        }
+    };
+
+    for (task_id, assignment) in pending_assignments {
+        let task_ref = &assignment.task_ref;
+        if let Ok(Some((authored_did, _, _))) = local_index.lookup_event(task_ref) {
+            let reader = crate::events::reader::Reader::new(repo, authored_did);
+            if let Ok(iter) = reader.iter_events() {
+                for ev_res in iter {
+                    if let Ok(env) = ev_res {
+                        if env.id == *task_ref {
+                            if let crate::schema::registry::EventPayload::Task(payload) = env.payload {
+                                return Some((task_id, assignment, payload));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        tracing::warn!(
+            "Warning: Assignment task_ref {} not found in ledger via LocalIndex.",
+            assignment.task_ref
+        );
+    }
+    
     None
 }
 

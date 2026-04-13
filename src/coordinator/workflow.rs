@@ -161,8 +161,6 @@ fn handle_task_requests(
     Ok(logged_any)
 }
 
-
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -250,8 +248,6 @@ mod tests {
         );
         Ok(())
     }
-
-
 
     #[sealed_test]
     fn test_handle_task_requests_direct() -> Result<()> {

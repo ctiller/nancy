@@ -28,6 +28,7 @@ pub struct SerializedFrame {
 #[derive(Clone)]
 pub enum StateElement {
     Log(String),
+    StreamLog(Arc<Mutex<String>>),
     Data(String, serde_json::Value),
     Frame(FrameNode),
 }
@@ -40,6 +41,9 @@ impl StateElement {
     pub fn snapshot_depth(&self, depth: usize) -> SerializedElement {
         match self {
             StateElement::Log(m) => SerializedElement::Log { message: m.clone() },
+            StateElement::StreamLog(m) => SerializedElement::Log {
+                message: m.lock().unwrap().clone(),
+            },
             StateElement::Data(k, v) => SerializedElement::Data {
                 key: k.clone(),
                 value: v.clone(),
@@ -130,6 +134,34 @@ pub struct IntrospectionContext {
 
 tokio::task_local! {
     pub static INTROSPECTION_CTX: IntrospectionContext;
+}
+
+pub struct StreamHandle {
+    content: Arc<Mutex<String>>,
+    updater: watch::Sender<u64>,
+}
+
+impl StreamHandle {
+    pub fn append(&self, chunk: &str) {
+        self.content.lock().unwrap().push_str(chunk);
+        let _ = self.updater.send_modify(|v| *v += 1);
+    }
+}
+
+pub fn stream_log(initial: &str) -> Option<StreamHandle> {
+    INTROSPECTION_CTX.try_with(|ctx| {
+        let content = Arc::new(Mutex::new(initial.to_string()));
+        ctx.current_frame
+            .elements
+            .lock()
+            .unwrap()
+            .push(StateElement::StreamLog(content.clone()));
+        let _ = ctx.updater.send_modify(|v| *v += 1);
+        StreamHandle {
+            content,
+            updater: ctx.updater.clone(),
+        }
+    }).ok()
 }
 
 pub fn log(message: &str) {

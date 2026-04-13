@@ -63,3 +63,4 @@ This directory contains the documented architectural and design decisions for Na
 * [0057: Token Arbitration Spot Market](0057-token-arbitration-spot-market.md) - Orchestrates dynamic budget assignments utilizing prioritized PageRank valuations securely cleanly.
 * [0058: Arbitration Market USD Budgeting](0058-arbitration-market-usd-budgeting.md) - Bounds financial tracking dynamically cleanly.
 * [0059: Environment-Driven UDS Socket Discovery](0059-environment-driven-uds-socket-discovery.md) - Standardizes mapping `NANCY_COORDINATOR_SOCKET_PATH` for robust native Sandbox Docker boundary evaluation smoothly.
+* [0060: LLM Streaming Introspection and Ledger Rollup](0060-llm-streaming-introspection-and-ledger-rollup.md) - Integrates unified Server-Sent Events natively buffering thoughts to UI graphs safely.

@@ -199,14 +199,21 @@ pub fn file_inspector(props: &FileInspectorProps) -> Html {
     {
         let content_opt = file_content.clone();
         let path_opt = props.active_file.clone();
-        use_effect_with((content_opt.clone(), path_opt.clone()), move |(content, path)| {
-            if let (Some(c), Some(p)) = (&**content, path) {
-                if !p.to_lowercase().ends_with(".md") && !p.to_lowercase().ends_with(".png") && !p.to_lowercase().ends_with(".jpg") && !p.to_lowercase().ends_with(".svg") {
-                    mountReadOnlyMonaco("repo-monaco", c, p);
+        use_effect_with(
+            (content_opt.clone(), path_opt.clone()),
+            move |(content, path)| {
+                if let (Some(c), Some(p)) = (&**content, path) {
+                    if !p.to_lowercase().ends_with(".md")
+                        && !p.to_lowercase().ends_with(".png")
+                        && !p.to_lowercase().ends_with(".jpg")
+                        && !p.to_lowercase().ends_with(".svg")
+                    {
+                        mountReadOnlyMonaco("repo-monaco", c, p);
+                    }
                 }
-            }
-            || ()
-        });
+                || ()
+            },
+        );
     }
 
     html! {

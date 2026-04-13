@@ -329,8 +329,6 @@ async fn test_appview_pagerank_drops_blocked_tasks() -> Result<()> {
     Ok(())
 }
 
-
-
 #[tokio::test]
 #[sealed_test(env = [
     ("GEMINI_API_KEY", "mock")

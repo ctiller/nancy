@@ -409,12 +409,19 @@ pub async fn handle_implement_task(
 ) -> Result<(crate::schema::task::AssignmentStatus, String)> {
     // 1. Verify Preconditions
     let mut precond_checker = crate::llm::fast_llm("precondition_checker")
-        .system_prompt(&crate::grind::prompts::implementer_system_prompt(&target_path))
+        .system_prompt(&crate::grind::prompts::implementer_system_prompt(
+            &target_path,
+        ))
         .build()?;
-    
-    if !task_payload.preconditions.trim().is_empty() && task_payload.preconditions.to_lowercase() != "none" {
-        let check_prompt = format!("Check if the following preconditions are currently met in the codebase:\n\nPreconditions: {}\n\nReturn a JSON object with `passed` (boolean), `failed_reason` (string explaining why), and `remedy_task_description` (string describing a new task to fix this if it failed, otherwise empty string).", task_payload.preconditions);
-        
+
+    if !task_payload.preconditions.trim().is_empty()
+        && task_payload.preconditions.to_lowercase() != "none"
+    {
+        let check_prompt = format!(
+            "Check if the following preconditions are currently met in the codebase:\n\nPreconditions: {}\n\nReturn a JSON object with `passed` (boolean), `failed_reason` (string explaining why), and `remedy_task_description` (string describing a new task to fix this if it failed, otherwise empty string).",
+            task_payload.preconditions
+        );
+
         let check_res = precond_checker.ask::<PrecondResult>(&check_prompt).await?;
         if !check_res.passed {
             let remedy = TaskPayload {
@@ -426,22 +433,34 @@ pub async fn handle_implement_task(
                 branch: format!("{}_remedy", task_payload.branch),
                 plan: task_payload.plan.clone(),
             };
-            let remedy_id = writer.log_event(crate::schema::registry::EventPayload::Task(remedy))?;
-            writer.log_event(crate::schema::registry::EventPayload::BlockedBy(crate::schema::task::BlockedByPayload {
-                source: remedy_id,
-                target: task_ref.to_string(),
-            }))?;
-            return Ok((crate::schema::task::AssignmentStatus::Blocked, format!("Blocked by precondition failure: {}", check_res.failed_reason)));
+            let remedy_id =
+                writer.log_event(crate::schema::registry::EventPayload::Task(remedy))?;
+            writer.log_event(crate::schema::registry::EventPayload::BlockedBy(
+                crate::schema::task::BlockedByPayload {
+                    source: remedy_id,
+                    target: task_ref.to_string(),
+                },
+            ))?;
+            return Ok((
+                crate::schema::task::AssignmentStatus::Blocked,
+                format!(
+                    "Blocked by precondition failure: {}",
+                    check_res.failed_reason
+                ),
+            ));
         }
     }
 
     let mut iteration = 0;
     let mut feedback = String::new();
-    
+
     loop {
         iteration += 1;
         if iteration > 10 {
-            return Ok((crate::schema::task::AssignmentStatus::Failed, "Exceeded implementation max loops".into()));
+            return Ok((
+                crate::schema::task::AssignmentStatus::Failed,
+                "Exceeded implementation max loops".into(),
+            ));
         }
 
         // 2. Implement
@@ -453,22 +472,34 @@ pub async fn handle_implement_task(
 
         let mut client = crate::llm::thinking_llm("implementer")
             .tools(tools)
-            .system_prompt(&crate::grind::prompts::implementer_system_prompt(&target_path))
+            .system_prompt(&crate::grind::prompts::implementer_system_prompt(
+                &target_path,
+            ))
             .with_market_weight(0.8)
             .build()?;
-        
+
         let impl_prompt = if feedback.is_empty() {
-             task_payload.description.clone()
+            task_payload.description.clone()
         } else {
-             format!("Previous attempt failed with feedback:\n{}\n\nPlease address this feedback and try again. Task: {}", feedback, task_payload.description)
+            format!(
+                "Previous attempt failed with feedback:\n{}\n\nPlease address this feedback and try again. Task: {}",
+                feedback, task_payload.description
+            )
         };
-        
+
         let _out = client.ask::<String>(&impl_prompt).await?;
 
         // 3. Postconditions
-        if !task_payload.postconditions.trim().is_empty() && task_payload.postconditions.to_lowercase() != "none" {
-            let postcond_prompt = format!("Check if the following postconditions are met in the codebase:\n\nPostconditions: {}\n\nReturn JSON with `passed` (bool), `failed_reason` (string), and `remedy_task_description` (string, empty if none).", task_payload.postconditions);
-            let post_res = precond_checker.ask::<PrecondResult>(&postcond_prompt).await?;
+        if !task_payload.postconditions.trim().is_empty()
+            && task_payload.postconditions.to_lowercase() != "none"
+        {
+            let postcond_prompt = format!(
+                "Check if the following postconditions are met in the codebase:\n\nPostconditions: {}\n\nReturn JSON with `passed` (bool), `failed_reason` (string), and `remedy_task_description` (string, empty if none).",
+                task_payload.postconditions
+            );
+            let post_res = precond_checker
+                .ask::<PrecondResult>(&postcond_prompt)
+                .await?;
             if !post_res.passed {
                 feedback = format!("Postconditions failed: {}", post_res.failed_reason);
                 continue;
@@ -480,7 +511,7 @@ pub async fn handle_implement_task(
             .revparse_single("HEAD~1")
             .map(|obj| obj.id().to_string())
             .unwrap_or_else(|_| "4b825dc642cb6eb9a060e54bf8d69288fbee4904".to_string());
-        
+
         let mut session = crate::pre_review::session::ReviewSession::new(target_path.to_path_buf());
         let mut coordinator_client = crate::llm::fast_llm("review_coordinator")
             .system_prompt(crate::grind::prompts::review_team_selection_prompt())
@@ -502,7 +533,7 @@ pub async fn handle_implement_task(
             Ok(commit) => commit.tree()?,
             Err(_) => repo.find_tree(begin_oid)?,
         };
-        
+
         // Ensure worktree HEAD is resolved successfully! Wait, the target_repo is the worktree...
         // let target_repo = Repository::open(target_path)?;
         // Use target_repo. Diff it.
@@ -511,7 +542,7 @@ pub async fn handle_implement_task(
             .revparse_single("HEAD")?
             .peel_to_commit()?
             .tree()?;
-            
+
         let diff = target_repo.diff_tree_to_tree(Some(&t_begin_tree), Some(&t_end), None)?;
         let mut diff_text = String::new();
         diff.print(git2::DiffFormat::Patch, |_delta, _hunk, line| {
@@ -545,7 +576,9 @@ pub async fn handle_implement_task(
             .await?;
 
         let mut synthesis_client = crate::llm::fast_llm("review_synthesis")
-            .system_prompt(&crate::grind::prompts::review_synthesis_prompt(&target_path))
+            .system_prompt(&crate::grind::prompts::review_synthesis_prompt(
+                &target_path,
+            ))
             .with_market_weight(0.6)
             .build()?;
 
@@ -553,10 +586,13 @@ pub async fn handle_implement_task(
             .into_iter()
             .filter_map(|(id, x)| x.ok().map(|o| (id, o)))
             .collect();
-            
+
         let mut all_approved = true;
         for out in valid_outputs.values() {
-            if matches!(out.vote, crate::pre_review::schema::ReviewVote::ChangesRequired) {
+            if matches!(
+                out.vote,
+                crate::pre_review::schema::ReviewVote::ChangesRequired
+            ) {
                 all_approved = false;
                 break;
             }
@@ -567,8 +603,11 @@ pub async fn handle_implement_task(
             let report = synthesis_client
                 .ask::<crate::schema::task::ReviewReportPayload>(&synthesis_str)
                 .await?;
-            
-            feedback = format!("Code review failed! Please address these issues:\n{}", report.general_notes);
+
+            feedback = format!(
+                "Code review failed! Please address these issues:\n{}",
+                report.general_notes
+            );
             continue;
         }
 
@@ -579,7 +618,7 @@ pub async fn handle_implement_task(
             .current_dir(target_path)
             .status()
             .await?;
-            
+
         if checkout_status.success() {
             let merge_status = tokio::process::Command::new("git")
                 .arg("merge")
@@ -588,24 +627,45 @@ pub async fn handle_implement_task(
                 .current_dir(target_path)
                 .status()
                 .await?;
-                
+
             if !merge_status.success() {
                 // abort and go back
-                let _ = tokio::process::Command::new("git").arg("merge").arg("--abort").current_dir(target_path).status().await;
-                let _ = tokio::process::Command::new("git").arg("checkout").arg(&task_payload.branch).current_dir(target_path).status().await;
-                
-                feedback = format!("Merge to parent branch '{}' was not a fast-forward. Please rebase your branch on top of '{}' to resolve conflicts.", task_payload.parent_branch, task_payload.parent_branch);
+                let _ = tokio::process::Command::new("git")
+                    .arg("merge")
+                    .arg("--abort")
+                    .current_dir(target_path)
+                    .status()
+                    .await;
+                let _ = tokio::process::Command::new("git")
+                    .arg("checkout")
+                    .arg(&task_payload.branch)
+                    .current_dir(target_path)
+                    .status()
+                    .await;
+
+                feedback = format!(
+                    "Merge to parent branch '{}' was not a fast-forward. Please rebase your branch on top of '{}' to resolve conflicts.",
+                    task_payload.parent_branch, task_payload.parent_branch
+                );
                 continue;
             }
         } else {
             // failed to checkout parent branch?
-            return Ok((crate::schema::task::AssignmentStatus::Failed, format!("Failed to find/checkout parent branch: {}", task_payload.parent_branch)));
+            return Ok((
+                crate::schema::task::AssignmentStatus::Failed,
+                format!(
+                    "Failed to find/checkout parent branch: {}",
+                    task_payload.parent_branch
+                ),
+            ));
         }
 
-        return Ok((crate::schema::task::AssignmentStatus::Completed, "Successfully implemented and merged.".into()));
+        return Ok((
+            crate::schema::task::AssignmentStatus::Completed,
+            "Successfully implemented and merged.".into(),
+        ));
     }
 }
-
 
 pub async fn execute<'a>(
     repo: &'a Repository,
@@ -898,8 +958,6 @@ mod tests {
 
         Ok(())
     }
-
-
 
     #[tokio::test]
     #[sealed_test(env = [
