@@ -14,7 +14,7 @@ pub fn appview_task_priority(task_id: String) -> crate::llm::client::TaskPriorit
         Box::pin(async move {
             let sock = crate::agent::get_coordinator_socket_path(None);
             if sock.exists() {
-                if let Ok(client) = reqwest::Client::builder().unix_socket(sock).build() {
+                if let Ok(client) = reqwest::Client::builder().unix_socket(sock).http2_prior_knowledge().build() {
                     let url = format!("http://localhost/api/market/task-priority/{}", t_id);
                     if let Ok(resp) = client.get(&url).timeout(std::time::Duration::from_secs(5)).send().await {
                         if let Ok(json) = resp.json::<serde_json::Value>().await {

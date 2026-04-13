@@ -7,3 +7,4 @@ node_modules
 /src/web/site
 /web/dist
 *.log
+.nancy

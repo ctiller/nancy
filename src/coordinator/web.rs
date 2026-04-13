@@ -95,7 +95,7 @@ async fn proxy_grinder_state(
         return (StatusCode::NO_CONTENT, "Grinder socket not found").into_response();
     }
 
-    if let Ok(client) = reqwest::Client::builder().unix_socket(socket_path).build() {
+    if let Ok(client) = reqwest::Client::builder().unix_socket(socket_path).http2_prior_knowledge().build() {
         let url = if let Some(last_update) = params.get("last_update") {
             format!("http://localhost/live-state?last_update={}", last_update)
         } else {
@@ -488,13 +488,37 @@ pub fn spawn_web_server(tcp_listener: tokio::net::TcpListener, ipc_state: crate:
         .layer(TraceLayer::new_for_http())
         .layer(axum::Extension(ipc_state));
 
+    let addr = tcp_listener.local_addr().unwrap();
+    drop(tcp_listener);
+
     tokio::spawn(async move {
+        // Generate a self-signed certificate for local HTTPS/HTTP2 support
+        let subject_alt_names = vec!["localhost".to_string(), "127.0.0.1".to_string(), "0.0.0.0".to_string()];
+        let cert = rcgen::generate_simple_self_signed(subject_alt_names).expect("Failed to generate self-signed cert");
+        let cert_der = cert.cert.der().to_vec();
+        let key_der = cert.signing_key.serialize_der();
+        
+        let config = axum_server::tls_rustls::RustlsConfig::from_der(vec![cert_der], key_der).await.unwrap();
+
         let shutdown_signal = async {
             if !crate::commands::coordinator::SHUTDOWN.load(Ordering::SeqCst) {
                 crate::commands::coordinator::SHUTDOWN_NOTIFY.notified().await;
             }
         };
-        axum::serve(tcp_listener, web_app).with_graceful_shutdown(shutdown_signal).await.ok();
+
+        let handle = axum_server::Handle::new();
+        let handle_clone = handle.clone();
+        
+        tokio::spawn(async move {
+            shutdown_signal.await;
+            handle_clone.graceful_shutdown(Some(std::time::Duration::from_secs(3)));
+        });
+
+        axum_server::bind_rustls(addr, config)
+            .handle(handle)
+            .serve(web_app.into_make_service())
+            .await
+            .ok();
     })
 }
 

@@ -36,7 +36,7 @@ sha2 = "0.11.0"
 strsim = "0.11.1"
 tar = "0.4.45"
 tempfile = "3.27.0"
-tokio = { version = "1.51.0", features = ["full", "test-util"] }
+tokio = { version = "1.51.0", features = ["full", "macros", "rt-multi-thread", "test-util"] }
 tokio-stream = "0.1.18"
 tower = "0.5.3"
 tower-http = { version = "0.6", features = ["fs", "cors", "trace"] }
@@ -53,11 +53,13 @@ tree-sitter-typescript = "0.23.2"
 tree-sitter-javascript = "0.25.0"
 syntect = "5.3.0"
 
-reqwest = { version = "0.13.2", default-features = false, features = ["rustls", "json"] }
+reqwest = { version = "0.13.2", default-features = false, features = ["rustls", "json", "http2"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "time", "local-time"] }
 time = { version = "0.3", features = ["local-offset", "formatting", "macros"] }
 ansi-to-html = "0.2.2"
+axum-server = { version = "0.8.0", features = ["tls-rustls"] }
+rcgen = "0.14.7"
 
 [dev-dependencies]
 proptest = "1.4.0"

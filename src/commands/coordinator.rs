@@ -91,7 +91,7 @@ impl Coordinator {
 
         let tcp_listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", port)).await.unwrap();
         let actual_port = tcp_listener.local_addr().unwrap().port();
-        eprintln!("Web server started at http://0.0.0.0:{}", actual_port);
+        eprintln!("Web server started at https://0.0.0.0:{}", actual_port);
         let web_server_task = spawn_web_server(tcp_listener, ipc_state.clone());
         
         if let Some(tx) = bind_cb {

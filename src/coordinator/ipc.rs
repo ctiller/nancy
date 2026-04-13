@@ -53,7 +53,7 @@ pub async fn remove_grinder_handler(
     let sock_path = root.join(".nancy").join("sockets").join(&payload.did).join("grinder.sock");
     
     if sock_path.exists() {
-        if let Ok(client) = reqwest::Client::builder().unix_socket(sock_path.clone()).build() {
+        if let Ok(client) = reqwest::Client::builder().unix_socket(sock_path.clone()).http2_prior_knowledge().build() {
             let _ = client.post("http://localhost/shutdown-requested").send().await;
             
             // Wait for it to close cleanly natively gracefully dropping Docker containers natively structurally

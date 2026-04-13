@@ -363,7 +363,7 @@ impl LlmClient {
         let mut target_model = model.clone();
 
         if coord_sock.exists() {
-            if let Ok(client) = reqwest::Client::builder().unix_socket(coord_sock.clone()).build() {
+            if let Ok(client) = reqwest::Client::builder().unix_socket(coord_sock.clone()).http2_prior_knowledge().build() {
                 let priority_val = (self.task_priority)().await;
                 let k = priority_val * self.local_market_weight;
                 
@@ -508,7 +508,7 @@ impl LlmClient {
             
             let coord_sock = crate::agent::get_coordinator_socket_path(None);
             if coord_sock.exists() {
-                if let Ok(client) = reqwest::Client::builder().unix_socket(coord_sock.clone()).build() {
+                if let Ok(client) = reqwest::Client::builder().unix_socket(coord_sock.clone()).http2_prior_knowledge().build() {
                     let payload = crate::schema::ipc::LlmUsagePayload {
                         model: serde_json::from_value(serde_json::Value::String(gemini.model.clone())).unwrap_or(schema::LlmModel::TestMockModel),
                         input_tokens,

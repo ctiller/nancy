@@ -236,7 +236,7 @@ pub async fn run_agent<P: AsRef<Path>, Processor: AgentTaskProcessor>(
 
             let socket_path = get_coordinator_socket_path(Some(&workdir));
             if socket_path.exists() {
-                match reqwest::Client::builder().unix_socket(socket_path.clone()).build() {
+                match reqwest::Client::builder().unix_socket(socket_path.clone()).http2_prior_knowledge().build() {
                     Ok(client) => {
                         let payload = crate::schema::ipc::ReadyForPollPayload { last_state_id };
                         let res = client.post("http://localhost/ready-for-poll")
@@ -286,7 +286,7 @@ pub async fn run_agent<P: AsRef<Path>, Processor: AgentTaskProcessor>(
                     grinder_did: worker_did.clone(),
                     completed_task_ids: crate::commands::grind::get_completed_tasks(&repo, &worker_did), // NOTE: generic usage applies safely as task payload bounds apply equally!
                 };
-                if let Ok(client) = reqwest::Client::builder().unix_socket(socket_path.clone()).build() {
+                if let Ok(client) = reqwest::Client::builder().unix_socket(socket_path.clone()).http2_prior_knowledge().build() {
                     tracing::debug!("[Agent {}] Sending /updates-ready block payload...", agent_type);
                     let res = client.post("http://localhost/updates-ready")
                         .json(&payload)
@@ -309,7 +309,7 @@ pub async fn run_agent<P: AsRef<Path>, Processor: AgentTaskProcessor>(
         // Optionally listen to immediate exit if requested locally!
         let socket_path_local = get_coordinator_socket_path(Some(&workdir));
         if socket_path_local.exists() {
-            if let Ok(client) = reqwest::Client::builder().unix_socket(socket_path_local.clone()).build() {
+            if let Ok(client) = reqwest::Client::builder().unix_socket(socket_path_local.clone()).http2_prior_knowledge().build() {
                 tokio::spawn(async move {
                     if let Ok(resp) = client.get("http://localhost/shutdown-requested").send().await {
                         if resp.status().is_success() {
