@@ -153,7 +153,7 @@ async fn handle_plan_task(
         let all_personas = crate::personas::get_all_personas();
         let mod_prompt = crate::grind::prompts::ModeratorPromptTemplate { personas: &all_personas }.render()?;
 
-        let mut coord_client = crate::llm::thinking_llm("planning_moderator")
+        let mut coord_client = crate::llm::fast_llm("planning_moderator")
             .system_prompt(&mod_prompt)
             .with_loop_detection()
             .with_task_priority(appview_task_priority(task_ref.to_string()))
@@ -191,7 +191,7 @@ async fn handle_plan_task(
     let mut feedback_context = String::new();
     let mut iteration = 0;
     
-    let mut synthesizer = crate::llm::thinking_llm("moderator_synthesizer")
+    let mut synthesizer = crate::llm::fast_llm("moderator_synthesizer")
         .system_prompt(&crate::grind::prompts::ModeratorSynthesizerSystemPromptTemplate {
             task_description: &task_payload.description,
             tdd_guidelines: crate::grind::prompts::TDD_GUIDELINES,
@@ -432,7 +432,7 @@ async fn handle_review_task(
         .unwrap_or_else(|_| "4b825dc642cb6eb9a060e54bf8d69288fbee4904".to_string());
     let mut session = crate::pre_review::session::ReviewSession::new(target_path.to_path_buf());
 
-    let mut coordinator_client = crate::llm::thinking_llm("review_coordinator")
+    let mut coordinator_client = crate::llm::fast_llm("review_coordinator")
         .system_prompt(crate::grind::prompts::review_team_selection_prompt())
         .with_task_priority(appview_task_priority(task_ref.to_string()))
         .with_market_weight(0.7)
@@ -484,7 +484,7 @@ async fn handle_review_task(
         )
         .await?;
 
-    let mut synthesis_client = crate::llm::thinking_llm("review_synthesis")
+    let mut synthesis_client = crate::llm::fast_llm("review_synthesis")
         .system_prompt(&crate::grind::prompts::review_synthesis_prompt(
             &target_path,
         ))

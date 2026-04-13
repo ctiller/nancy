@@ -3,7 +3,7 @@ use futures_util::StreamExt;
 use std::collections::{HashMap, HashSet};
 
 use crate::llm::client::LlmClient;
-use crate::llm::thinking_llm;
+use crate::llm::fast_llm;
 use crate::personas::{PersonaCategory, get_all_personas};
 use crate::pre_review::runner::reviewer_system_prompt;
 
@@ -155,7 +155,7 @@ impl ReviewSession {
                     .context(&format!("Reviewing: {}", persona.name), &client_name)
                     .build();
 
-                let new_client = thinking_llm(&client_name)
+                let new_client = fast_llm(&client_name)
                     .system_prompt(&sys_prompt)
                     .tools(tools)
                     .with_loop_detection()

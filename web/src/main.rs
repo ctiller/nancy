@@ -222,9 +222,15 @@ fn command_view() -> Html {
                                         });
                                     });
                                     html! {
-                                        <div onclick={on_click} style="cursor: pointer; padding: 12px; background: rgba(0,0,100,0.3); border-radius: 4px; border-left: 4px solid var(--accent); transition: background 0.2s;">
-                                            <div style="font-weight: bold; margin-bottom: 8px;">{ "Plan: " } { plan.task_name.clone() }</div>
-                                            <div style="font-size: 0.8rem; color: var(--text-muted);">{"Click to review design."}</div>
+                                        <div class="action-card action-card-plan" onclick={on_click}>
+                                            <div class="action-card-title">
+                                                <span style="color: var(--accent-cyan); margin-right: 6px;">{"Plan:"}</span>
+                                                { plan.document.title.clone() }
+                                            </div>
+                                            <div class="action-card-subtitle">
+                                                <span>{"Click to review design"}</span>
+                                                <span style="margin-left: auto;">{"➔"}</span>
+                                            </div>
                                         </div>
                                     }
                                 })}
@@ -245,9 +251,15 @@ fn command_view() -> Html {
                                         });
                                     });
                                     html! {
-                                        <div onclick={on_click} style="cursor: pointer; padding: 12px; background: rgba(100,50,0,0.3); border-radius: 4px; border-left: 4px solid var(--accent-orange, #ff9800); transition: background 0.2s;">
-                                            <div style="font-weight: bold; margin-bottom: 4px;">{ "Task: " } { ask.task_name.clone() }</div>
-                                            <div style="font-size: 0.8rem; color: var(--text-muted);">{"Click to answer."}</div>
+                                        <div class="action-card action-card-ask" onclick={on_click}>
+                                            <div class="action-card-title">
+                                                <span style="color: #ff9800; margin-right: 6px;">{"Task:"}</span>
+                                                { ask.task_name.clone() }
+                                            </div>
+                                            <div class="action-card-subtitle">
+                                                <span>{"Click to answer"}</span>
+                                                <span style="margin-left: auto;">{"➔"}</span>
+                                            </div>
                                         </div>
                                     }
                                 })}
