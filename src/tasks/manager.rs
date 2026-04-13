@@ -1,37 +1,37 @@
 use crate::events::index::LocalIndex;
 use crate::events::reader::Reader;
+use crate::git::AsyncRepository;
 use crate::schema::registry::EventPayload;
 use crate::schema::task::TaskPayload;
 use anyhow::Result;
-use git2::Repository;
 
 pub struct TaskManager<'a> {
-    repo: &'a Repository,
+    repo: &'a AsyncRepository,
     index: &'a LocalIndex,
 }
 
 impl<'a> TaskManager<'a> {
-    pub fn new(repo: &'a Repository, index: &'a LocalIndex) -> Self {
+    pub fn new(repo: &'a AsyncRepository, index: &'a LocalIndex) -> Self {
         Self { repo, index }
     }
 
-    pub fn refresh_cache(&self) -> Result<()> {
-        let branches = self.repo.branches(Some(git2::BranchType::Local))?;
+    pub async fn refresh_cache(&self) -> Result<()> {
+        let branches = self.repo.branches(Some(git2::BranchType::Local)).await?;
 
-        for branch_result in branches {
-            let (branch, _) = branch_result?;
-            if let Some(name) = branch.name()? {
-                if name.starts_with("nancy/") {
-                    let did = name.trim_start_matches("nancy/");
-                    let commit = branch.get().peel_to_commit()?;
-                    let latest_hash = commit.id().to_string();
+        for branch in branches {
+            let name = branch.name;
+            if name.starts_with("nancy/") {
+                let did = name.trim_start_matches("nancy/");
 
-                    let cached_hash = self.index.get_branch_commit(did)?;
-                    if cached_hash.as_deref() != Some(&latest_hash) {
-                        let reader = Reader::new(self.repo, did.to_string());
-                        if let Err(e) = reader.sync_index(self.index) {
-                            tracing::debug!("Skipping index sync for branch {}: {}", name, e);
-                        }
+                let branch_ref = format!("refs/heads/{}", name);
+                let commit = self.repo.peel_to_commit(&branch_ref).await?;
+                let latest_hash = commit.oid.0.clone();
+
+                let cached_hash = self.index.get_branch_commit(did)?;
+                if cached_hash.as_deref() != Some(&latest_hash) {
+                    let reader = Reader::new(self.repo, did.to_string());
+                    if let Err(e) = reader.sync_index(self.index).await {
+                        tracing::debug!("Skipping index sync for branch {}: {}", name, e);
                     }
                 }
             }
@@ -39,23 +39,20 @@ impl<'a> TaskManager<'a> {
         Ok(())
     }
 
-    pub fn get_ready_tasks(&self) -> Result<Vec<TaskPayload>> {
+    pub async fn get_ready_tasks(&self) -> Result<Vec<TaskPayload>> {
         let mut ready_tasks = Vec::new();
 
-        let branches = self.repo.branches(Some(git2::BranchType::Local))?;
-        for branch_result in branches {
-            let (branch, _) = branch_result?;
-            if let Some(name) = branch.name()? {
-                if name.starts_with("nancy/") {
-                    let did = name.trim_start_matches("nancy/");
-                    let reader = Reader::new(self.repo, did.to_string());
+        let branches = self.repo.branches(Some(git2::BranchType::Local)).await?;
+        for branch in branches {
+            let name = branch.name;
+            if name.starts_with("nancy/") {
+                let did = name.trim_start_matches("nancy/");
+                let reader = Reader::new(self.repo, did.to_string());
 
-                    for event_res in reader.iter_events()? {
-                        if let Ok(env) = event_res {
-                            if let EventPayload::Task(task_payload) = env.payload {
-                                // For now, we assume all tasks are unblocked and ready.
-                                ready_tasks.push(task_payload);
-                            }
+                for event_res in reader.iter_events().await? {
+                    if let Ok(env) = event_res {
+                        if let EventPayload::Task(task_payload) = env.payload {
+                            ready_tasks.push(task_payload);
                         }
                     }
                 }
@@ -74,9 +71,9 @@ mod tests {
     use crate::schema::identity_config::{DidOwner, Identity};
     use did_key::{Ed25519KeyPair, Fingerprint, KeyMaterial};
 
-    #[test]
-    fn test_task_manager() -> Result<()> {
-        let mut _tr = crate::debug::test_repo::TestRepo::new()?;
+    #[tokio::test]
+    async fn test_task_manager() -> Result<()> {
+        let mut _tr = crate::debug::test_repo::TestRepo::new().await?;
         let temp_dir = &_tr.td;
         let repo = &_tr.repo;
         let nancy_dir = temp_dir.path().join(".nancy");
@@ -97,7 +94,7 @@ mod tests {
             human: Some(crate::schema::identity_config::DidOwner::generate()),
         };
 
-        let writer = Writer::new(&repo, identity)?;
+        let writer = Writer::new(&_tr.async_repo, identity)?;
 
         // Log identity first
         writer.log_event(EventPayload::Identity(IdentityPayload {
@@ -116,13 +113,13 @@ mod tests {
             plan: None,
         }))?;
 
-        writer.commit_batch()?;
+        writer.commit_batch().await?;
 
-        let manager = TaskManager::new(&repo, &local_index);
+        let manager = TaskManager::new(&_tr.async_repo, &local_index);
 
-        manager.refresh_cache()?;
+        manager.refresh_cache().await?;
 
-        let ready_tasks = manager.get_ready_tasks()?;
+        let ready_tasks = manager.get_ready_tasks().await?;
         assert_eq!(ready_tasks.len(), 1);
         assert_eq!(ready_tasks[0].description, "A test task");
 

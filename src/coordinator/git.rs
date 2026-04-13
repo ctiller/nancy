@@ -1,20 +1,22 @@
 use crate::coordinator::appview::AppView;
-use git2::Repository;
+use crate::git::AsyncRepository;
 
-pub fn ensure_task_branch(repo: &Repository, appview: &AppView, task_id: &String) {
+pub async fn ensure_task_branch(repo: &AsyncRepository, appview: &AppView, task_id: &String) {
     let task_branch = format!("refs/heads/nancy/tasks/{}", task_id);
-    if repo.find_reference(&task_branch).is_ok() {
+    if repo.find_reference(&task_branch).await.is_ok() {
         return;
     }
     let feature_branch = match appview.get_feature_branch(task_id) {
         Some(b) => b,
         None => return,
     };
-    let feat_ref = match repo.find_reference(&feature_branch) {
+    let feat_ref = match repo.find_reference(&feature_branch).await {
         Ok(r) => r,
         Err(_) => return,
     };
-    if let Ok(commit) = feat_ref.peel_to_commit() {
-        let _ = repo.branch(&format!("nancy/tasks/{}", task_id), &commit, false);
+    if let Ok(commit) = repo.peel_to_commit(&feat_ref.name).await {
+        let _ = repo
+            .branch(&format!("nancy/tasks/{}", task_id), &commit.oid.0, false)
+            .await;
     }
 }

@@ -1,48 +1,52 @@
 use anyhow::{Context, Result, anyhow};
-use git2::Repository;
+use crate::git::AsyncRepository;
 use std::collections::BTreeMap;
 
 use super::EventEnvelope;
 
 pub struct Reader<'a> {
-    repo: &'a Repository,
+    repo: &'a AsyncRepository,
     did: String,
 }
 
 impl<'a> Reader<'a> {
-    pub fn new(repo: &'a Repository, did: String) -> Self {
+    pub fn new(repo: &'a AsyncRepository, did: String) -> Self {
         Reader { repo, did }
     }
 
-    pub fn iter_events(&self) -> Result<impl Iterator<Item = Result<EventEnvelope>>> {
+    pub async fn iter_events(&self) -> Result<impl Iterator<Item = Result<EventEnvelope>>> {
         let safe_did = self.did.replace(":", "_");
         let branch_name = format!("refs/heads/nancy/{}", safe_did);
-        let branch_ref = self.repo.find_reference(&branch_name)?;
-        let commit = branch_ref.peel_to_commit()?;
-        let tree = commit.tree()?;
+        let commit = self.repo.peel_to_commit(&branch_name).await;
+        let commit = match commit {
+            Ok(c) => c,
+            Err(_) => return Ok(Vec::new().into_iter()),
+        };
 
-        let events_entry = tree
-            .get_name("events")
-            .context("events directory missing")?;
-        let events_object = events_entry.to_object(self.repo)?;
-        let events_tree = events_object
-            .as_tree()
-            .ok_or_else(|| anyhow!("events is not a tree"))?;
+        let root_entries = self.repo.read_tree(&commit.tree_oid.0).await?;
 
-        // Collect all blobs ordered by filename
+        let mut events_tree_oid = None;
+        for (name, oid, kind) in root_entries {
+            if name == "events" && kind == Some(git2::ObjectType::Tree) {
+                events_tree_oid = Some(oid);
+                break;
+            }
+        }
+        let events_tree_oid = events_tree_oid.context("events directory missing")?;
+
+        let events_entries = self.repo.read_tree(&events_tree_oid).await?;
+
         let mut log_blobs = BTreeMap::new();
-        for entry in events_tree.iter() {
-            if let Some(name) = entry.name() {
-                if name.ends_with(".log") {
-                    log_blobs.insert(name.to_string(), entry.id());
-                }
+        for (name, oid, _kind) in events_entries {
+            if name.ends_with(".log") {
+                log_blobs.insert(name, oid);
             }
         }
 
         let mut all_lines = Vec::new();
         for (_, blob_id) in log_blobs {
-            let blob = self.repo.find_blob(blob_id)?;
-            let content = std::str::from_utf8(blob.content())?;
+            let blob_data = self.repo.read_blob(&blob_id).await?;
+            let content = std::str::from_utf8(&blob_data)?;
             for line in content.trim().split('\n') {
                 if !line.is_empty() {
                     all_lines.push(line.to_string());
@@ -58,7 +62,11 @@ impl<'a> Reader<'a> {
                 // Native Cryptographic Ed25519 Signature Verification
                 let payload_str = serde_json::to_string(&env.payload)?;
                 let sig_bytes = hex::decode(&env.signature).context("Invalid hex signature bounds")?;
-                let uri = format!("did:key:{}", env.did);
+                let uri = if env.did.starts_with("did:key:") {
+                    env.did.clone()
+                } else {
+                    format!("did:key:{}", env.did)
+                };
                 let pk = did_key::resolve(&uri).map_err(|e| anyhow!("Failed to resolve DID URI smoothly: {:?}", e))?;
                 
                 use did_key::CoreSign;
@@ -66,46 +74,57 @@ impl<'a> Reader<'a> {
                     .map_err(|_| anyhow!("Cryptographic signature verification failed efficiently for Event {}", env.id))?;
                 
                 Ok(env)
-            });
+            })
+            .collect::<Vec<_>>()
+            .into_iter();
 
         Ok(iter)
     }
 
-    pub fn sync_index(&self, index: &crate::events::index::LocalIndex) -> Result<()> {
+    pub async fn sync_index(&self, index: &crate::events::index::LocalIndex) -> Result<()> {
         let safe_did = self.did.replace(":", "_");
         let branch_name = format!("refs/heads/nancy/{}", safe_did);
-        let branch_ref = self.repo.find_reference(&branch_name)?;
-        let commit = branch_ref.peel_to_commit()?;
-        let tree = commit.tree()?;
+        let commit = self.repo.peel_to_commit(&branch_name).await;
+        let commit = match commit {
+            Ok(c) => c,
+            Err(_) => return Ok(()),
+        };
 
-        let events_entry = tree
-            .get_name("events")
-            .context("events directory missing")?;
-        let events_object = events_entry.to_object(self.repo)?;
-        let events_tree = events_object
-            .as_tree()
-            .ok_or_else(|| anyhow!("events is not a tree"))?;
+        let root_entries = self.repo.read_tree(&commit.tree_oid.0).await?;
+
+        let mut events_tree_oid = None;
+        for (name, oid, kind) in root_entries {
+            if name == "events" && kind == Some(git2::ObjectType::Tree) {
+                events_tree_oid = Some(oid);
+                break;
+            }
+        }
+        let events_tree_oid = events_tree_oid.context("events directory missing")?;
+
+        let events_entries = self.repo.read_tree(&events_tree_oid).await?;
 
         // Collect all blobs ordered by filename
         let mut log_blobs = BTreeMap::new();
-        for entry in events_tree.iter() {
-            if let Some(name) = entry.name() {
-                if name.ends_with(".log") {
-                    log_blobs.insert(name.to_string(), entry.id());
-                }
+        for (name, oid, _kind) in events_entries {
+            if name.ends_with(".log") {
+                log_blobs.insert(name, oid);
             }
         }
 
         for (log_file, blob_id) in log_blobs {
-            let blob = self.repo.find_blob(blob_id)?;
-            let content = std::str::from_utf8(blob.content())?;
+            let blob_data = self.repo.read_blob(&blob_id).await?;
+            let content = std::str::from_utf8(&blob_data)?;
             for (line_index, line) in content.trim().split('\n').enumerate() {
                 if !line.is_empty() {
                     if let Ok(env) = serde_json::from_str::<EventEnvelope>(line) {
                         use did_key::CoreSign;
                         if let Ok(payload_str) = serde_json::to_string(&env.payload) {
                             if let Ok(sig_bytes) = hex::decode(&env.signature) {
-                                let uri = format!("did:key:{}", env.did);
+                                let uri = if env.did.starts_with("did:key:") {
+                                    env.did.clone()
+                                } else {
+                                    format!("did:key:{}", env.did)
+                                };
                                 if let Ok(pk) = did_key::resolve(&uri) {
                                     if pk.verify(payload_str.as_bytes(), &sig_bytes).is_ok() {
                                         index.insert_event(&env.id, &self.did, &log_file, line_index)?;
@@ -120,7 +139,7 @@ impl<'a> Reader<'a> {
             }
         }
 
-        index.set_branch_commit(&self.did, &commit.id().to_string())?;
+        index.set_branch_commit(&self.did, &commit.oid.0.to_string())?;
 
         Ok(())
     }
@@ -136,11 +155,10 @@ mod tests {
     use crate::schema::registry::EventPayload;
     use did_key::{Ed25519KeyPair, Fingerprint, KeyMaterial};
 
-    #[test]
-    fn test_reader_iter_events() -> Result<()> {
-        let mut _tr = crate::debug::test_repo::TestRepo::new()?;
+    #[tokio::test]
+    async fn test_reader_iter_events() -> Result<()> {
+        let mut _tr = crate::debug::test_repo::TestRepo::new().await?;
         let temp_dir = &_tr.td;
-        let repo = &_tr.repo;
         let nancy_dir = temp_dir.path().join(".nancy");
         std::fs::create_dir_all(&nancy_dir)?;
 
@@ -152,19 +170,19 @@ mod tests {
             private_key_hex: hex::encode(key.private_key_bytes()),
         });
 
-        let writer = Writer::new(&repo, identity)?;
+        let writer = Writer::new(&_tr.async_repo, identity)?;
 
         writer.log_event(EventPayload::Identity(IdentityPayload {
             did: did.clone(),
             public_key_hex: "dummy".to_string(),
             timestamp: 100,
         }))?;
-        writer.commit_batch()?;
+        writer.commit_batch().await?;
 
-        let reader = Reader::new(&repo, did.clone());
+        let reader = Reader::new(&_tr.async_repo, did.clone());
         let mut count = 0;
         let mut cached_id = String::new();
-        for event_result in reader.iter_events()? {
+        for event_result in reader.iter_events().await? {
             let env = event_result?;
             assert_eq!(env.did, did);
             cached_id = env.id;
@@ -173,7 +191,7 @@ mod tests {
         assert_eq!(count, 1, "Should iterate exactly one event");
 
         let local_index = LocalIndex::new(&nancy_dir)?;
-        reader.sync_index(&local_index)?;
+        reader.sync_index(&local_index).await?;
 
         let lookup_res = local_index
             .lookup_event(&cached_id)?

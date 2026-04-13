@@ -13,6 +13,9 @@ async fn test_e2e_crash_recovery() {
 
     // 1. git init
     let repo = git2::Repository::init(tmp.path()).unwrap();
+    let async_repo = nancy::git::AsyncRepository::discover(repo.workdir().unwrap())
+        .await
+        .unwrap();
 
     // 2. nancy init (provision 1 grinder)
     nancy::commands::init::init(tmp.path(), 1).await.unwrap();
@@ -98,8 +101,8 @@ async fn test_e2e_crash_recovery() {
     attempts = 0;
     while crash_ref.is_empty() && attempts < 200 {
         tokio::time::sleep(Duration::from_millis(100)).await;
-        let reader = nancy::events::reader::Reader::new(&repo, root_did.clone());
-        if let Ok(iter) = reader.iter_events() {
+        let reader = nancy::events::reader::Reader::new(&async_repo, root_did.clone());
+        if let Ok(iter) = reader.iter_events().await {
             for ev_res in iter {
                 if let Ok(env) = ev_res {
                     if let nancy::schema::registry::EventPayload::AgentCrashReport(report) =

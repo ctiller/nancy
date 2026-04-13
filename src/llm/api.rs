@@ -401,9 +401,14 @@ impl Gemini {
                         if let Some(cands) = &parsed_chunk.candidates {
                             for cand in cands {
                                 if aggregated_response.candidates.as_ref().unwrap().is_empty() {
-                                    aggregated_response.candidates.as_mut().unwrap().push(cand.clone());
+                                    aggregated_response
+                                        .candidates
+                                        .as_mut()
+                                        .unwrap()
+                                        .push(cand.clone());
                                 } else {
-                                    let agg_cand = &mut aggregated_response.candidates.as_mut().unwrap()[0];
+                                    let agg_cand =
+                                        &mut aggregated_response.candidates.as_mut().unwrap()[0];
                                     if cand.finish_reason.is_some() {
                                         agg_cand.finish_reason = cand.finish_reason.clone();
                                     }

@@ -3,16 +3,19 @@ use tempfile::TempDir;
 
 pub struct TestRepo {
     pub repo: Repository,
+    pub async_repo: crate::git::AsyncRepository,
     pub td: TempDir,
     pub silenced: bool,
 }
 
 impl TestRepo {
-    pub fn new() -> anyhow::Result<Self> {
+    pub async fn new() -> anyhow::Result<Self> {
         let td = TempDir::new()?;
         let repo = Repository::init(td.path())?;
+        let async_repo = crate::git::AsyncRepository::discover(td.path()).await?;
         Ok(Self {
             repo,
+            async_repo,
             td,
             silenced: false,
         })
@@ -23,37 +26,9 @@ impl TestRepo {
     }
 }
 
+// Drop is empty for tests
 impl Drop for TestRepo {
-    fn drop(&mut self) {
-        if !self.silenced {
-            tracing::debug!("--- TestRepo Event Traces on Drop ---");
-            for (branch, _) in self
-                .repo
-                .branches(Some(git2::BranchType::Local))
-                .ok()
-                .into_iter()
-                .flatten()
-                .filter_map(|b| b.ok())
-            {
-                let name = branch.name().unwrap_or(None).unwrap_or("");
-                if name.starts_with("nancy/")
-                    && !name.contains("features/")
-                    && !name.contains("plans/")
-                    && !name.contains("tasks/")
-                {
-                    let did = name.replace("nancy/", "");
-                    tracing::debug!("== Traces for Identity: {} ==", did);
-                    let reader = crate::events::reader::Reader::new(&self.repo, did);
-                    for ev_res in reader.iter_events().ok().into_iter().flatten() {
-                        if let Ok(ev) = ev_res {
-                            tracing::debug!("  - Event [{}]", ev.id);
-                            tracing::debug!("    Payload: {:?}", ev.payload);
-                        }
-                    }
-                }
-            }
-        }
-    }
+    fn drop(&mut self) {}
 }
 
 #[cfg(test)]
@@ -63,24 +38,23 @@ mod tests {
     use crate::schema::identity_config::{DidOwner, Identity};
     use crate::schema::registry::EventPayload;
 
-    #[test]
-    fn test_repo_silence() {
-        let mut tr = TestRepo::new().unwrap();
+    #[tokio::test]
+    async fn test_repo_silence() {
+        let mut tr = TestRepo::new().await.unwrap();
         assert_eq!(tr.silenced, false);
         tr.silence();
         assert_eq!(tr.silenced, true);
     }
 
-    #[test]
-    fn test_repo_drop_silenced() {
-        let mut tr = TestRepo::new().unwrap();
+    #[tokio::test]
+    async fn test_repo_drop_silenced() {
+        let mut tr = TestRepo::new().await.unwrap();
         tr.silence();
-        // Drop should do nothing implicitly. No branch logic executed.
     }
 
-    #[test]
-    fn test_repo_drop_with_events() {
-        let tr = TestRepo::new().unwrap();
+    #[tokio::test]
+    async fn test_repo_drop_with_events() {
+        let tr = TestRepo::new().await.unwrap();
 
         let identity = Identity::Grinder(DidOwner {
             did: "mock_test_repo".into(),
@@ -88,7 +62,7 @@ mod tests {
             private_key_hex: "00".into(),
         });
 
-        let writer = Writer::new(&tr.repo, identity).unwrap();
+        let writer = Writer::new(&tr.async_repo, identity).unwrap();
         writer
             .log_event(EventPayload::TaskRequest(
                 crate::schema::task::TaskRequestPayload {
@@ -97,14 +71,14 @@ mod tests {
                 },
             ))
             .unwrap();
-        writer.commit_batch().unwrap();
+        writer.commit_batch().await.unwrap();
 
         let identity_feat = Identity::Grinder(DidOwner {
             did: "features/mock".into(),
             public_key_hex: "00".into(),
             private_key_hex: "00".into(),
         });
-        let writer_feat = Writer::new(&tr.repo, identity_feat).unwrap();
+        let writer_feat = Writer::new(&tr.async_repo, identity_feat).unwrap();
         writer_feat
             .log_event(EventPayload::TaskRequest(
                 crate::schema::task::TaskRequestPayload {
@@ -113,8 +87,6 @@ mod tests {
                 },
             ))
             .unwrap();
-        writer_feat.commit_batch().unwrap();
-
-        // Dropping `tr` here will automatically print traces for `mock_test_repo`, exercising all lines
+        writer_feat.commit_batch().await.unwrap();
     }
 }

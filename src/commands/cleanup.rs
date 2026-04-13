@@ -103,7 +103,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_cleanup_removes_dir_and_branches() -> Result<()> {
-        let mut _tr = crate::debug::test_repo::TestRepo::new()?;
+        let mut _tr = crate::debug::test_repo::TestRepo::new().await?;
         let repo_path = _tr.td.path();
 
         init(repo_path, 2).await?;

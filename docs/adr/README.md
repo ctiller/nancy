@@ -67,3 +67,4 @@ This directory contains the documented architectural and design decisions for Na
 * [0061: Grinder AppView Isolation and Event Resolution](0061-grinder-appview-isolation-and-event-resolution.md) - Mandates resolving remote configurations organically bounds decoupling `AppView` dependency statically cleanly securely seamlessly.
 * [0062: Accumulate Native Debug Utilities](0062-accumulate-native-debug-utilities.md) - Details strategy of standardizing ad-hoc test scripts inside dedicated `nancy debug *` subcommands.
 * [0064: Event Ledger Cryptographic Verification](0064-event-ledger-cryptographic-verification.md) - Enforces Ed25519 signature bounds dynamically tracking native ledger synchronization gracefully securely.
+* [0065: Async Git Actor Layer](0065-async-git-actor.md) - Establishes Actor-based `git2` thread pools to serialize access safely eliminating Tokio race blockings gracefully comprehensively.

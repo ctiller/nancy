@@ -16,8 +16,10 @@ impl AskHuman {
         }
 
         let repo_path = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-        let r = git2::Repository::discover(&repo_path).ok()?;
-        let wd = r.workdir().unwrap_or(&repo_path);
+        let r = crate::git::AsyncRepository::discover(&repo_path)
+            .await
+            .ok()?;
+        let wd = r.workdir().unwrap_or(repo_path.clone());
         let id_obj = crate::schema::identity_config::Identity::load(wd)
             .await
             .ok()?;
@@ -38,7 +40,7 @@ impl AskHuman {
             task_name: task_name.to_string(),
         });
         let _ = writer.log_event(payload);
-        let _ = writer.commit_batch();
+        let _ = writer.commit_batch().await;
 
         Some(Self {
             item_ref: aref,
@@ -54,9 +56,9 @@ impl AskHuman {
         let mut human_appended_response = String::new();
         let mut should_wait = false;
 
-        if let Ok(r) = git2::Repository::discover(&self.repo_path) {
+        if let Ok(r) = crate::git::AsyncRepository::discover(&self.repo_path).await {
             let reader = crate::events::reader::Reader::new(&r, human_did.clone());
-            if let Ok(iter) = reader.iter_events() {
+            if let Ok(iter) = reader.iter_events().await {
                 for ev in iter.flatten() {
                     if let crate::schema::registry::EventPayload::Seen(s) = &ev.payload {
                         if s.item_ref == self.item_ref {
@@ -83,9 +85,9 @@ impl AskHuman {
             };
             for _ in 0..30 {
                 tokio::time::sleep(std::time::Duration::from_millis(sleep_time)).await;
-                if let Ok(r) = git2::Repository::discover(&self.repo_path) {
+                if let Ok(r) = crate::git::AsyncRepository::discover(&self.repo_path).await {
                     let reader2 = crate::events::reader::Reader::new(&r, human_did.clone());
-                    if let Ok(iter) = reader2.iter_events() {
+                    if let Ok(iter) = reader2.iter_events().await {
                         for ev in iter.flatten() {
                             if let crate::schema::registry::EventPayload::HumanResponse(hr) =
                                 &ev.payload
@@ -111,8 +113,8 @@ impl AskHuman {
     }
 
     pub async fn cancel(&self) {
-        if let Ok(r) = git2::Repository::discover(&self.repo_path) {
-            let wd = r.workdir().unwrap_or(&self.repo_path);
+        if let Ok(r) = crate::git::AsyncRepository::discover(&self.repo_path).await {
+            let wd = r.workdir().unwrap_or(self.repo_path.clone());
             if let Ok(id_obj) = crate::schema::identity_config::Identity::load(wd).await {
                 if let Ok(writer) = crate::events::writer::Writer::new(&r, id_obj) {
                     let payload = crate::schema::registry::EventPayload::CancelItem(
@@ -121,6 +123,7 @@ impl AskHuman {
                         },
                     );
                     let _ = writer.log_event(payload);
+                    let _ = writer.commit_batch().await;
                 }
             }
         }
@@ -277,7 +280,7 @@ mod tests {
         // Spawn async human responder securely
         tokio::spawn(async move {
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-            if let Ok(r) = git2::Repository::discover(".") {
+            if let Ok(r) = crate::git::AsyncRepository::discover(".").await {
                 let test_human = crate::schema::identity_config::DidOwner {
                     did: "z6MkiuexGTCjkPmnT4jv1JNAmeV7UnBoMh1rsxLoYYCQ8Txs".to_string(),
                     public_key_hex:
@@ -304,7 +307,7 @@ mod tests {
                             timestamp: 0,
                         },
                     ));
-                    let _ = writer.commit_batch();
+                    let _ = writer.commit_batch().await;
                 }
             }
         });
@@ -326,10 +329,14 @@ mod tests {
         let id_obj = crate::schema::identity_config::Identity::load(&td_path)
             .await
             .unwrap();
-        let reader = crate::events::reader::Reader::new(&repo, id_obj.get_did_owner().did.clone());
+        let async_repo_x = crate::git::AsyncRepository::discover(&td_path)
+            .await
+            .unwrap();
+        let reader =
+            crate::events::reader::Reader::new(&async_repo_x, id_obj.get_did_owner().did.clone());
         let mut found_ask = false;
         let mut found_cancel = false;
-        for ev in reader.iter_events().unwrap().flatten() {
+        for ev in reader.iter_events().await.unwrap().flatten() {
             if let crate::schema::registry::EventPayload::Ask(_) = ev.payload {
                 found_ask = true;
             }
@@ -352,7 +359,7 @@ mod tests {
         let td_path = td.path().to_path_buf();
         std::env::set_current_dir(&td_path).unwrap();
 
-        let _repo = git2::Repository::init(&td_path).unwrap();
+        let _repo = crate::git::AsyncRepository::init(&td_path).await.unwrap();
         crate::commands::init::init(td_path.clone(), 1)
             .await
             .unwrap();
@@ -364,7 +371,7 @@ mod tests {
         let item_ref_clone = ask.item_ref.clone();
         tokio::spawn(async move {
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-            if let Ok(r) = git2::Repository::discover(".") {
+            if let Ok(r) = crate::git::AsyncRepository::discover(".").await {
                 let test_human = crate::schema::identity_config::DidOwner {
                     did: "z6MkiuexGTCjkPmnT4jv1JNAmeV7UnBoMh1rsxLoYYCQ8Txs".to_string(),
                     public_key_hex:
@@ -392,7 +399,7 @@ mod tests {
                             text_response: "Module Mock Human Response".to_string(),
                         },
                     ));
-                    let _ = writer.commit_batch();
+                    let _ = writer.commit_batch().await;
                 }
             }
         });

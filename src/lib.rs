@@ -5,6 +5,7 @@ pub mod coordinator;
 pub mod dreamer;
 pub mod eval;
 pub mod events;
+pub mod git;
 pub mod grind;
 pub mod introspection;
 pub mod llm;

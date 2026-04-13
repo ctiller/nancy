@@ -8,7 +8,7 @@ use super::llm::{
 use super::task::{
     AskPayload, AssignmentCompletePayload, BlockedByPayload, CancelItemPayload,
     CoordinatorAssignmentPayload, ResponsePayload, ReviewFeedbackPayload, ReviewPlanPayload,
-    SeenPayload, TaskPayload, TaskRequestPayload, TaskSpendPayload,
+    SeenPayload, TaskPayload, TaskRequestPayload,
 };
 
 /// Enum describing all understood schema payloads in the event log.

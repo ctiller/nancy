@@ -39,7 +39,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_dreamer_loops_gracefully() -> anyhow::Result<()> {
-        let mut _tr = crate::debug::test_repo::TestRepo::new()?;
+        let mut _tr = crate::debug::test_repo::TestRepo::new().await?;
         let td = &_tr.td;
         let _repo = &_tr.repo;
         let nancy_dir = td.path().join(".nancy");

@@ -1,5 +1,4 @@
 use anyhow::Result;
-use git2::Repository;
 use std::collections::HashSet;
 
 use crate::coordinator::appview::AppView;
@@ -10,8 +9,8 @@ use crate::schema::identity_config::Identity;
 use crate::schema::registry::EventPayload;
 use crate::schema::task::{BlockedByPayload, TaskAction, TaskPayload};
 
-pub fn process_app_view_events(
-    repo: &Repository,
+pub async fn process_app_view_events(
+    repo: &crate::git::AsyncRepository,
     appview: &AppView,
     identity: &Identity,
     processed_completed_tasks: &mut HashSet<String>,
@@ -35,26 +34,28 @@ pub fn process_app_view_events(
         } else {
             logged_any |=
                 handle_work_assignments(repo, appview, &writer, workers, processed_request_ids)
+                    .await
                     .unwrap_or(false);
             logged_any |= handle_task_requests(repo, appview, &writer, processed_request_ids)
+                .await
                 .unwrap_or(false);
         }
     }
 
     if logged_any {
-        writer.commit_batch()?;
+        writer.commit_batch().await?;
     }
 
     Ok(logged_any)
 }
 
 fn process_task_completion(
-    repo: &Repository,
+    _repo: &crate::git::AsyncRepository,
     appview: &AppView,
-    writer: &Writer,
+    _writer: &Writer,
     task_id: &String,
 ) -> Result<bool> {
-    let mut logged_any = false;
+    let logged_any = false;
     if let Some(EventPayload::Task(t)) = appview.tasks.get(task_id) {
         match t.action {
             TaskAction::Plan => {}
@@ -64,10 +65,10 @@ fn process_task_completion(
     Ok(logged_any)
 }
 
-fn handle_work_assignments(
-    repo: &Repository,
+async fn handle_work_assignments(
+    repo: &crate::git::AsyncRepository,
     appview: &AppView,
-    writer: &Writer,
+    writer: &Writer<'_>,
     workers: &[crate::schema::identity_config::DidOwner],
     processed_request_ids: &mut HashSet<String>,
 ) -> Result<bool> {
@@ -85,7 +86,7 @@ fn handle_work_assignments(
 
         if let Some(EventPayload::Task(t)) = appview.tasks.get(&task_id) {
             if t.action == TaskAction::Implement {
-                ensure_task_branch(repo, appview, &task_id);
+                ensure_task_branch(repo, appview, &task_id).await;
             }
         }
 
@@ -99,10 +100,10 @@ fn handle_work_assignments(
     Ok(logged_any)
 }
 
-fn handle_task_requests(
-    repo: &Repository,
+async fn handle_task_requests(
+    repo: &crate::git::AsyncRepository,
     appview: &AppView,
-    writer: &Writer,
+    writer: &Writer<'_>,
     processed_request_ids: &mut HashSet<String>,
 ) -> Result<bool> {
     let mut logged_any = false;
@@ -119,15 +120,16 @@ fn handle_task_requests(
             _ => continue,
         };
 
-        let default_fallback = if repo.find_reference("refs/heads/main").is_ok() {
+        let default_fallback = if repo.find_reference("refs/heads/main").await.is_ok() {
             "refs/heads/main".to_string()
         } else {
             "refs/heads/master".to_string()
         };
 
         let mut target_branch = repo
-            .head()
-            .map(|h| h.name().unwrap_or(&default_fallback).to_string())
+            .find_reference("HEAD")
+            .await
+            .map(|h| h.name)
             .unwrap_or_else(|_| default_fallback.clone());
 
         if target_branch.starts_with("refs/heads/nancy/")
@@ -174,9 +176,9 @@ mod tests {
     use sealed_test::prelude::*;
     use std::fs;
 
-    #[sealed_test]
-    fn test_coordinator_intercepts_requests() -> Result<()> {
-        let mut _tr = crate::debug::test_repo::TestRepo::new()?;
+    #[tokio::test]
+    async fn test_coordinator_intercepts_requests() -> Result<()> {
+        let mut _tr = crate::debug::test_repo::TestRepo::new().await?;
         let temp_dir = &_tr.td;
         let repo = &_tr.repo;
 
@@ -185,7 +187,7 @@ mod tests {
 
         let coord_owner = crate::schema::identity_config::DidOwner::generate();
         let coordinator_did = coord_owner.did.clone();
-        
+
         let worker_owner = crate::schema::identity_config::DidOwner::generate();
         let worker_did = worker_owner.did.clone();
 
@@ -204,36 +206,35 @@ mod tests {
             serde_json::to_string(&coord_identity)?,
         )?;
 
-        let writer = Writer::new(&repo, coord_identity)?;
+        let writer = Writer::new(&_tr.async_repo, coord_identity)?;
         writer.log_event(EventPayload::TaskRequest(TaskRequestPayload {
             requestor: "Alice".to_string(),
             description: "Some request".to_string(),
         }))?;
-        writer.commit_batch()?;
+        writer.commit_batch().await?;
 
         let mut condition_met = false;
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        rt.block_on(async {
-            let mut coord = Coordinator::new(temp_dir.path()).await.unwrap();
-            coord
-                .run_until(0, None, |appview| {
-                    if appview.tasks.values().any(|ev| {
-                        if let EventPayload::Task(t) = ev {
-                            t.action == TaskAction::Plan
-                        } else {
-                            false
-                        }
-                    }) {
-                        true
+        let mut coord = Coordinator::new(temp_dir.path().to_path_buf())
+            .await
+            .unwrap();
+        coord
+            .run_until(0, None, |appview| {
+                if appview.tasks.values().any(|ev| {
+                    if let EventPayload::Task(t) = ev {
+                        t.action == TaskAction::Plan
                     } else {
                         false
                     }
-                })
-                .await
-        })?;
+                }) {
+                    true
+                } else {
+                    false
+                }
+            })
+            .await?;
 
-        let root_reader = Reader::new(&repo, coordinator_did);
-        for ev_res in root_reader.iter_events()? {
+        let root_reader = Reader::new(&_tr.async_repo, coordinator_did);
+        for ev_res in root_reader.iter_events().await? {
             let env = ev_res?;
             if let EventPayload::Task(t) = env.payload {
                 if t.action == TaskAction::Plan {
@@ -248,9 +249,9 @@ mod tests {
         Ok(())
     }
 
-    #[sealed_test]
-    fn test_handle_task_requests_direct() -> Result<()> {
-        let mut _tr = crate::debug::test_repo::TestRepo::new()?;
+    #[tokio::test]
+    async fn test_handle_task_requests_direct() -> Result<()> {
+        let mut _tr = crate::debug::test_repo::TestRepo::new().await?;
         let temp_dir = &_tr.td;
         let repo = &_tr.repo;
         let nancy_dir = temp_dir.path().join(".nancy");
@@ -267,7 +268,7 @@ mod tests {
             nancy_dir.join("identity.json"),
             serde_json::to_string(&coord_identity)?,
         )?;
-        let writer = Writer::new(&repo, coord_identity)?;
+        let writer = Writer::new(&_tr.async_repo, coord_identity)?;
         let mut appview = AppView::new();
 
         let req_payload = EventPayload::TaskRequest(TaskRequestPayload {
@@ -277,13 +278,14 @@ mod tests {
         appview.apply_event(&req_payload, "req1");
 
         let mut processed = HashSet::new();
-        let handled = handle_task_requests(&repo, &appview, &writer, &mut processed)?;
+        let handled =
+            handle_task_requests(&_tr.async_repo, &appview, &writer, &mut processed).await?;
         assert!(handled, "Task requests should log Plan events");
-        writer.commit_batch()?;
+        writer.commit_batch().await?;
 
         let mut plan_found = false;
-        let reader = Reader::new(&repo, coord_did);
-        for ev in reader.iter_events()? {
+        let reader = Reader::new(&_tr.async_repo, coord_did);
+        for ev in reader.iter_events().await? {
             if let EventPayload::Task(t) = ev?.payload {
                 if t.action == TaskAction::Plan && t.description == "Test Request" {
                     plan_found = true;
@@ -297,16 +299,16 @@ mod tests {
         Ok(())
     }
 
-    #[sealed_test]
-    fn test_handle_work_assignments_direct() -> Result<()> {
-        let mut _tr = crate::debug::test_repo::TestRepo::new()?;
+    #[tokio::test]
+    async fn test_handle_work_assignments_direct() -> Result<()> {
+        let mut _tr = crate::debug::test_repo::TestRepo::new().await?;
         let temp_dir = &_tr.td;
         let repo = &_tr.repo;
         let nancy_dir = temp_dir.path().join(".nancy");
         fs::create_dir_all(&nancy_dir)?;
         let worker = crate::schema::identity_config::DidOwner::generate();
         let worker_did = worker.did.clone();
-        
+
         let coord_owner = crate::schema::identity_config::DidOwner::generate();
         let coord_did = coord_owner.did.clone();
 
@@ -320,7 +322,7 @@ mod tests {
             nancy_dir.join("identity.json"),
             serde_json::to_string(&coord_identity)?,
         )?;
-        let writer = Writer::new(&repo, coord_identity)?;
+        let writer = Writer::new(&_tr.async_repo, coord_identity)?;
         let mut appview = AppView::new();
 
         let implement_payload = EventPayload::Task(TaskPayload {
@@ -336,21 +338,22 @@ mod tests {
 
         let mut processed = HashSet::new();
         let handled = handle_work_assignments(
-            &repo,
+            &_tr.async_repo,
             &appview,
             &writer,
             &vec![worker.clone()],
             &mut processed,
-        )?;
+        )
+        .await?;
         assert!(
             handled,
             "Work assignments skipped cleanly without assigning bounds!"
         );
-        writer.commit_batch()?;
+        writer.commit_batch().await?;
 
         let mut assigned = false;
-        let reader = Reader::new(&repo, coord_did);
-        for ev in reader.iter_events()? {
+        let reader = Reader::new(&_tr.async_repo, coord_did);
+        for ev in reader.iter_events().await? {
             if let EventPayload::CoordinatorAssignment(a) = ev?.payload {
                 if a.assignee_did == worker_did && a.task_ref == "impl1" {
                     assigned = true;

@@ -25,6 +25,9 @@ async fn test_coordinator_generates_plan_from_task_request() -> Result<()> {
     // -------------------------------------------------------------------------
     let temp_dir = TempDir::new()?;
     let repo = Repository::init(temp_dir.path())?;
+    let async_repo = nancy::git::AsyncRepository::discover(repo.workdir().unwrap())
+        .await
+        .unwrap();
 
     let nancy_dir = temp_dir.path().join(".nancy");
     fs::create_dir_all(&nancy_dir)?;
@@ -50,7 +53,7 @@ async fn test_coordinator_generates_plan_from_task_request() -> Result<()> {
     repo.commit(Some("refs/heads/main"), &sig, &sig, "init main", &tree, &[])?;
     repo.set_head("refs/heads/main")?;
 
-    let writer = Writer::new(&repo, coord_identity)?;
+    let writer = Writer::new(&async_repo, coord_identity)?;
 
     // -------------------------------------------------------------------------
     // Property 1: DAG Initialization via TaskRequest
@@ -59,7 +62,7 @@ async fn test_coordinator_generates_plan_from_task_request() -> Result<()> {
         requestor: "Alice".to_string(),
         description: "Test E2E feature".to_string(),
     }))?;
-    writer.commit_batch()?;
+    writer.commit_batch().await?;
 
     let mut coord = Coordinator::new(temp_dir.path()).await?;
 
@@ -96,6 +99,9 @@ async fn test_coordinator_generates_review_plan_task_upon_plan_completion() -> R
 
     let temp_dir = TempDir::new()?;
     let repo = Repository::init(temp_dir.path())?;
+    let async_repo = nancy::git::AsyncRepository::discover(repo.workdir().unwrap())
+        .await
+        .unwrap();
     let nancy_dir = temp_dir.path().join(".nancy");
     fs::create_dir_all(&nancy_dir)?;
 
@@ -120,7 +126,7 @@ async fn test_coordinator_generates_review_plan_task_upon_plan_completion() -> R
     repo.commit(Some("refs/heads/main"), &sig, &sig, "init main", &tree, &[])?;
     repo.set_head("refs/heads/main")?;
 
-    let writer = Writer::new(&repo, coord_identity)?;
+    let writer = Writer::new(&async_repo, coord_identity)?;
     // Mock a Plan Task being Completed bounding the Review constraint Generation
     let plan_task = EventPayload::Task(nancy::schema::task::TaskPayload {
         description: "Plan Generation".into(),
@@ -145,7 +151,7 @@ async fn test_coordinator_generates_review_plan_task_upon_plan_completion() -> R
             report: "Done".into(),
         },
     ))?;
-    writer.commit_batch()?;
+    writer.commit_batch().await?;
 
     let mut coord = Coordinator::new(temp_dir.path()).await?;
     coord
@@ -176,6 +182,9 @@ async fn test_coordinator_inherits_task_parent_from_feature_branch() -> Result<(
 
     let temp_dir = TempDir::new()?;
     let repo = Repository::init(temp_dir.path())?;
+    let async_repo = nancy::git::AsyncRepository::discover(repo.workdir().unwrap())
+        .await
+        .unwrap();
     let nancy_dir = temp_dir.path().join(".nancy");
     fs::create_dir_all(&nancy_dir)?;
 
@@ -209,7 +218,7 @@ async fn test_coordinator_inherits_task_parent_from_feature_branch() -> Result<(
         &[],
     )?;
 
-    let writer = Writer::new(&repo, coord_identity)?;
+    let writer = Writer::new(&async_repo, coord_identity)?;
     // Mock the dependency injection BlockedBy mapping from a parent review
     let review_plan = EventPayload::Task(nancy::schema::task::TaskPayload {
         description: "Review Plan target".into(),
@@ -254,7 +263,7 @@ async fn test_coordinator_inherits_task_parent_from_feature_branch() -> Result<(
     )?;
     writer.log_event(EventPayload::AssignmentComplete(pre_review))?;
 
-    writer.commit_batch()?;
+    writer.commit_batch().await?;
 
     let mut coord = Coordinator::new(temp_dir.path()).await?;
     coord
@@ -328,6 +337,9 @@ async fn test_worktree_extermination_and_ledger_consistency() -> Result<()> {
     // 16: Physical limits extermination limits:
     let temp_dir = TempDir::new()?;
     let repo = Repository::init(temp_dir.path())?;
+    let async_repo = nancy::git::AsyncRepository::discover(repo.workdir().unwrap())
+        .await
+        .unwrap();
     let nancy_dir = temp_dir.path().join(".nancy");
     fs::create_dir_all(&nancy_dir)?;
 
@@ -366,9 +378,16 @@ async fn test_worktree_extermination_and_ledger_consistency() -> Result<()> {
     };
 
     // Invoke Worktree allocation! Map to task
-    let writer = nancy::events::writer::Writer::new(&repo, id_obj.clone())?;
-    nancy::grind::execute_task::execute(&repo, &id_obj, "t_10", "t_ref_10", &payload, &writer)
-        .await?;
+    let writer = nancy::events::writer::Writer::new(&async_repo, id_obj.clone())?;
+    nancy::grind::execute_task::execute(
+        &async_repo,
+        &id_obj,
+        "t_10",
+        "t_ref_10",
+        &payload,
+        &writer,
+    )
+    .await?;
 
     // Verify Worktree Exterminated over Rust bounds terminating explicitly safely
     let task_worktree_path = temp_dir.path().join(".nancy").join("tasks").join("t_10");
@@ -403,12 +422,13 @@ async fn test_identify_assigned_task_discovers_payload_via_local_index() -> Resu
     let temp_dir = TempDir::new()?;
     let root = temp_dir.path();
     let repo = Repository::init(root)?;
+    let async_repo = nancy::git::AsyncRepository::discover(repo.workdir().unwrap())
+        .await
+        .unwrap();
 
     let nancy_dir = root.join(".nancy");
     fs::create_dir_all(&nancy_dir)?;
 
-
-    
     let mut index = repo.index()?;
     let tree_id = index.write_tree()?;
     let sig = git2::Signature::now("A", "B")?;
@@ -418,8 +438,8 @@ async fn test_identify_assigned_task_discovers_payload_via_local_index() -> Resu
     let worker_owner = DidOwner::generate();
     let worker_did = worker_owner.did.clone();
     let worker_id = Identity::Grinder(worker_owner.clone());
-    
-    let worker_writer = Writer::new(&repo, worker_id.clone())?;
+
+    let worker_writer = Writer::new(&async_repo, worker_id.clone())?;
     let task_payload = EventPayload::Task(nancy::schema::task::TaskPayload {
         description: "Task authored by worker".into(),
         preconditions: "".into(),
@@ -430,34 +450,39 @@ async fn test_identify_assigned_task_discovers_payload_via_local_index() -> Resu
         plan: None,
     });
     worker_writer.log_event_with_id_override(task_payload, "task_eval_1".into())?;
-    worker_writer.commit_batch()?;
+    worker_writer.commit_batch().await?;
 
     let coord_owner = DidOwner::generate();
     let coord_did_str = coord_owner.did.clone();
     let coord_did = coord_did_str.as_str();
-    
+
     let coord_id = Identity::Coordinator {
         did: coord_owner,
         workers: vec![worker_owner],
         dreamer: DidOwner::generate(),
         human: None,
     };
-    
-    let coord_writer = Writer::new(&repo, coord_id.clone())?;
-    let assignment = EventPayload::CoordinatorAssignment(nancy::schema::task::CoordinatorAssignmentPayload {
-        task_ref: "task_eval_1".into(),
-        assignee_did: worker_did.clone(),
-    });
+
+    let coord_writer = Writer::new(&async_repo, coord_id.clone())?;
+    let assignment =
+        EventPayload::CoordinatorAssignment(nancy::schema::task::CoordinatorAssignmentPayload {
+            task_ref: "task_eval_1".into(),
+            assignee_did: worker_did.clone(),
+        });
     coord_writer.log_event(assignment)?;
-    coord_writer.commit_batch()?;
+    coord_writer.commit_batch().await?;
 
     // Ensure TaskManager inside identify_assigned_task inherently syncs index natively
-    let assigned = nancy::commands::grind::identify_assigned_task(&repo, &worker_did, coord_did);
-    
-    assert!(assigned.is_some(), "Identify assigned task failed to cross-resolve raw payload via LocalIndex!");
+    let assigned =
+        nancy::commands::grind::identify_assigned_task(&async_repo, &worker_did, coord_did).await;
+
+    assert!(
+        assigned.is_some(),
+        "Identify assigned task failed to cross-resolve raw payload via LocalIndex!"
+    );
     let (_, assignment_payload, raw_task_payload) = assigned.unwrap();
     assert_eq!(assignment_payload.task_ref, "task_eval_1");
     assert_eq!(raw_task_payload.description, "Task authored by worker");
-    
+
     Ok(())
 }

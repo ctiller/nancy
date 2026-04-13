@@ -1,5 +1,4 @@
 use anyhow::{Context, Result, bail};
-use git2::Repository;
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -27,8 +26,10 @@ impl Coordinator {
             crate::llm::ban_llm();
         }
 
-        let repo = Repository::discover(dir.as_ref()).context("Not a git repository")?;
-        let workdir = repo.workdir().context("Bare repository")?.to_path_buf();
+        let repo = crate::git::AsyncRepository::discover(dir.as_ref())
+            .await
+            .context("Not a git repository")?;
+        let workdir = repo.workdir().context("Bare repository")?;
 
         let identity_file = workdir.join(".nancy").join("identity.json");
         if !identity_file.exists() {
@@ -129,13 +130,14 @@ impl Coordinator {
         while !condition(&AppView::new()) && !SHUTDOWN.load(Ordering::SeqCst) {
             let active_identity = { shared_identity.read().await.clone() };
             // Ensure git resource descriptors drop each loop native avoiding OS handle exhaustion entirely seamlessly natively!
-            let active_repo = git2::Repository::open(&self.workdir)?;
+            let active_repo = crate::git::AsyncRepository::discover(&self.workdir).await?;
 
             let appview = AppView::hydrate(
                 &active_repo,
                 &active_identity,
                 sync_engine.target_sync_grinder.as_deref(),
-            );
+            )
+            .await;
             sync_engine.target_sync_grinder = None;
 
             // Test loop condition against synced view
@@ -155,7 +157,8 @@ impl Coordinator {
                 &active_identity,
                 &mut processed_completed_tasks,
                 &mut processed_request_ids,
-            )?;
+            )
+            .await?;
 
             if let Some(ref mut d) = docker_orch {
                 let crashes = d.sync_deployments(&appview, &active_identity).await;
@@ -169,7 +172,7 @@ impl Coordinator {
                             crate::schema::registry::EventPayload::AgentCrashReport(report),
                         );
                     }
-                    if writer.commit_batch().unwrap_or(false) {
+                    if writer.commit_batch().await.unwrap_or(false) {
                         logged_any = true;
                     }
                 }

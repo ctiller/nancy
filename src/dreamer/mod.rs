@@ -23,7 +23,7 @@ impl DreamerTaskProcessor {
 impl AgentTaskProcessor for DreamerTaskProcessor {
     fn process<'a>(
         &'a mut self,
-        repo: &'a git2::Repository,
+        repo: &'a crate::git::AsyncRepository,
         id_obj: &'a Identity,
         _worker_did: &'a str,
         _coordinator_did: &'a str,
@@ -62,10 +62,13 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let repo = git2::Repository::init(tmp.path()).unwrap();
         crate::commands::init::init(tmp.path(), 1).await.unwrap();
+        let async_repo = crate::git::AsyncRepository::discover(tmp.path())
+            .await
+            .unwrap();
 
         let id_obj = Identity::load(tmp.path()).await.unwrap();
         let tree_root = std::sync::Arc::new(IntrospectionTreeRoot::new());
-        let writer = Writer::new(&repo, id_obj.clone()).unwrap();
+        let writer = Writer::new(&async_repo, id_obj.clone()).unwrap();
 
         // Use a short timeout to prevent waiting the full 1000ms if not necessary, or let it wait 1 tick.
         let mut processor = DreamerTaskProcessor::new();
@@ -73,7 +76,7 @@ mod tests {
         // We can just run it using tokio::time::timeout
         let _ = tokio::time::timeout(
             tokio::time::Duration::from_millis(1500),
-            processor.process(&repo, &id_obj, "worker", "coord", &tree_root, &writer),
+            processor.process(&async_repo, &id_obj, "worker", "coord", &tree_root, &writer),
         )
         .await
         .unwrap();

@@ -23,7 +23,7 @@ pub async fn eval_plan(path: &str, output_path: &std::path::Path) -> Result<()> 
         .wait_for_completion(|view| !view.task_completions.is_empty())
         .await?;
 
-    let appview = runner.get_appview()?;
+    let appview = runner.get_appview().await?;
     let mut tasks = Vec::new();
     let mut final_plan_doc = None;
 
@@ -54,7 +54,7 @@ pub async fn eval_plan(path: &str, output_path: &std::path::Path) -> Result<()> 
     let result = crate::eval::EvalResult {
         final_plan,
         recommended_tasks,
-        traces: runner.extract_traces(),
+        traces: runner.extract_traces().await,
     };
 
     let result_yaml = serde_yaml::to_string(&result)?;

@@ -124,11 +124,12 @@ impl LlmClient {
         if std::env::var("NANCY_NO_TRACE_EVENTS").unwrap_or_default() == "1" {
             return;
         }
-        if let Ok(repo) = git2::Repository::discover(".") {
+        if let Ok(repo) = crate::git::AsyncRepository::discover(".").await {
             if let Some(wd) = repo.workdir() {
                 if let Ok(id_obj) = crate::schema::identity_config::Identity::load(wd).await {
                     if let Ok(writer) = crate::events::writer::Writer::new(&repo, id_obj) {
                         let _ = writer.log_event(payload);
+                        let _ = writer.commit_batch().await;
                     }
                 }
             }
@@ -479,7 +480,9 @@ impl LlmClient {
             // Loop for retries
             let mut retry_count = 0;
             let resp: GeminiResponse = loop {
-                let stream_handle = std::sync::Arc::new(std::sync::Mutex::new(None::<crate::introspection::StreamHandle>));
+                let stream_handle = std::sync::Arc::new(std::sync::Mutex::new(
+                    None::<crate::introspection::StreamHandle>,
+                ));
                 let ts_locked = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
 
                 let ask_res = if let Some(queue) = &self.mock_queue {
@@ -504,23 +507,26 @@ impl LlmClient {
                     tracing::info!(
                         "==== [LLM Client] Sending request to Gemini API. Waiting... ===="
                     );
-                    
+
                     let sh_clone = stream_handle.clone();
                     let t_clone = ts_locked.clone();
-                    
+
                     let timeout_res = tokio::time::timeout(
                         std::time::Duration::from_secs(120),
-                        gemini.ask_stream(self.session.get_history(), move |chunk: &str, is_thought: bool| {
-                            if is_thought {
-                                let mut sh_lock = sh_clone.lock().unwrap();
-                                if let Some(handle) = sh_lock.as_ref() {
-                                    handle.append(chunk);
-                                } else {
-                                    *sh_lock = crate::introspection::stream_log(chunk);
+                        gemini.ask_stream(
+                            self.session.get_history(),
+                            move |chunk: &str, is_thought: bool| {
+                                if is_thought {
+                                    let mut sh_lock = sh_clone.lock().unwrap();
+                                    if let Some(handle) = sh_lock.as_ref() {
+                                        handle.append(chunk);
+                                    } else {
+                                        *sh_lock = crate::introspection::stream_log(chunk);
+                                    }
+                                    t_clone.lock().unwrap().push_str(chunk);
                                 }
-                                t_clone.lock().unwrap().push_str(chunk);
-                            }
-                        }),
+                            },
+                        ),
                     )
                     .await;
 
@@ -529,7 +535,7 @@ impl LlmClient {
                         Ok(res) => {
                             thought_str = ts_locked.lock().unwrap().clone();
                             res
-                        },
+                        }
                         Err(_) => {
                             return Err(anyhow::anyhow!(
                                 "Gemini API network request timed out (120s deadline exceeded) organically stopping indefinitely suspended tasks."
@@ -734,9 +740,13 @@ mod tests {
         let id_obj = crate::schema::identity_config::Identity::load(&td_path)
             .await
             .unwrap();
-        let reader = crate::events::reader::Reader::new(&repo, id_obj.get_did_owner().did.clone());
+        let async_repo = crate::git::AsyncRepository::discover(&td_path)
+            .await
+            .unwrap();
+        let reader =
+            crate::events::reader::Reader::new(&async_repo, id_obj.get_did_owner().did.clone());
         let mut found = false;
-        for ev in reader.iter_events().unwrap().flatten() {
+        for ev in reader.iter_events().await.unwrap().flatten() {
             if let crate::schema::registry::EventPayload::LlmResponse(resp) = ev.payload {
                 if resp.response == "mocked trace" {
                     found = true;

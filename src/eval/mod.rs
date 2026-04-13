@@ -79,15 +79,15 @@ pub struct EvalResult {
     pub traces: Vec<crate::schema::registry::EventPayload>,
 }
 
-pub fn extract_traces(
-    repo: &git2::Repository,
+pub async fn extract_traces(
+    repo: &crate::git::AsyncRepository,
     id_obj: &crate::schema::identity_config::Identity,
 ) -> Vec<crate::schema::registry::EventPayload> {
     let mut traces = Vec::new();
     if let crate::schema::identity_config::Identity::Coordinator { workers, .. } = id_obj {
         for worker in workers {
             let reader = crate::events::reader::Reader::new(repo, worker.did.clone());
-            if let Ok(iter) = reader.iter_events() {
+            if let Ok(iter) = reader.iter_events().await {
                 for env_result in iter {
                     let env = match env_result {
                         Ok(e) => e,
@@ -173,20 +173,21 @@ impl EvalRunner {
         Ok(())
     }
 
-    pub fn extract_traces(&self) -> Vec<crate::schema::registry::EventPayload> {
-        extract_traces(&self.repo, &self.id_obj)
+    pub async fn extract_traces(&self) -> Vec<crate::schema::registry::EventPayload> {
+        let path_str = self.repo.workdir().unwrap().to_str().unwrap();
+        let async_repo = crate::git::AsyncRepository::open(path_str).await.unwrap();
+        extract_traces(&async_repo, &self.id_obj).await
     }
 
-    pub fn get_appview(&self) -> anyhow::Result<crate::coordinator::appview::AppView> {
-        Ok(crate::coordinator::appview::AppView::hydrate(
-            &self.repo,
-            &self.id_obj,
-            None,
-        ))
+    pub async fn get_appview(&self) -> anyhow::Result<crate::coordinator::appview::AppView> {
+        let path_str = self.repo.workdir().unwrap().to_str().unwrap();
+        let async_repo = crate::git::AsyncRepository::open(path_str).await?;
+        Ok(crate::coordinator::appview::AppView::hydrate(&async_repo, &self.id_obj, None).await)
     }
 
-    pub fn get_request_hash(&self) -> anyhow::Result<String> {
-        let appview = self.get_appview()?;
+    pub async fn get_request_hash(&self) -> anyhow::Result<String> {
+        let appview = self.get_appview().await?;
+println!("Requests: {:?}", appview.requests);
         let hash = appview
             .requests
             .keys()
@@ -241,11 +242,11 @@ mod tests {
         assert!(temp_dir_2.path().join("test.rs").exists() || temp_dir_2.path().exists());
     }
 
-    #[test]
-    fn test_extract_traces_filters_unrelated_events_safely() {
+    #[tokio::test]
+    async fn test_extract_traces_filters_unrelated_events_safely() {
         use crate::schema::identity_config::*;
 
-        let mut _tr = crate::debug::test_repo::TestRepo::new().unwrap();
+        let mut _tr = crate::debug::test_repo::TestRepo::new().await.unwrap();
         let repo = &_tr.repo;
 
         let coord_owner = crate::schema::identity_config::DidOwner::generate();
@@ -257,9 +258,9 @@ mod tests {
         };
 
         // When no extra workers exist, extraction skips fast naturally securely.
-        let traces = extract_traces(&repo, &id_obj);
+        let traces = extract_traces(&_tr.async_repo, &id_obj);
         assert!(
-            traces.is_empty(),
+            traces.await.is_empty(),
             "Traces mapping failed to handle 0 worker constraints safely"
         );
     }
@@ -299,8 +300,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_request_hash_resolves_request_id_not_task_id() -> anyhow::Result<()> {
-        let tr = crate::debug::test_repo::TestRepo::new().unwrap();
+        let tr = crate::debug::test_repo::TestRepo::new().await.unwrap();
         let target_repo = &tr.repo;
+        let target_repo_async = crate::git::AsyncRepository::discover(tr.td.path())
+            .await
+            .unwrap();
 
         use crate::schema::identity_config::*;
         let coord_owner = crate::schema::identity_config::DidOwner::generate();
@@ -311,7 +315,8 @@ mod tests {
             human: Some(crate::schema::identity_config::DidOwner::generate()),
         };
 
-        let writer = crate::events::writer::Writer::new(target_repo, coord_identity.clone())?;
+        let writer =
+            crate::events::writer::Writer::new(&target_repo_async, coord_identity.clone())?;
 
         let task_req = crate::schema::registry::EventPayload::TaskRequest(
             crate::schema::task::TaskRequestPayload {
@@ -331,7 +336,7 @@ mod tests {
             plan: None,
         });
         let task_id = writer.log_event(task).unwrap();
-        writer.commit_batch().unwrap();
+        writer.commit_batch().await.unwrap();
 
         assert_ne!(req_id, task_id);
 
@@ -342,7 +347,7 @@ mod tests {
             id_obj: coord_identity,
         };
 
-        let resolved_hash = runner.get_request_hash()?;
+        let resolved_hash = runner.get_request_hash().await?;
 
         assert_eq!(
             resolved_hash, req_id,

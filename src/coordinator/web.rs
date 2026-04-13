@@ -167,16 +167,11 @@ async fn get_api_grinders(
     let mut statuses = vec![];
     let identity = { state.shared_identity.read().await.clone() };
 
-    let appview = tokio::task::spawn_blocking({
-        let root = root.clone();
-        let identity = identity.clone();
-        move || {
-            let repo = git2::Repository::discover(&root).ok();
-            repo.map(|r| crate::coordinator::appview::AppView::hydrate(&r, &identity, None))
-        }
-    })
-    .await
-    .unwrap_or(None);
+    let appview = async {
+        let repo = crate::git::AsyncRepository::discover(&root).await.ok()?;
+        Some(crate::coordinator::appview::AppView::hydrate(&repo, &identity, None).await)
+    }
+    .await;
 
     if let crate::schema::identity_config::Identity::Coordinator {
         workers, dreamer, ..
@@ -338,21 +333,11 @@ async fn get_api_tasks_topology(
     let root = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     let identity = { state.shared_identity.read().await.clone() };
 
-    let appview_opt = tokio::task::spawn_blocking({
-        let root = root.clone();
-        let identity = identity.clone();
-        move || {
-            let repo = match git2::Repository::discover(&root) {
-                Ok(r) => r,
-                Err(_) => return None,
-            };
-            Some(crate::coordinator::appview::AppView::hydrate(
-                &repo, &identity, None,
-            ))
-        }
-    })
-    .await
-    .unwrap_or(None);
+    let appview_opt = async {
+        let repo = crate::git::AsyncRepository::discover(&root).await.ok()?;
+        Some(crate::coordinator::appview::AppView::hydrate(&repo, &identity, None).await)
+    }
+    .await;
 
     let mut topology = if let Some(av) = appview_opt {
         av.get_topology()
@@ -387,21 +372,11 @@ async fn get_api_tasks_evaluations(
     let root = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     let identity = { state.shared_identity.read().await.clone() };
 
-    let appview_opt = tokio::task::spawn_blocking({
-        let root = root.clone();
-        let identity = identity.clone();
-        move || {
-            let repo = match git2::Repository::discover(&root) {
-                Ok(r) => r,
-                Err(_) => return None,
-            };
-            Some(crate::coordinator::appview::AppView::hydrate(
-                &repo, &identity, None,
-            ))
-        }
-    })
-    .await
-    .unwrap_or(None);
+    let appview_opt = async {
+        let repo = crate::git::AsyncRepository::discover(&root).await.ok()?;
+        Some(crate::coordinator::appview::AppView::hydrate(&repo, &identity, None).await)
+    }
+    .await;
 
     let mut evals = Vec::new();
     if let Some(av) = appview_opt {
@@ -578,21 +553,11 @@ async fn api_human_pending(
     let identity = { state.shared_identity.read().await.clone() };
     let root = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
 
-    let appview_opt = tokio::task::spawn_blocking({
-        let root = root.clone();
-        let identity = identity.clone();
-        move || {
-            let repo = match git2::Repository::discover(&root) {
-                Ok(r) => r,
-                Err(_) => return None,
-            };
-            Some(crate::coordinator::appview::AppView::hydrate(
-                &repo, &identity, None,
-            ))
-        }
-    })
-    .await
-    .unwrap_or(None);
+    let appview_opt = async {
+        let repo = crate::git::AsyncRepository::discover(&root).await.ok()?;
+        Some(crate::coordinator::appview::AppView::hydrate(&repo, &identity, None).await)
+    }
+    .await;
 
     if let Some(av) = appview_opt {
         let asks: Vec<_> = av.active_asks.values().cloned().collect();
@@ -620,8 +585,10 @@ async fn api_human_action(
     let identity = { state.shared_identity.read().await.clone() };
     let root = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
 
-    let res = tokio::task::spawn_blocking(move || {
-        let repo = git2::Repository::discover(&root).map_err(|e| e.to_string())?;
+    let res = async {
+        let repo = crate::git::AsyncRepository::discover(&root)
+            .await
+            .map_err(|e| e.to_string())?;
         let writer =
             crate::events::writer::Writer::new(&repo, identity).map_err(|e| e.to_string())?;
 
@@ -647,10 +614,9 @@ async fn api_human_action(
                 ))
                 .map_err(|e| e.to_string())?;
         }
-        writer.commit_batch().map_err(|e| e.to_string())
-    })
-    .await
-    .unwrap_or_else(|e| Err(e.to_string()));
+        writer.commit_batch().await.map_err(|e| e.to_string())
+    }
+    .await;
 
     match res {
         Ok(_) => StatusCode::OK.into_response(),

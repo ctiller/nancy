@@ -1,8 +1,5 @@
-use anyhow::{Context, Result, bail};
-use git2::Repository;
+use anyhow::Result;
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
-use tokio::fs;
 
 use crate::schema::identity_config::Identity;
 
@@ -29,7 +26,7 @@ struct GrinderTaskProcessor;
 impl crate::agent::AgentTaskProcessor for GrinderTaskProcessor {
     fn process<'a>(
         &'a mut self,
-        repo: &'a git2::Repository,
+        repo: &'a crate::git::AsyncRepository,
         id_obj: &'a Identity,
         worker_did: &'a str,
         coordinator_did: &'a str,
@@ -37,7 +34,7 @@ impl crate::agent::AgentTaskProcessor for GrinderTaskProcessor {
         global_writer: &'a crate::events::writer::Writer,
     ) -> Pin<Box<dyn Future<Output = Result<bool>> + 'a>> {
         Box::pin(async move {
-            let assigned = identify_assigned_task(repo, worker_did, coordinator_did);
+            let assigned = identify_assigned_task(repo, worker_did, coordinator_did).await;
 
             if let Some((task_id, assignment, payload)) = assigned {
                 *tree_root.root_frame.elements.lock().unwrap() = Vec::new();
@@ -98,10 +95,10 @@ impl crate::agent::AgentTaskProcessor for GrinderTaskProcessor {
     }
 }
 
-pub fn get_completed_tasks(repo: &git2::Repository, worker_did: &str) -> Vec<String> {
+pub async fn get_completed_tasks(repo: &crate::git::AsyncRepository, worker_did: &str) -> Vec<String> {
     let mut tasks_completed = std::collections::HashSet::new();
     let local_reader = crate::events::reader::Reader::new(repo, worker_did.to_string());
-    if let Ok(iter) = local_reader.iter_events() {
+    if let Ok(iter) = local_reader.iter_events().await {
         for ev_res in iter {
             if let Ok(env) = ev_res {
                 if let crate::schema::registry::EventPayload::AssignmentComplete(c) = env.payload {
@@ -113,8 +110,8 @@ pub fn get_completed_tasks(repo: &git2::Repository, worker_did: &str) -> Vec<Str
     tasks_completed.into_iter().collect()
 }
 
-pub fn identify_assigned_task(
-    repo: &git2::Repository,
+pub async fn identify_assigned_task(
+    repo: &crate::git::AsyncRepository,
     worker_did: &str,
     coordinator_did: &str,
 ) -> Option<(
@@ -126,7 +123,7 @@ pub fn identify_assigned_task(
     let mut tasks_assigned = Vec::new();
 
     let root_reader = crate::events::reader::Reader::new(repo, coordinator_did.to_string());
-    if let Ok(iter) = root_reader.iter_events() {
+    if let Ok(iter) = root_reader.iter_events().await {
         for ev_res in iter {
             if let Ok(env) = ev_res {
                 let ev_id_str = env.id.clone();
@@ -142,7 +139,7 @@ pub fn identify_assigned_task(
         }
     }
 
-    let completed = get_completed_tasks(repo, worker_did);
+    let completed = get_completed_tasks(repo, worker_did).await;
     
     let mut pending_assignments = Vec::new();
     for (task_id, assignment) in tasks_assigned {
@@ -155,7 +152,7 @@ pub fn identify_assigned_task(
         return None;
     }
 
-    let nancy_dir = repo.workdir().unwrap().join(".nancy");
+    let nancy_dir = repo.path().join(".nancy");
     let local_index = match crate::events::index::LocalIndex::new(&nancy_dir) {
         Ok(idx) => idx,
         Err(e) => {
@@ -165,7 +162,7 @@ pub fn identify_assigned_task(
     };
 
     let manager = crate::tasks::manager::TaskManager::new(repo, &local_index);
-    if let Err(e) = manager.refresh_cache() {
+    if let Err(e) = manager.refresh_cache().await {
         tracing::error!("Failed to refresh LocalIndex cache: {}", e);
     }
 
@@ -173,7 +170,7 @@ pub fn identify_assigned_task(
         let task_ref = &assignment.task_ref;
         if let Ok(Some((authored_did, _, _))) = local_index.lookup_event(task_ref) {
             let reader = crate::events::reader::Reader::new(repo, authored_did);
-            if let Ok(iter) = reader.iter_events() {
+            if let Ok(iter) = reader.iter_events().await {
                 for ev_res in iter {
                     if let Ok(env) = ev_res {
                         if env.id == *task_ref {
@@ -215,7 +212,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_grind_loops_gracefully() -> anyhow::Result<()> {
-        let mut _tr = crate::debug::test_repo::TestRepo::new()?;
+        use tokio::fs;
+        let mut _tr = crate::debug::test_repo::TestRepo::new().await?;
         let td = &_tr.td;
         let _repo = &_tr.repo;
         let nancy_dir = td.path().join(".nancy");
@@ -251,7 +249,8 @@ mod tests {
     }
     #[tokio::test]
     async fn test_grind_socket_exists_coverage() -> anyhow::Result<()> {
-        let mut _tr = crate::debug::test_repo::TestRepo::new()?;
+        use tokio::fs;
+        let mut _tr = crate::debug::test_repo::TestRepo::new().await?;
         let td = &_tr.td;
         let _repo = &_tr.repo;
         let nancy_dir = td.path().join(".nancy");

@@ -1,7 +1,7 @@
 use crate::events::reader::Reader;
 use crate::schema::identity_config::Identity;
 use crate::schema::registry::EventPayload;
-use git2::Repository;
+use crate::git::AsyncRepository;
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -57,8 +57,8 @@ impl AppView {
         }
     }
 
-    pub fn hydrate(
-        repo: &Repository,
+    pub async fn hydrate(
+        repo: &AsyncRepository,
         identity: &Identity,
         restricted_grinder_did: Option<&str>,
     ) -> Self {
@@ -67,7 +67,7 @@ impl AppView {
 
         // Poll our own ledger to hydrate AppView structurally
         let reader = Reader::new(repo, did.clone());
-        if let Ok(iter) = reader.iter_events() {
+        if let Ok(iter) = reader.iter_events().await {
             for ev_res in iter {
                 if let Ok(env) = ev_res {
                     appview.apply_event(&env.payload, &env.id);
@@ -77,16 +77,13 @@ impl AppView {
 
         // Dynamically aggregate all nancy/* branches directly from the underlying ledger to automatically capture all Grinders securely,
         // side-stepping strict Identity IPC routing mechanisms that standalone execution can miss.
-        if let Ok(branches) = repo.branches(Some(git2::BranchType::Local)) {
+        if let Ok(branches) = repo.branches(Some(git2::BranchType::Local)).await {
             let mut dynamic_dids = HashSet::new();
-            for branch_res in branches {
-                if let Ok((branch, _)) = branch_res {
-                    if let Ok(Some(name)) = branch.name() {
-                        if name.starts_with("nancy/") {
-                            let branch_did = name.trim_start_matches("nancy/");
-                            dynamic_dids.insert(branch_did.to_string());
-                        }
-                    }
+            for branch in branches {
+                let name = branch.name;
+                if name.starts_with("nancy/") {
+                    let branch_did = name.trim_start_matches("nancy/");
+                    dynamic_dids.insert(branch_did.to_string());
                 }
             }
 
@@ -102,13 +99,20 @@ impl AppView {
                     }
                 }
 
-                let local_reader = Reader::new(repo, branch_did);
-                if let Ok(iter) = local_reader.iter_events() {
+                let local_reader = Reader::new(repo, branch_did.clone());
+                if let Ok(iter) = local_reader.iter_events().await {
                     for ev_res in iter {
-                        if let Ok(env) = ev_res {
-                            appview.apply_event(&env.payload, &env.id);
+                        match ev_res {
+                            Ok(env) => {
+                                appview.apply_event(&env.payload, &env.id);
+                            }
+                            Err(e) => {
+                                println!("AppView hydrate err: {}", e);
+                            }
                         }
                     }
+                } else {
+                    println!("iter_events failed entirely for branch_did={}", branch_did);
                 }
             }
         }

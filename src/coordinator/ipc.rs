@@ -184,8 +184,8 @@ pub async fn task_priority_handler(
     axum::extract::Path(task_id): axum::extract::Path<String>,
 ) -> axum::Json<serde_json::Value> {
     let root = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-    let priority = tokio::task::spawn_blocking(move || {
-        let repo = match git2::Repository::discover(&root) {
+    let priority = async {
+        let repo = match crate::git::AsyncRepository::discover(&root).await {
             Ok(r) => r,
             Err(_) => return 0.5,
         };
@@ -193,7 +193,7 @@ pub async fn task_priority_handler(
         let dummy_id = crate::schema::identity_config::Identity::Dreamer(
             crate::schema::identity_config::DidOwner::generate(),
         );
-        let av = crate::coordinator::appview::AppView::hydrate(&repo, &dummy_id, None);
+        let av = crate::coordinator::appview::AppView::hydrate(&repo, &dummy_id, None).await;
         let scores = av.get_pagerank_scores();
 
         let score = *scores.get(&task_id).unwrap_or(&0.5);
@@ -208,9 +208,8 @@ pub async fn task_priority_handler(
         } else {
             0.5
         }
-    })
-    .await
-    .unwrap_or(0.5);
+    }
+    .await;
 
     axum::Json(serde_json::json!({ "priority": priority }))
 }

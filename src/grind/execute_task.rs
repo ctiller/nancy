@@ -1,6 +1,5 @@
 use anyhow::{Context, Result, bail};
 use askama::Template;
-use git2::Repository;
 use schemars::JsonSchema;
 
 use crate::events::writer::Writer;
@@ -260,7 +259,7 @@ async fn handle_plan_task(
                 document: output.tdd.clone(),
             }
         ));
-        if let Err(e) = writer.commit_batch() {
+        if let Err(e) = writer.commit_batch().await {
             tracing::error!("FATAL COMMIT BATCH ERROR: {}", e);
         }
 
@@ -292,9 +291,9 @@ async fn handle_plan_task(
             loop {
                 _human_last_seen = 0;
                 let mut found_response = None;
-                if let Ok(repo_discover) = git2::Repository::discover(target_path) {
+                if let Ok(repo_discover) = crate::git::AsyncRepository::discover(target_path).await {
                     let reader = crate::events::reader::Reader::new(&repo_discover, human_did.clone());
-                    if let Ok(iter) = reader.iter_events() {
+                    if let Ok(iter) = reader.iter_events().await {
                         for ev in iter.flatten() {
                             if let crate::schema::registry::EventPayload::Seen(s) = &ev.payload {
                                 if s.item_ref == plan_ref {
@@ -341,7 +340,7 @@ async fn handle_plan_task(
                     item_ref: plan_ref.clone(),
                 }
             ));
-            let _ = writer.commit_batch();
+            let _ = writer.commit_batch().await;
         }
 
         if matches!(consensus, crate::schema::task::Consensus::ChangesRequired) {
@@ -402,7 +401,7 @@ struct PrecondResult {
 
 pub async fn handle_implement_task(
     target_path: &std::path::Path,
-    repo: &Repository,
+    repo: &crate::git::AsyncRepository,
     task_ref: &str,
     task_payload: &TaskPayload,
     writer: &Writer<'_>,
@@ -509,7 +508,8 @@ pub async fn handle_implement_task(
         // 4. Pre-reviewers
         let head_minus_one = repo
             .revparse_single("HEAD~1")
-            .map(|obj| obj.id().to_string())
+            .await
+            .map(|obj| obj.0)
             .unwrap_or_else(|_| "4b825dc642cb6eb9a060e54bf8d69288fbee4904".to_string());
 
         let mut session = crate::pre_review::session::ReviewSession::new(target_path.to_path_buf());
@@ -528,31 +528,17 @@ pub async fn handle_implement_task(
             .ask::<TeamSelectionPayload>("Select team based on diff bounds...")
             .await?;
 
-        let begin_oid = git2::Oid::from_str(&head_minus_one)?;
-        let t_begin_tree = match repo.find_commit(begin_oid) {
-            Ok(commit) => commit.tree()?,
-            Err(_) => repo.find_tree(begin_oid)?,
+        let target_repo = crate::git::AsyncRepository::open(target_path).await?;
+        let t_end = target_repo.revparse_single("HEAD").await?.0;
+
+        let diff_str = target_repo
+            .diff_tree_to_tree(&head_minus_one, &t_end)
+            .await?;
+        let diff_text = if diff_str.is_empty() {
+            String::new()
+        } else {
+            diff_str
         };
-
-        // Ensure worktree HEAD is resolved successfully! Wait, the target_repo is the worktree...
-        // let target_repo = Repository::open(target_path)?;
-        // Use target_repo. Diff it.
-        let target_repo = Repository::open(target_path)?;
-        let t_end = target_repo
-            .revparse_single("HEAD")?
-            .peel_to_commit()?
-            .tree()?;
-
-        let diff = target_repo.diff_tree_to_tree(Some(&t_begin_tree), Some(&t_end), None)?;
-        let mut diff_text = String::new();
-        diff.print(git2::DiffFormat::Patch, |_delta, _hunk, line| {
-            let origin = line.origin();
-            if origin == '+' || origin == '-' || origin == ' ' {
-                diff_text.push(origin);
-            }
-            diff_text.push_str(std::str::from_utf8(line.content()).unwrap_or(""));
-            true
-        })?;
 
         let review_context = format!("Git Diff:\n{}", diff_text);
         let task_prompt = crate::pre_review::runner::reviewer_task_prompt(
@@ -668,7 +654,7 @@ pub async fn handle_implement_task(
 }
 
 pub async fn execute<'a>(
-    repo: &'a Repository,
+    repo: &'a crate::git::AsyncRepository,
     _id_obj: &Identity,
     assignment_id: &str,
     task_ref: &str,
@@ -690,14 +676,15 @@ pub async fn execute<'a>(
         .unwrap_or(&task_payload.branch)
         .to_string();
 
-    let default_fallback = if repo.find_reference("refs/heads/main").is_ok() {
+    let default_fallback = if repo.find_reference("refs/heads/main").await.is_ok() {
         "main".to_string()
-    } else if repo.find_reference("refs/heads/master").is_ok() {
+    } else if repo.find_reference("refs/heads/master").await.is_ok() {
         "master".to_string()
     } else {
-        repo.head()
+        repo.find_reference("HEAD")
+            .await
             .ok()
-            .and_then(|h| h.shorthand().map(|s| s.to_string()))
+            .map(|h| h.name)
             .unwrap_or_else(|| "HEAD".to_string())
     };
 
@@ -719,7 +706,7 @@ pub async fn execute<'a>(
         .arg("remove")
         .arg("-f")
         .arg(&target_path)
-        .current_dir(workdir)
+        .current_dir(&workdir)
         .status()
         .await;
 
@@ -728,12 +715,13 @@ pub async fn execute<'a>(
     let _ = tokio::process::Command::new("git")
         .arg("worktree")
         .arg("prune")
-        .current_dir(workdir)
+        .current_dir(&workdir)
         .status()
         .await;
 
     let branch_exists = repo
         .find_reference(&format!("refs/heads/{}", safe_target_branch))
+        .await
         .is_ok()
         || safe_target_branch == "HEAD";
 
@@ -753,7 +741,7 @@ pub async fn execute<'a>(
         add_cmd.arg(&safe_target_branch);
     }
 
-    let status = add_cmd.current_dir(workdir).status().await?;
+    let status = add_cmd.current_dir(&workdir).status().await?;
 
     if !status.success() {
         bail!("Failed to spawn worktree for {}", task_ref);
@@ -768,7 +756,7 @@ pub async fn execute<'a>(
             .arg("remove")
             .arg("-f")
             .arg(&plan_exec_path)
-            .current_dir(workdir)
+            .current_dir(&workdir)
             .status()
             .await;
 
@@ -781,7 +769,7 @@ pub async fn execute<'a>(
             .arg("-f")
             .arg(&plan_exec_path)
             .arg("HEAD")
-            .current_dir(workdir)
+            .current_dir(&workdir)
             .status()
             .await?;
     }
@@ -811,7 +799,7 @@ pub async fn execute<'a>(
             .arg("remove")
             .arg("-f")
             .arg(&plan_exec_path)
-            .current_dir(workdir)
+            .current_dir(&workdir)
             .status()
             .await?;
     }
@@ -821,7 +809,7 @@ pub async fn execute<'a>(
         .arg("remove")
         .arg("-f")
         .arg(&target_path)
-        .current_dir(workdir)
+        .current_dir(&workdir)
         .status()
         .await?;
 
@@ -836,7 +824,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_execute_failure_bounds() -> anyhow::Result<()> {
-        let mut _tr = crate::debug::test_repo::TestRepo::new()?;
+        let mut _tr = crate::debug::test_repo::TestRepo::new().await?;
         let _td = &_tr.td;
         let repo = &_tr.repo;
 
@@ -845,6 +833,8 @@ mod tests {
             public_key_hex: "00".into(),
             private_key_hex: "00".into(),
         });
+
+        let async_repo = crate::git::AsyncRepository::open(_td.path()).await?;
 
         let payload = TaskPayload {
             description: "fake".into(),
@@ -856,9 +846,9 @@ mod tests {
             plan: None,
         };
 
-        let writer = Writer::new(repo, identity.clone())?;
+        let writer = Writer::new(&async_repo, identity.clone())?;
         let res = execute(
-            &repo,
+            &async_repo,
             &identity,
             "assign_123",
             "task_ref_7xyz",
@@ -884,7 +874,7 @@ mod tests {
         ("NANCY_NO_TRACE_EVENTS", "1")
     ])]
     async fn test_execute_success_bounds() -> anyhow::Result<()> {
-        let mut _tr = crate::debug::test_repo::TestRepo::new()?;
+        let mut _tr = crate::debug::test_repo::TestRepo::new().await?;
         let td = &_tr.td;
         let repo = &_tr.repo;
 
@@ -930,7 +920,7 @@ mod tests {
 
         builder = builder.respond(r#"{"tdd": {"title": "T", "summary": "S", "background_context": "", "goals": ["G"], "non_goals": [], "proposed_design": ["D"], "risks_and_tradeoffs": [], "alternatives_considered": []}, "tasks": [{"id": "t1", "description": "foo", "preconditions": "foo", "postconditions": "foo", "parent_branch": "foo", "action": "implement", "branch": "foo", "depends_on": []}]}"#);
 
-        for _ in 0..6 {
+        for _ in 0..30 {
             builder = builder
                 .respond(r#"{"vote": "approve", "agree_notes": "Good", "disagree_notes": ""}"#);
         }
@@ -938,10 +928,11 @@ mod tests {
         builder.respond(r#"{"vote": "approve", "agree_notes": "", "disagree_notes": "", "consensus": "approve", "recommended_tasks": [], "general_notes": ""}"#)
             .commit();
 
-        let writer = Writer::new(repo, identity.clone())?;
+        let async_repo = crate::git::AsyncRepository::open(td.path()).await?;
+        let writer = Writer::new(&async_repo, identity.clone())?;
 
         let res = execute(
-            &repo,
+            &async_repo,
             &identity,
             "assign_success",
             "task_ref_success",
@@ -965,7 +956,7 @@ mod tests {
         ("NANCY_NO_TRACE_EVENTS", "1")
     ])]
     async fn test_execute_implement_bounds() -> anyhow::Result<()> {
-        let mut _tr = crate::debug::test_repo::TestRepo::new()?;
+        let mut _tr = crate::debug::test_repo::TestRepo::new().await?;
         let td = &_tr.td;
         let repo = &_tr.repo;
 
@@ -1004,10 +995,10 @@ mod tests {
             plan: None,
         };
 
-        let writer = Writer::new(repo, identity.clone())?;
+        let writer = Writer::new(&_tr.async_repo, identity.clone())?;
 
         let res = execute(
-            &repo,
+            &_tr.async_repo,
             &identity,
             "assign_impl",
             "task_ref_impl",
@@ -1027,7 +1018,7 @@ mod tests {
         ("NANCY_NO_TRACE_EVENTS", "1")
     ])]
     async fn test_execute_plan_retries_bounds() -> anyhow::Result<()> {
-        let mut _tr = crate::debug::test_repo::TestRepo::new()?;
+        let mut _tr = crate::debug::test_repo::TestRepo::new().await?;
         let td = &_tr.td;
         let repo = &_tr.repo;
 
@@ -1086,10 +1077,10 @@ mod tests {
             plan: None,
         };
 
-        let writer = Writer::new(repo, identity.clone())?;
+        let writer = Writer::new(&_tr.async_repo, identity.clone())?;
 
         let res = execute(
-            &repo,
+            &_tr.async_repo,
             &identity,
             "assign_retry",
             "task_ref_retry",
@@ -1112,7 +1103,7 @@ mod tests {
         ("NANCY_NO_TRACE_EVENTS", "1")
     ])]
     async fn test_execute_plan_complex_loops_coverage() -> anyhow::Result<()> {
-        let mut _tr = crate::debug::test_repo::TestRepo::new()?;
+        let mut _tr = crate::debug::test_repo::TestRepo::new().await?;
         let td = &_tr.td;
         let repo = &_tr.repo;
 
@@ -1157,7 +1148,7 @@ mod tests {
         builder = builder.respond(r#"{"tdd": {"title": "T", "summary": "S", "background_context": "", "goals": ["G"], "non_goals": [], "proposed_design": ["D"], "risks_and_tradeoffs": [], "alternatives_considered": []}, "tasks": [{"id": "t1", "description": "", "preconditions": "", "postconditions": "", "parent_branch": "", "action": "implement", "branch": "", "depends_on": []}, {"id": "t2", "description": "", "preconditions": "", "postconditions": "", "parent_branch": "", "action": "implement", "branch": "", "depends_on": ["t1"]}]}"#);
 
         // Iteration 4: Formal review accepts
-        for _ in 0..6 {
+        for _ in 0..30 {
             builder = builder.respond(
                 r#"{"vote": "approve", "agree_notes": "Looks good", "disagree_notes": ""}"#,
             );
@@ -1180,10 +1171,10 @@ mod tests {
             plan: None,
         };
 
-        let writer = Writer::new(repo, identity.clone())?;
+        let writer = Writer::new(&_tr.async_repo, identity.clone())?;
 
         let res = execute(
-            &repo,
+            &_tr.async_repo,
             &identity,
             "assign_complex",
             "task_ref_complex",

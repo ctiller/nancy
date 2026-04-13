@@ -127,6 +127,7 @@ impl FrameNode {
     }
 }
 
+#[derive(Clone)]
 pub struct IntrospectionContext {
     pub current_frame: FrameNode,
     pub updater: watch::Sender<u64>,
@@ -149,19 +150,21 @@ impl StreamHandle {
 }
 
 pub fn stream_log(initial: &str) -> Option<StreamHandle> {
-    INTROSPECTION_CTX.try_with(|ctx| {
-        let content = Arc::new(Mutex::new(initial.to_string()));
-        ctx.current_frame
-            .elements
-            .lock()
-            .unwrap()
-            .push(StateElement::StreamLog(content.clone()));
-        let _ = ctx.updater.send_modify(|v| *v += 1);
-        StreamHandle {
-            content,
-            updater: ctx.updater.clone(),
-        }
-    }).ok()
+    INTROSPECTION_CTX
+        .try_with(|ctx| {
+            let content = Arc::new(Mutex::new(initial.to_string()));
+            ctx.current_frame
+                .elements
+                .lock()
+                .unwrap()
+                .push(StateElement::StreamLog(content.clone()));
+            let _ = ctx.updater.send_modify(|v| *v += 1);
+            StreamHandle {
+                content,
+                updater: ctx.updater.clone(),
+            }
+        })
+        .ok()
 }
 
 pub fn log(message: &str) {

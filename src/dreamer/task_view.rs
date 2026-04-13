@@ -20,22 +20,18 @@ impl TaskViewEvaluator {
 
     pub async fn evaluate_events<'a>(
         &'a mut self,
-        repo: &'a git2::Repository,
+        repo: &'a crate::git::AsyncRepository,
         id_obj: &'a Identity,
         tree_root: &'a Arc<IntrospectionTreeRoot>,
         global_writer: &'a crate::events::writer::Writer<'_>,
     ) -> Result<bool> {
         let mut workers_dids = HashSet::new();
-        if let Ok(branches) = repo.branches(Some(git2::BranchType::Local)) {
-            for branch_res in branches {
-                if let Ok((branch, _)) = branch_res {
-                    if let Ok(Some(name)) = branch.name() {
-                        if name.starts_with("nancy/") && name != "nancy/workers" {
-                            let extracted_did =
-                                name.replace("nancy/workers/", "").replace("nancy/", "");
-                            workers_dids.insert(extracted_did);
-                        }
-                    }
+        if let Ok(branches) = repo.branches(Some(git2::BranchType::Local)).await {
+            for branch in branches {
+                let name = branch.name;
+                if name.starts_with("nancy/") && name != "nancy/workers" {
+                    let extracted_did = name.replace("nancy/workers/", "").replace("nancy/", "");
+                    workers_dids.insert(extracted_did);
                 }
             }
         }
@@ -47,7 +43,7 @@ impl TaskViewEvaluator {
         if !self.hydrated {
             for node_did in &workers_dids {
                 let reader = Reader::new(repo, node_did.clone());
-                if let Ok(iter) = reader.iter_events() {
+                if let Ok(iter) = reader.iter_events().await {
                     for event_res in iter {
                         if let Ok(event) = event_res {
                             if let crate::schema::registry::EventPayload::TaskEvaluation(te) =
@@ -73,7 +69,7 @@ impl TaskViewEvaluator {
                     let mut logged_any = false;
                     for node_did in workers_dids {
                         let reader = Reader::new(repo, node_did.clone());
-                        if let Ok(iter) = reader.iter_events() {
+                        if let Ok(iter) = reader.iter_events().await {
                             let mut iter_count = 0;
                             for event_res in iter {
                                 if let Ok(event) = event_res {
@@ -116,7 +112,7 @@ impl TaskViewEvaluator {
                             }
                             println!("DREAMER EVAL ITER FINISHED WITH {} ITEMS FROM {}", iter_count, node_did);
                             if logged_any {
-                                let _ = global_writer.commit_batch();
+                                let _ = global_writer.commit_batch().await;
                             }
                         } else {
                             println!("DREAMER EVAL FAILED TO ITERATE EVENTS FROM {}", node_did);
@@ -239,13 +235,17 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let repo = git2::Repository::init(tmp.path()).unwrap();
         crate::commands::init::init(tmp.path(), 1).await.unwrap();
-
+        let async_repo = crate::git::AsyncRepository::discover(tmp.path())
+            .await
+            .unwrap();
         let id_obj = Identity::load(tmp.path()).await.unwrap();
 
         if let Identity::Coordinator { workers, .. } = &id_obj {
-            let writer =
-                crate::events::writer::Writer::new(&repo, Identity::Grinder(workers[0].clone()))
-                    .unwrap();
+            let writer = crate::events::writer::Writer::new(
+                &async_repo,
+                Identity::Grinder(workers[0].clone()),
+            )
+            .unwrap();
             writer
                 .log_event(crate::schema::registry::EventPayload::Ask(
                     crate::schema::task::AskPayload {
@@ -256,27 +256,28 @@ mod tests {
                     },
                 ))
                 .unwrap();
-            writer.commit_batch().unwrap();
+            writer.commit_batch().await.unwrap();
         }
 
         let tree_root = Arc::new(IntrospectionTreeRoot::new());
-        let global_writer = crate::events::writer::Writer::new(&repo, id_obj.clone()).unwrap();
+        let global_writer =
+            crate::events::writer::Writer::new(&async_repo, id_obj.clone()).unwrap();
 
         crate::llm::mock::builder::MockChatBuilder::new()
             .respond("99")
             .commit();
 
         let mut eval = TaskViewEvaluator::new();
-        eval.evaluate_events(&repo, &id_obj, &tree_root, &global_writer)
+        eval.evaluate_events(&async_repo, &id_obj, &tree_root, &global_writer)
             .await
             .unwrap();
-        global_writer.commit_batch().unwrap();
+        global_writer.commit_batch().await.unwrap();
 
         assert!(eval.evaluated_event_ids.len() >= 1);
 
-        let reader = Reader::new(&repo, id_obj.get_did_owner().did.clone());
+        let reader = Reader::new(&async_repo, id_obj.get_did_owner().did.clone());
         let mut found = false;
-        for ev in reader.iter_events().unwrap() {
+        for ev in reader.iter_events().await.unwrap() {
             if let EventPayload::TaskEvaluation(te) = ev.unwrap().payload {
                 if te.score == 50 {
                     found = true;
@@ -292,6 +293,9 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let repo = git2::Repository::init(tmp.path()).unwrap();
         crate::commands::init::init(tmp.path(), 1).await.unwrap();
+        let async_repo = crate::git::AsyncRepository::discover(tmp.path())
+            .await
+            .unwrap();
 
         let id_obj = Identity::load(tmp.path()).await.unwrap();
 
@@ -301,7 +305,7 @@ mod tests {
             unreachable!()
         };
 
-        let writer = crate::events::writer::Writer::new(&repo, dreamer_id.clone()).unwrap();
+        let writer = crate::events::writer::Writer::new(&async_repo, dreamer_id.clone()).unwrap();
         writer
             .log_event(crate::schema::registry::EventPayload::Ask(
                 crate::schema::task::AskPayload {
@@ -312,26 +316,27 @@ mod tests {
                 },
             ))
             .unwrap();
-        writer.commit_batch().unwrap();
+        writer.commit_batch().await.unwrap();
 
         let tree_root = Arc::new(IntrospectionTreeRoot::new());
-        let global_writer = crate::events::writer::Writer::new(&repo, dreamer_id.clone()).unwrap();
+        let global_writer =
+            crate::events::writer::Writer::new(&async_repo, dreamer_id.clone()).unwrap();
 
         crate::llm::mock::builder::MockChatBuilder::new()
             .respond("42")
             .commit();
 
         let mut eval = TaskViewEvaluator::new();
-        eval.evaluate_events(&repo, &dreamer_id, &tree_root, &global_writer)
+        eval.evaluate_events(&async_repo, &dreamer_id, &tree_root, &global_writer)
             .await
             .unwrap();
-        global_writer.commit_batch().unwrap();
+        global_writer.commit_batch().await.unwrap();
 
         assert!(eval.evaluated_event_ids.len() >= 1);
 
-        let reader = Reader::new(&repo, dreamer_id.get_did_owner().did.clone());
+        let reader = Reader::new(&async_repo, dreamer_id.get_did_owner().did.clone());
         let mut found = false;
-        for ev in reader.iter_events().unwrap() {
+        for ev in reader.iter_events().await.unwrap() {
             if let EventPayload::TaskEvaluation(te) = ev.unwrap().payload {
                 if te.score == 32 {
                     found = true;

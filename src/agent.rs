@@ -1,5 +1,4 @@
 use anyhow::{Context, Result, bail};
-use git2::Repository;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::fs;
@@ -64,7 +63,7 @@ impl crate::llm::tool::LlmTool for ExploreFrameTool {
 pub trait AgentTaskProcessor {
     fn process<'a>(
         &'a mut self,
-        repo: &'a Repository,
+        repo: &'a crate::git::AsyncRepository,
         id_obj: &'a Identity,
         worker_did: &'a str,
         coordinator_did: &'a str,
@@ -81,8 +80,11 @@ pub async fn run_agent<P: AsRef<Path>, Processor: AgentTaskProcessor>(
     mut processor: Processor,
 ) -> Result<()> {
     let dir = dir.as_ref();
-    let repo = Repository::discover(dir).context("Not a git repository")?;
-    let workdir = repo.workdir().context("Bare repository")?.to_path_buf();
+    let repo = crate::git::AsyncRepository::discover(dir).await.context("Not a git repository")?;
+    let workdir = repo
+        .workdir()
+        .context("Bare repository")?
+        .to_path_buf();
 
     let identity_file = workdir.join(".nancy").join("identity.json");
     let id_obj = match identity_override {
@@ -370,7 +372,7 @@ pub async fn run_agent<P: AsRef<Path>, Processor: AgentTaskProcessor>(
         }
 
         let mut logged_any = false;
-        if let Ok(true) = global_writer.commit_batch() {
+        if let Ok(true) = global_writer.commit_batch().await {
             logged_any = true;
         }
 
@@ -387,7 +389,8 @@ pub async fn run_agent<P: AsRef<Path>, Processor: AgentTaskProcessor>(
                     completed_task_ids: crate::commands::grind::get_completed_tasks(
                         &repo,
                         &worker_did,
-                    ), // NOTE: generic usage applies safely as task payload bounds apply equally!
+                    )
+                    .await, // NOTE: generic usage applies safely as task payload bounds apply equally!
                 };
                 if let Ok(client) = reqwest::Client::builder()
                     .unix_socket(socket_path.clone())

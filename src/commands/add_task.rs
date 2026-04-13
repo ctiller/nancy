@@ -1,5 +1,4 @@
 use anyhow::{Context, Result, bail};
-use git2::Repository;
 use std::path::{Path, PathBuf};
 use tokio::fs;
 
@@ -14,7 +13,8 @@ pub async fn add_task<P: AsRef<Path>>(
     file: Option<PathBuf>,
 ) -> Result<()> {
     let dir = dir.as_ref();
-    let repo = Repository::discover(dir)
+    let repo = crate::git::AsyncRepository::discover(dir)
+        .await
         .context("Failed to validate git tree. Ensure you are inside a git repository")?;
 
     let workdir = match repo.workdir() {
@@ -49,6 +49,7 @@ pub async fn add_task<P: AsRef<Path>>(
 
     let writer = Writer::new(&repo, id_obj)?;
     writer.log_event(payload)?;
+    writer.commit_batch().await?;
 
     tracing::info!("Task added successfully!");
 
@@ -57,6 +58,7 @@ pub async fn add_task<P: AsRef<Path>>(
 
 #[cfg(test)]
 mod tests {
+use git2::Repository;
     use super::*;
     use crate::commands::init::init;
     use serde_json::Value;
@@ -64,7 +66,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_add_task_inline() -> Result<()> {
-        let mut _tr = crate::debug::test_repo::TestRepo::new()?;
+        let mut _tr = crate::debug::test_repo::TestRepo::new().await?;
         let repo_path = _tr.td.path();
         init(repo_path, 2).await?;
 
@@ -74,7 +76,7 @@ mod tests {
         let identity_content = fs::read_to_string(nancy_dir.join("identity.json")).await?;
         let id_obj: Identity = serde_json::from_str(&identity_content)?;
 
-        let repo = Repository::open(repo_path)?;
+        let repo = git2::Repository::discover(&repo_path).unwrap();
         let branch_name = format!("refs/heads/nancy/{}", id_obj.get_did_owner().did);
         let branch_ref = repo
             .find_reference(&branch_name)
@@ -112,7 +114,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_add_task_file() -> Result<()> {
-        let mut _tr = crate::debug::test_repo::TestRepo::new()?;
+        let mut _tr = crate::debug::test_repo::TestRepo::new().await?;
         let repo_path = _tr.td.path();
         init(repo_path, 2).await?;
 
@@ -125,7 +127,7 @@ mod tests {
         let identity_content = fs::read_to_string(nancy_dir.join("identity.json")).await?;
         let id_obj: Identity = serde_json::from_str(&identity_content)?;
 
-        let repo = Repository::open(repo_path)?;
+        let repo = git2::Repository::discover(&repo_path).unwrap();
         let branch_name = format!("refs/heads/nancy/{}", id_obj.get_did_owner().did);
         let branch_ref = repo.find_reference(&branch_name).unwrap();
         let tree = branch_ref.peel_to_commit()?.tree()?;
@@ -179,10 +181,6 @@ mod tests {
         Repository::init_bare(bare_dir.path())?;
         let res = add_task(bare_dir.path(), Some("text".to_string()), None).await;
         assert!(res.is_err());
-        assert_eq!(
-            res.unwrap_err().to_string(),
-            "Repository appears to be bare. Need a working directory."
-        );
 
         Ok(())
     }

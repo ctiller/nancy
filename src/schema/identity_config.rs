@@ -57,7 +57,7 @@ impl Identity {
             tokio::fs::write(&identity_file, &patched_content).await?;
 
             // Natively emit the Event Payload mapping back to event ledger dynamically
-            if let Ok(repo) = git2::Repository::discover(dir.as_ref()) {
+            if let Ok(repo) = crate::git::AsyncRepository::discover(dir.as_ref()).await {
                 let identity_patched: Self = serde_json::from_value(raw.clone())?;
                 if let Ok(writer) = crate::events::writer::Writer::new(&repo, identity_patched) {
                     let payload = crate::schema::registry::EventPayload::Identity(
@@ -102,7 +102,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_identity_auto_patching() {
-        let mut _tr = crate::debug::test_repo::TestRepo::new().unwrap();
+        let mut _tr = crate::debug::test_repo::TestRepo::new().await.unwrap();
         let repo_path = _tr.td.path();
 
         let nancy_dir = repo_path.join(".nancy");

@@ -37,4 +37,3 @@ pub struct LlmThoughtPayload {
     pub timestamp: u64,
     pub thought_content: String,
 }
-

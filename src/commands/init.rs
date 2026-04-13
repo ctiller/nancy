@@ -1,6 +1,5 @@
 use anyhow::{Context, Result, bail};
 // Unused did_key footprint cleared safely
-use git2::Repository;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::fs::{self, OpenOptions};
@@ -8,7 +7,8 @@ use tokio::io::AsyncWriteExt;
 
 pub async fn init<P: AsRef<Path>>(dir: P, grinders: usize) -> Result<()> {
     let dir = dir.as_ref();
-    let repo = Repository::discover(dir)
+    let repo = crate::git::AsyncRepository::discover(dir)
+        .await
         .context("Failed to validate git tree. Ensure you are inside a git repository")?;
 
     let workdir = match repo.workdir() {
@@ -134,6 +134,8 @@ pub async fn init<P: AsRef<Path>>(dir: P, grinders: usize) -> Result<()> {
         writer.log_event(worker_payload)?;
     }
 
+    writer.commit_batch().await?;
+
     let branch_name = format!("refs/heads/nancy/{}", did);
     println!("Successfully provisioned new DID and initialized .nancy!");
     println!("DID: {}", did);
@@ -147,16 +149,14 @@ mod tests {
     use super::*;
     use serde_json::Value;
 
-    #[test]
-    fn test_init_command() -> Result<()> {
+    #[tokio::test]
+    async fn test_init_command() -> Result<()> {
         // Setup temporary directory structure and initialize git
-        let mut _tr = crate::debug::test_repo::TestRepo::new()?;
+        let mut _tr = crate::debug::test_repo::TestRepo::new().await?;
         let repo_path = _tr.td.path();
         let repo = &_tr.repo;
 
-        // Run the init command with 2 grinders
-        let rt = tokio::runtime::Runtime::new()?;
-        rt.block_on(init(repo_path, 2))?;
+        init(repo_path, 2).await?;
 
         // Verify .nancy directory and identity.json were created
         let nancy_dir = repo_path.join(".nancy");
@@ -236,9 +236,9 @@ mod tests {
         // Test the reader index syncing
         use crate::events::index::LocalIndex;
         use crate::events::reader::Reader;
-        let reader = Reader::new(&repo, did.to_string());
+        let reader = Reader::new(&_tr.async_repo, did.to_string());
         let local_index = LocalIndex::new(&nancy_dir)?;
-        reader.sync_index(&local_index)?;
+        reader.sync_index(&local_index).await?;
 
         let resolved = local_index
             .lookup_event(id)?
@@ -258,17 +258,17 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn test_init_double_fails() {
-        let mut _tr = crate::debug::test_repo::TestRepo::new().unwrap();
+    #[tokio::test]
+    async fn test_init_double_fails() {
+        let mut _tr = crate::debug::test_repo::TestRepo::new().await.unwrap();
         let temp_dir = &_tr.td;
         let _repo = &_tr.repo;
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        rt.block_on(crate::commands::init::init(temp_dir.path(), 6))
+        crate::commands::init::init(temp_dir.path(), 6)
+            .await
             .unwrap();
 
         // Ensure double initialization returns an error securely
-        let result = rt.block_on(crate::commands::init::init(temp_dir.path(), 6));
+        let result = crate::commands::init::init(temp_dir.path(), 6).await;
         assert!(result.is_err());
     }
 }

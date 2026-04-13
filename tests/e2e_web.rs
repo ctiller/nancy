@@ -382,6 +382,9 @@ async fn test_e2e_web_incident_logs() {
     let tmp = TempDir::new().unwrap();
     std::env::set_current_dir(tmp.path()).unwrap();
     let repo = git2::Repository::init(tmp.path()).unwrap();
+    let async_repo = nancy::git::AsyncRepository::discover(repo.workdir().unwrap())
+        .await
+        .unwrap();
     nancy::commands::init::init(tmp.path(), 1).await.unwrap();
     let identity = nancy::schema::identity_config::Identity::load(tmp.path())
         .await
@@ -394,7 +397,7 @@ async fn test_e2e_web_incident_logs() {
         _ => panic!("Not a coordinator"),
     };
 
-    let writer = nancy::events::writer::Writer::new(&repo, identity.clone()).unwrap();
+    let writer = nancy::events::writer::Writer::new(&async_repo, identity.clone()).unwrap();
     writer.attach_incident_log(
         "test-crash.log",
         "thread '<unnamed>' panicked at 'explicit panic'",
@@ -409,7 +412,7 @@ async fn test_e2e_web_incident_logs() {
             },
         ))
         .unwrap();
-    writer.commit_batch().unwrap();
+    writer.commit_batch().await.unwrap();
 
     // Secure authentic nancy executable mappings natively for tests running `DockerOrchestrator` organically
     unsafe {
@@ -464,6 +467,9 @@ async fn test_e2e_web_tasks_evaluations() {
     std::env::set_current_dir(tmp.path()).unwrap();
 
     let repo = git2::Repository::init(tmp.path()).unwrap();
+    let async_repo = nancy::git::AsyncRepository::discover(repo.workdir().unwrap())
+        .await
+        .unwrap();
     nancy::commands::init::init(tmp.path(), 1).await.unwrap();
 
     let (mock_port, test_queue) = common::mock_gemini::spawn_mock_server().await;
@@ -473,7 +479,7 @@ async fn test_e2e_web_tasks_evaluations() {
         let id_obj = nancy::schema::identity_config::Identity::load(tmp.path())
             .await
             .unwrap();
-        let writer = nancy::events::writer::Writer::new(&repo, id_obj.clone()).unwrap();
+        let writer = nancy::events::writer::Writer::new(&async_repo, id_obj.clone()).unwrap();
         writer
             .log_event(nancy::schema::registry::EventPayload::Ask(
                 nancy::schema::task::AskPayload {
@@ -484,12 +490,13 @@ async fn test_e2e_web_tasks_evaluations() {
                 },
             ))
             .unwrap();
-        writer.commit_batch().unwrap();
+        writer.commit_batch().await.unwrap();
 
         // Assert it wrote!
-        let reader = nancy::events::reader::Reader::new(&repo, id_obj.get_did_owner().did.clone());
+        let reader =
+            nancy::events::reader::Reader::new(&async_repo, id_obj.get_did_owner().did.clone());
         let mut count = 0;
-        for _ in reader.iter_events().unwrap() {
+        for _ in reader.iter_events().await.unwrap() {
             count += 1;
         }
         println!(
@@ -597,6 +604,9 @@ async fn test_e2e_web_human_pending_standalone_grinder_hydration() {
     std::env::set_current_dir(tmp.path()).unwrap();
 
     let repo = git2::Repository::init(tmp.path()).unwrap();
+    let async_repo = nancy::git::AsyncRepository::discover(repo.workdir().unwrap())
+        .await
+        .unwrap();
     nancy::commands::init::init(tmp.path(), 0).await.unwrap();
 
     // Simulate a Standalone Grinder natively writing to its own DID branch securely!
@@ -604,7 +614,8 @@ async fn test_e2e_web_human_pending_standalone_grinder_hydration() {
         nancy::schema::identity_config::DidOwner::generate(),
     );
 
-    let grinder_writer = nancy::events::writer::Writer::new(&repo, standalone_identity).unwrap();
+    let grinder_writer =
+        nancy::events::writer::Writer::new(&async_repo, standalone_identity).unwrap();
     grinder_writer
         .log_event(nancy::schema::registry::EventPayload::ReviewPlan(
             nancy::schema::task::ReviewPlanPayload {
@@ -626,7 +637,7 @@ async fn test_e2e_web_human_pending_standalone_grinder_hydration() {
             },
         ))
         .unwrap();
-    grinder_writer.commit_batch().unwrap();
+    grinder_writer.commit_batch().await.unwrap();
 
     // Boot the Coordinator!
     let mut coord = nancy::commands::coordinator::Coordinator::new(tmp.path())

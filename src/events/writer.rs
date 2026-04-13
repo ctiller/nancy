@@ -1,6 +1,6 @@
-use anyhow::{Context, Result, anyhow};
+use crate::git::AsyncRepository;
+use anyhow::Result;
 use did_key::{CoreSign, Ed25519KeyPair};
-use git2::Repository;
 
 use crate::schema::identity_config::Identity;
 use crate::schema::registry::EventPayload;
@@ -8,7 +8,7 @@ use crate::schema::registry::EventPayload;
 use super::EventEnvelope;
 
 pub struct Writer<'a> {
-    repo: &'a Repository,
+    repo: &'a AsyncRepository,
     identity: Identity,
     pending_events: std::sync::Mutex<Vec<String>>,
     pending_incident_logs: std::sync::Mutex<std::collections::HashMap<String, String>>,
@@ -17,7 +17,7 @@ pub struct Writer<'a> {
 }
 
 impl<'a> Writer<'a> {
-    pub fn new(repo: &'a Repository, identity: Identity) -> Result<Self> {
+    pub fn new(repo: &'a AsyncRepository, identity: Identity) -> Result<Self> {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         Ok(Writer {
             repo,
@@ -103,68 +103,56 @@ impl<'a> Writer<'a> {
             .insert(filename.to_string(), content.to_string());
     }
 
-    pub fn commit_batch(&self) -> Result<bool> {
-        let mut rx = self.trace_rx.lock().unwrap();
-        while let Ok(event) = rx.try_recv() {
-            self.log_event(event)?;
+    pub async fn commit_batch(&self) -> Result<bool> {
+        {
+            let mut rx = self.trace_rx.lock().unwrap();
+            while let Ok(event) = rx.try_recv() {
+                self.log_event(event)?;
+            }
         }
 
-        let mut pending = self.pending_events.lock().unwrap();
-        let mut pending_incidents = self.pending_incident_logs.lock().unwrap();
+        let pending = {
+            let mut p = self.pending_events.lock().unwrap();
+            std::mem::take(&mut *p)
+        };
+        let pending_incidents = {
+            let mut pi = self.pending_incident_logs.lock().unwrap();
+            std::mem::take(&mut *pi)
+        };
         if pending.is_empty() && pending_incidents.is_empty() {
             return Ok(false);
         }
 
         let safe_did = self.identity.get_did_owner().did.replace(":", "_");
         let branch_name = format!("refs/heads/nancy/{}", safe_did);
-        let branch_ref = self.repo.find_reference(&branch_name);
+        let commit = self.repo.peel_to_commit(&branch_name).await;
 
         let mut max_log_idx = 0;
         let mut log_blobs = std::collections::BTreeMap::new();
-        let mut parents = Vec::new();
 
-        let branch_commit = if let Ok(br) = branch_ref {
-            let commit = br.peel_to_commit()?;
-            parents.push(commit.clone());
-            Some(commit)
-        } else {
-            None
-        };
+        let mut events_tree_oid = None;
 
-        let events_tree = if let Some(commit) = &branch_commit {
-            let tree = commit.tree()?;
-            if let Ok(entry) = tree.get_name("events").context("events miss") {
-                let events_obj = entry.to_object(self.repo)?;
-                Some(events_obj.into_tree().map_err(|_| anyhow!("not tree"))?)
-            } else {
-                None
+        if let Ok(c) = &commit {
+            if let Ok(entries) = self.repo.read_tree(&c.tree_oid.0).await {
+                for (name, oid, kind) in entries {
+                    if name == "events" && kind == Some(git2::ObjectType::Tree) {
+                        events_tree_oid = Some(oid);
+                        break;
+                    }
+                }
             }
-        } else {
-            None
-        };
+        }
 
-        let incidents_tree = if let Some(commit) = &branch_commit {
-            let tree = commit.tree()?;
-            if let Some(entry) = tree.get_name("incidents") {
-                let incidents_obj = entry.to_object(self.repo)?;
-                Some(incidents_obj.into_tree().map_err(|_| anyhow!("not tree"))?)
-            } else {
-                None
-            }
-        } else {
-            None
-        };
-
-        if let Some(tree) = &events_tree {
-            for entry in tree.iter() {
-                if let Some(name) = entry.name() {
-                    log_blobs.insert(name.to_string(), entry.id());
+        if let Some(events_oid) = &events_tree_oid {
+            if let Ok(entries) = self.repo.read_tree(events_oid).await {
+                for (name, oid, _kind) in entries {
                     if name.ends_with(".log") {
                         if let Ok(num) = name.trim_end_matches(".log").parse::<u32>() {
                             if num > max_log_idx {
                                 max_log_idx = num;
                             }
                         }
+                        log_blobs.insert(name, oid);
                     }
                 }
             }
@@ -178,15 +166,17 @@ impl<'a> Writer<'a> {
         let mut current_content = String::new();
         let mut current_lines = 0;
 
-        if let Some(blob_id) = log_blobs.get(&latest_log_name) {
-            let blob = self.repo.find_blob(*blob_id)?;
-            let content_str = std::str::from_utf8(blob.content())?;
-            current_content = content_str.to_string();
-            current_lines = current_content
-                .trim()
-                .split('\n')
-                .filter(|l| !l.is_empty())
-                .count();
+        if let Some(blob_oid) = log_blobs.get(&latest_log_name) {
+            if let Ok(blob) = self.repo.read_blob(blob_oid).await {
+                if let Ok(content_str) = std::str::from_utf8(&blob) {
+                    current_content = content_str.to_string();
+                    current_lines = current_content
+                        .trim()
+                        .split('\n')
+                        .filter(|l| !l.is_empty())
+                        .count();
+                }
+            }
         }
 
         let mut blobs_to_write = Vec::new();
@@ -196,7 +186,7 @@ impl<'a> Writer<'a> {
         while event_idx < pending.len() {
             let space = 10000_usize.saturating_sub(current_lines);
             if space == 0 {
-                blobs_to_write.push((format!("{:05}.log", log_idx), current_content));
+                blobs_to_write.push((format!("{:05}.log", log_idx), current_content.into_bytes()));
                 log_idx += 1;
                 current_content = String::new();
                 current_lines = 0;
@@ -211,73 +201,20 @@ impl<'a> Writer<'a> {
         }
 
         if current_lines > 0 {
-            blobs_to_write.push((format!("{:05}.log", log_idx), current_content));
+            blobs_to_write.push((format!("{:05}.log", log_idx), current_content.into_bytes()));
         }
 
-        let mut events_tb = if let Some(tree) = &events_tree {
-            self.repo.treebuilder(Some(tree))?
-        } else {
-            self.repo.treebuilder(None)?
-        };
-
-        for (name, content) in blobs_to_write {
-            let blob_id = self.repo.blob(content.as_bytes())?;
-            events_tb.insert(name, blob_id, 0o100644)?;
-        }
-
-        let new_events_tree_id = events_tb.write()?;
-
-        let mut incidents_tb = if let Some(tree) = &incidents_tree {
-            self.repo.treebuilder(Some(tree))?
-        } else {
-            self.repo.treebuilder(None)?
-        };
-
+        let mut inc_blobs = Vec::new();
         for (name, content) in pending_incidents.iter() {
-            let blob_id = self.repo.blob(content.as_bytes())?;
-            incidents_tb.insert(name, blob_id, 0o100644)?;
+            inc_blobs.push((name.clone(), content.as_bytes().to_vec()));
         }
-        let new_incidents_tree_id = incidents_tb.write()?;
 
-        let root_tree_id = if let Some(commit) = parents.first() {
-            let mut root_tb = self.repo.treebuilder(Some(&commit.tree()?))?;
-            root_tb.insert("events", new_events_tree_id, 0o040000)?;
-            root_tb.insert("incidents", new_incidents_tree_id, 0o040000)?;
-            root_tb.write()?
-        } else {
-            let mut root_tb = self.repo.treebuilder(None)?;
-            root_tb.insert("events", new_events_tree_id, 0o040000)?;
-            root_tb.insert("incidents", new_incidents_tree_id, 0o040000)?;
-            root_tb.write()?
-        };
+        // Pass everything to the actor
+        self.repo
+            .commit_blob_batch(&branch_name, blobs_to_write, inc_blobs)
+            .await?;
 
-        let new_root_tree = self.repo.find_tree(root_tree_id)?;
-        let parents_refs: Vec<&git2::Commit> = parents.iter().collect();
-
-        let sig = self.repo.signature().unwrap_or_else(|_| {
-            git2::Signature::now("Nancy Orchestrator", "nancy@localhost").unwrap()
-        });
-
-        self.repo.commit(
-            Some(&format!("refs/heads/nancy/{}", safe_did)),
-            &sig,
-            &sig,
-            "Batched append event logs",
-            &new_root_tree,
-            &parents_refs,
-        )?;
-
-        pending.clear();
-        pending_incidents.clear();
         Ok(true)
-    }
-}
-
-impl<'a> Drop for Writer<'a> {
-    fn drop(&mut self) {
-        if let Err(e) = self.commit_batch() {
-            tracing::error!("nancy: Failed to auto-commit batch writer: {}", e);
-        }
     }
 }
 
@@ -288,9 +225,9 @@ mod tests {
     use crate::schema::identity_config::DidOwner;
     use did_key::{Ed25519KeyPair, Fingerprint, KeyMaterial};
 
-    #[test]
-    fn test_writer_creates_events() -> Result<()> {
-        let mut _tr = crate::debug::test_repo::TestRepo::new()?;
+    #[tokio::test]
+    async fn test_writer_creates_events() -> Result<()> {
+        let mut _tr = crate::debug::test_repo::TestRepo::new().await?;
         let _temp_dir = &_tr.td;
         let repo = &_tr.repo;
 
@@ -307,7 +244,7 @@ mod tests {
             human: Some(crate::schema::identity_config::DidOwner::generate()),
         };
 
-        let writer = Writer::new(&repo, identity)?;
+        let writer = Writer::new(&_tr.async_repo, identity)?;
 
         writer.log_event(EventPayload::Identity(IdentityPayload {
             did: did.clone(),
@@ -321,7 +258,7 @@ mod tests {
             timestamp: 123456790,
         }))?;
 
-        writer.commit_batch()?;
+        writer.commit_batch().await?;
 
         // Verify git branches
         let branch_name = format!("refs/heads/nancy/{}", did);
@@ -355,9 +292,9 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn test_writer_appends_to_existing_log() -> Result<()> {
-        let mut _tr = crate::debug::test_repo::TestRepo::new()?;
+    #[tokio::test]
+    async fn test_writer_appends_to_existing_log() -> Result<()> {
+        let mut _tr = crate::debug::test_repo::TestRepo::new().await?;
         let _temp_dir = &_tr.td;
         let repo = &_tr.repo;
 
@@ -375,26 +312,26 @@ mod tests {
         };
 
         // First instance creates the git repo and orphaned branch initially
-        let writer1 = Writer::new(&repo, identity.clone())?;
+        let writer1 = Writer::new(&_tr.async_repo, identity.clone())?;
         writer1.log_event(EventPayload::Identity(IdentityPayload {
             did: did.clone(),
             public_key_hex: "dummy1".to_string(),
             timestamp: 1,
         }))?;
-        writer1.commit_batch()?;
+        writer1.commit_batch().await?;
 
         // Second instance triggers the tree validation and updates existing log blob
-        let writer2 = Writer::new(&repo, identity.clone())?;
+        let mut writer2 = Writer::new(&_tr.async_repo, identity.clone())?;
 
         // Let's also cover the empty payload return gracefully!
-        writer2.commit_batch()?;
+        writer2.commit_batch().await?;
 
         writer2.log_event(EventPayload::Identity(IdentityPayload {
             did: did.clone(),
             public_key_hex: "dummy2".to_string(),
             timestamp: 2,
         }))?;
-        writer2.commit_batch()?;
+        writer2.commit_batch().await?;
 
         let branch_name = format!("refs/heads/nancy/{}", did);
         let branch_ref = repo
@@ -424,9 +361,9 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn test_writer_log_rollover_boundaries() -> Result<()> {
-        let mut _tr = crate::debug::test_repo::TestRepo::new()?;
+    #[tokio::test]
+    async fn test_writer_log_rollover_boundaries() -> Result<()> {
+        let mut _tr = crate::debug::test_repo::TestRepo::new().await?;
         let _temp_dir = &_tr.td;
         let repo = &_tr.repo;
 
@@ -438,7 +375,7 @@ mod tests {
             private_key_hex: hex::encode(key.private_key_bytes()),
         });
 
-        let writer = Writer::new(&repo, identity)?;
+        let writer = Writer::new(&_tr.async_repo, identity)?;
 
         // Cross the 10,000 line constraint entirely via 15,000 entries
         for i in 0..15000 {
@@ -450,7 +387,7 @@ mod tests {
         }
 
         // Execute the fast batch memory evaluation
-        writer.commit_batch()?;
+        writer.commit_batch().await?;
 
         let branch_name = format!("refs/heads/nancy/{}", did);
         let branch_ref = repo
@@ -509,8 +446,8 @@ mod tests {
 
         // Now test the reader retrieving all 15k!
         use crate::events::reader::Reader;
-        let reader = Reader::new(&repo, did.clone());
-        let count = reader.iter_events()?.count();
+        let reader = Reader::new(&_tr.async_repo, did.clone());
+        let count = reader.iter_events().await?.count();
         assert_eq!(
             count, 15000,
             "Reader must successfully retrieve exactly 15000 entries sequentially via chunks"
