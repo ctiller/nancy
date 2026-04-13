@@ -133,6 +133,48 @@ pub struct IntrospectionContext {
     pub updater: watch::Sender<u64>,
 }
 
+impl IntrospectionContext {
+    pub fn log(&self, message: &str) {
+        self.current_frame
+            .elements
+            .lock()
+            .unwrap()
+            .push(StateElement::Log(message.to_string()));
+        let _ = self.updater.send_modify(|v| *v += 1);
+    }
+
+    pub fn data_log(&self, key: &str, value: serde_json::Value) {
+        self.current_frame
+            .elements
+            .lock()
+            .unwrap()
+            .push(StateElement::Data(key.to_string(), value));
+        let _ = self.updater.send_modify(|v| *v += 1);
+    }
+
+    pub fn set_frame_status(&self, status: &str) {
+        *self.current_frame.status.lock().unwrap() = Some(status.to_string());
+        let _ = self.updater.send_modify(|v| *v += 1);
+    }
+
+    pub fn in_frame<R, F: FnOnce(&IntrospectionContext) -> R>(&self, name: &str, f: F) -> R {
+        let child_node = FrameNode::new(name);
+        self.current_frame
+            .elements
+            .lock()
+            .unwrap()
+            .push(StateElement::Frame(child_node.clone()));
+        let _ = self.updater.send_modify(|v| *v += 1);
+
+        let child_ctx = IntrospectionContext {
+            current_frame: child_node,
+            updater: self.updater.clone(),
+        };
+
+        f(&child_ctx)
+    }
+}
+
 tokio::task_local! {
     pub static INTROSPECTION_CTX: IntrospectionContext;
 }
@@ -223,19 +265,70 @@ where
 }
 
 pub struct IntrospectionTreeRoot {
-    pub root_frame: FrameNode,
+    pub agent_root: FrameNode,
+    pub git_root: FrameNode,
     pub updater: watch::Sender<u64>,
     pub receiver: watch::Receiver<u64>,
+    pub status: Arc<Mutex<Option<String>>>,
+    pub rollup: Arc<Mutex<Option<String>>>,
 }
 
 impl IntrospectionTreeRoot {
     pub fn new() -> Self {
         let (updater, receiver) = watch::channel(0);
         Self {
-            root_frame: FrameNode::new("root"),
+            agent_root: FrameNode::new("agent"),
+            git_root: FrameNode::new("git"),
             updater,
             receiver,
+            status: Arc::new(Mutex::new(None)),
+            rollup: Arc::new(Mutex::new(None)),
         }
+    }
+
+    pub fn snapshot(&self) -> SerializedFrame {
+        self.snapshot_depth(usize::MAX)
+    }
+
+    pub fn snapshot_depth(&self, depth: usize) -> SerializedFrame {
+        let status = self.status.lock().unwrap().clone();
+        let rollup = self.rollup.lock().unwrap().clone();
+        
+        let elements = if depth == 0 {
+            Vec::new()
+        } else {
+            vec![
+                SerializedElement::Frame(self.agent_root.snapshot_depth(depth - 1)),
+                SerializedElement::Frame(self.git_root.snapshot_depth(depth - 1)),
+            ]
+        };
+
+        SerializedFrame {
+            name: "root".to_string(),
+            status,
+            rollup,
+            elements,
+        }
+    }
+
+    pub fn find_frame_by_path(&self, path: &[String]) -> Option<FrameNode> {
+        if path.is_empty() { return None; }
+        
+        if path[0] == "root" {
+            if path.len() == 1 {
+                return None; // Cannot return synthetic root as FrameNode
+            }
+            return self.find_frame_by_path(&path[1..]);
+        }
+        
+        if path[0] == "agent" { return self.agent_root.find_frame_by_path(path); }
+        if path[0] == "git" { return self.git_root.find_frame_by_path(path); }
+        
+        // Implicit check directly under if "root" was omitted
+        if let Some(f) = self.agent_root.find_frame_by_path(path) { return Some(f); }
+        if let Some(f) = self.git_root.find_frame_by_path(path) { return Some(f); }
+        
+        None
     }
 }
 
@@ -247,14 +340,14 @@ mod tests {
     async fn test_introspection_tree_mechanics() {
         let tree_root = IntrospectionTreeRoot::new();
         let ctx = IntrospectionContext {
-            current_frame: tree_root.root_frame.clone(),
+            current_frame: tree_root.agent_root.clone(),
             updater: tree_root.updater.clone(),
         };
 
         // Snapshot initially
-        let snap = tree_root.root_frame.snapshot();
+        let snap = tree_root.snapshot();
         assert_eq!(snap.name, "root");
-        assert!(snap.elements.is_empty());
+        assert_eq!(snap.elements.len(), 2); // agent and git frames
 
         let rx = tree_root.receiver.clone();
         assert_eq!(*rx.borrow(), 0);
@@ -273,15 +366,21 @@ mod tests {
 
         assert_eq!(*rx.borrow(), 4); // 4 updates total
 
-        let snap2 = tree_root.root_frame.snapshot();
-        assert_eq!(snap2.elements.len(), 3);
+        let snap2 = tree_root.snapshot();
+        
+        let agent_frame = match &snap2.elements[0] {
+            SerializedElement::Frame(f) => f,
+            _ => panic!("Expected frame"),
+        };
 
-        match &snap2.elements[0] {
+        assert_eq!(agent_frame.elements.len(), 3);
+
+        match &agent_frame.elements[0] {
             SerializedElement::Log { message } => assert_eq!(message, "hello world"),
             _ => panic!("Expected log"),
         }
 
-        match &snap2.elements[1] {
+        match &agent_frame.elements[1] {
             SerializedElement::Data { key, value } => {
                 assert_eq!(key, "my_key");
                 assert_eq!(value, &serde_json::json!({"foo": "bar"}));
@@ -289,7 +388,7 @@ mod tests {
             _ => panic!("Expected data"),
         }
 
-        match &snap2.elements[2] {
+        match &agent_frame.elements[2] {
             SerializedElement::Frame(f) => {
                 assert_eq!(f.name, "child_task");
                 assert_eq!(f.elements.len(), 1);

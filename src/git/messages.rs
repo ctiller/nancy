@@ -105,4 +105,8 @@ pub enum GitRequest {
         incidents_blobs: Vec<(String, Vec<u8>)>,
         resp: oneshot::Sender<anyhow::Result<bool>>,
     },
+    SetIntrospection {
+        ctx: crate::introspection::IntrospectionContext,
+        resp: oneshot::Sender<anyhow::Result<()>>,
+    },
 }

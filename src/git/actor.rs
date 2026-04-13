@@ -9,6 +9,7 @@ use super::types::{BranchProxy, CommitProxy, OidProxy, ReferenceProxy};
 pub struct GitActor {
     repo: Option<Repository>,
     receiver: mpsc::Receiver<GitRequest>,
+    ctx: Option<crate::introspection::IntrospectionContext>,
 }
 
 impl GitActor {
@@ -18,6 +19,7 @@ impl GitActor {
             let mut actor = GitActor {
                 repo: None,
                 receiver: rx,
+                ctx: None,
             };
             actor.run();
         });
@@ -26,8 +28,51 @@ impl GitActor {
 
     fn run(&mut self) {
         while let Some(msg) = self.receiver.blocking_recv() {
-            match msg {
-                GitRequest::Init { path, resp } => {
+            let req_name = match &msg {
+                GitRequest::Init { .. } => "GitRequest::Init",
+                GitRequest::Discover { .. } => "GitRequest::Discover",
+                GitRequest::Open { .. } => "GitRequest::Open",
+                GitRequest::FindReference { .. } => "GitRequest::FindReference",
+                GitRequest::PeelToCommit { .. } => "GitRequest::PeelToCommit",
+                GitRequest::FindObject { .. } => "GitRequest::FindObject",
+                GitRequest::Branch { .. } => "GitRequest::Branch",
+                GitRequest::Branches { .. } => "GitRequest::Branches",
+                GitRequest::Add { .. } => "GitRequest::Add",
+                GitRequest::CommitTree { .. } => "GitRequest::CommitTree",
+                GitRequest::Checkout { .. } => "GitRequest::Checkout",
+                GitRequest::Merge { .. } => "GitRequest::Merge",
+                GitRequest::Push { .. } => "GitRequest::Push",
+                GitRequest::Fetch { .. } => "GitRequest::Fetch",
+                GitRequest::GetFeatureBranch { .. } => "GitRequest::GetFeatureBranch",
+                GitRequest::Log { .. } => "GitRequest::Log",
+                GitRequest::DiffTreeToTree { .. } => "GitRequest::DiffTreeToTree",
+                GitRequest::RunProcess { .. } => "GitRequest::RunProcess",
+                GitRequest::RevparseSingle { .. } => "GitRequest::RevparseSingle",
+                GitRequest::ReadTree { .. } => "GitRequest::ReadTree",
+                GitRequest::ReadBlob { .. } => "GitRequest::ReadBlob",
+                GitRequest::CommitBlobBatch { .. } => "GitRequest::CommitBlobBatch",
+                GitRequest::SetIntrospection { .. } => "GitRequest::SetIntrospection",
+            };
+
+            // Don't recurse introspection setup inside itself
+            if req_name == "GitRequest::SetIntrospection" {
+                self.handle_msg(msg);
+                continue;
+            }
+
+            if let Some(ctx) = self.ctx.clone() {
+                let _ = ctx.in_frame(req_name, |_child_ctx| {
+                    self.handle_msg(msg)
+                });
+            } else {
+                self.handle_msg(msg);
+            }
+        }
+    }
+
+    fn handle_msg(&mut self, msg: GitRequest) {
+        match msg {
+            GitRequest::Init { path, resp } => {
                     let res = Repository::init(&path)
                         .map(|r| {
                             self.repo = Some(r);
@@ -418,6 +463,9 @@ impl GitActor {
                     });
                     let _ = resp.send(res);
                 }
+            GitRequest::SetIntrospection { ctx, resp } => {
+                self.ctx = Some(ctx);
+                let _ = resp.send(Ok(()));
             }
         }
     }

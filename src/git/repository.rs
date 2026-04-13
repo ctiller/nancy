@@ -8,19 +8,19 @@ use super::types::{BranchProxy, CommitProxy, OidProxy, ReferenceProxy};
 
 #[derive(Clone)]
 pub struct AsyncRepository {
-    tx: mpsc::Sender<crate::git::messages::GitRequestEnvelope>,
+    tx: mpsc::Sender<GitRequest>,
     workdir: std::path::PathBuf,
 }
 
 impl AsyncRepository {
     async fn send_req(&self, req: GitRequest) -> anyhow::Result<()> {
-        let ctx = crate::introspection::INTROSPECTION_CTX.try_with(|c| c.clone()).ok();
-        self.send_req(crate::git::messages::GitRequestEnvelope { req, ctx })
-            .await
-            .map_err(Into::into)
+        self.tx.send(req).await.map_err(|e| anyhow::anyhow!("MPSC send error: {}", e))
     }
-
-impl AsyncRepository {
+    
+    pub async fn attach_introspection(&self, ctx: crate::introspection::IntrospectionContext) {
+        let (resp, _rx) = oneshot::channel();
+        let _ = self.send_req(GitRequest::SetIntrospection { ctx, resp }).await;
+    }
     pub fn new(path: impl AsRef<Path>) -> Self {
         Self {
             tx: super::actor::GitActor::spawn(),

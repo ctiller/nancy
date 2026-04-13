@@ -36,7 +36,7 @@ impl AgentTaskProcessor for DreamerTaskProcessor {
 
             // Run evaluate events background worker
             {
-                *tree_root.root_frame.status.lock().unwrap() =
+                *tree_root.status.lock().unwrap() =
                     Some("Evaluating Tasks...".to_string());
                 let _ = tree_root.updater.send_modify(|v| *v += 1);
             }

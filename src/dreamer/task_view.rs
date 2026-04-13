@@ -60,7 +60,7 @@ impl TaskViewEvaluator {
 
         let logged_any = crate::introspection::INTROSPECTION_CTX.scope(
             crate::introspection::IntrospectionContext {
-                current_frame: tree_root.root_frame.clone(),
+                current_frame: tree_root.agent_root.clone(),
                 updater: tree_root.updater.clone(),
             },
             async {

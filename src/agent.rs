@@ -52,7 +52,7 @@ impl crate::llm::tool::LlmTool for ExploreFrameTool {
 
     async fn call(&self, args: serde_json::Value) -> anyhow::Result<serde_json::Value> {
         let args: ExploreFrameArgs = serde_json::from_value(args)?;
-        if let Some(target) = self.tree.root_frame.find_frame_by_path(&args.path) {
+        if let Some(target) = self.tree.find_frame_by_path(&args.path) {
             Ok(serde_json::to_value(target.snapshot())?)
         } else {
             Ok(serde_json::json!({"error": "Frame not found at requested path"}))
@@ -162,11 +162,17 @@ pub async fn run_agent<P: AsRef<Path>, Processor: AgentTaskProcessor>(
 
     use crate::introspection::IntrospectionTreeRoot;
     let tree_root = std::sync::Arc::new(IntrospectionTreeRoot::new());
+    
+    let git_ctx = crate::introspection::IntrospectionContext {
+        current_frame: tree_root.git_root.clone(),
+        updater: tree_root.updater.clone(),
+    };
+    repo.attach_introspection(git_ctx).await;
 
     {
         let tree_clone = tree_root.clone();
         let mut rx = tree_clone.receiver.clone();
-        let rollup_ref = tree_clone.root_frame.rollup.clone();
+        let rollup_ref = tree_clone.rollup.clone();
         tokio::spawn(async move {
             loop {
                 tokio::select! {
@@ -185,7 +191,7 @@ pub async fn run_agent<P: AsRef<Path>, Processor: AgentTaskProcessor>(
                     break;
                 }
 
-                let snap = tree_clone.root_frame.snapshot_depth(1);
+                let snap = tree_clone.snapshot_depth(1);
                 let tool = ExploreFrameTool {
                     tree: tree_clone.clone(),
                 };
@@ -256,7 +262,7 @@ pub async fn run_agent<P: AsRef<Path>, Processor: AgentTaskProcessor>(
                     }
 
                     let new_version = *rx.borrow();
-                    let snapshot = state.root_frame.snapshot();
+                    let snapshot = state.snapshot();
 
                     axum::Json(serde_json::json!({
                         "update_number": new_version,
@@ -304,7 +310,7 @@ pub async fn run_agent<P: AsRef<Path>, Processor: AgentTaskProcessor>(
 
         if !processed {
             {
-                let mut status_lock = tree_root.root_frame.status.lock().unwrap();
+                let mut status_lock = tree_root.status.lock().unwrap();
                 if status_lock.as_deref() != Some("Waiting for assignments...") {
                     *status_lock = Some("Waiting for assignments...".to_string());
                     drop(status_lock);

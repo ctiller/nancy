@@ -37,13 +37,13 @@ impl crate::agent::AgentTaskProcessor for GrinderTaskProcessor {
             let assigned = identify_assigned_task(repo, worker_did, coordinator_did).await;
 
             if let Some((task_id, assignment, payload)) = assigned {
-                *tree_root.root_frame.elements.lock().unwrap() = Vec::new();
-                *tree_root.root_frame.status.lock().unwrap() =
+                *tree_root.agent_root.elements.lock().unwrap() = Vec::new();
+                *tree_root.status.lock().unwrap() =
                     Some("Executing Task...".to_string());
                 let _ = tree_root.updater.send_modify(|v| *v += 1);
 
                 let ctx = crate::introspection::IntrospectionContext {
-                    current_frame: tree_root.root_frame.clone(),
+                    current_frame: tree_root.agent_root.clone(),
                     updater: tree_root.updater.clone(),
                 };
 
@@ -235,12 +235,12 @@ mod tests {
         )
         .await?;
 
-        crate::agent::SHUTDOWN.store(false, Ordering::SeqCst);
+        crate::agent::SHUTDOWN.store(false, std::sync::atomic::Ordering::SeqCst);
         tokio::spawn(async {
             for _ in 0..10 {
                 tokio::task::yield_now().await;
             }
-            crate::agent::SHUTDOWN.store(true, Ordering::SeqCst);
+            crate::agent::SHUTDOWN.store(true, std::sync::atomic::Ordering::SeqCst);
             crate::agent::SHUTDOWN_NOTIFY.notify_waiters();
         });
 
@@ -290,12 +290,12 @@ mod tests {
             axum::serve(listener, app).await.unwrap();
         });
 
-        crate::agent::SHUTDOWN.store(false, Ordering::SeqCst);
+        crate::agent::SHUTDOWN.store(false, std::sync::atomic::Ordering::SeqCst);
         tokio::spawn(async {
             for _ in 0..10 {
                 tokio::task::yield_now().await;
             }
-            crate::agent::SHUTDOWN.store(true, Ordering::SeqCst);
+            crate::agent::SHUTDOWN.store(true, std::sync::atomic::Ordering::SeqCst);
             crate::agent::SHUTDOWN_NOTIFY.notify_waiters();
         });
 
