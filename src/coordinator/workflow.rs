@@ -183,15 +183,14 @@ mod tests {
         let nancy_dir = temp_dir.path().join(".nancy");
         fs::create_dir_all(&nancy_dir)?;
 
-        let coordinator_did = "mock_coord_888".to_string();
-        let worker_did = "mock_worker_999".to_string();
+        let coord_owner = crate::schema::identity_config::DidOwner::generate();
+        let coordinator_did = coord_owner.did.clone();
+        
+        let worker_owner = crate::schema::identity_config::DidOwner::generate();
+        let worker_did = worker_owner.did.clone();
 
         let coord_identity = Identity::Coordinator {
-            did: DidOwner {
-                did: coordinator_did.clone(),
-                public_key_hex: "00".to_string(),
-                private_key_hex: "00".to_string(),
-            },
+            did: coord_owner,
             workers: vec![DidOwner {
                 did: worker_did,
                 public_key_hex: "00".to_string(),
@@ -256,12 +255,10 @@ mod tests {
         let repo = &_tr.repo;
         let nancy_dir = temp_dir.path().join(".nancy");
         fs::create_dir_all(&nancy_dir)?;
+        let coord_owner = crate::schema::identity_config::DidOwner::generate();
+        let coord_did = coord_owner.did.clone();
         let coord_identity = Identity::Coordinator {
-            did: DidOwner {
-                did: "mock1".to_string(),
-                public_key_hex: "00".to_string(),
-                private_key_hex: "00".to_string(),
-            },
+            did: coord_owner,
             workers: vec![],
             dreamer: crate::schema::identity_config::DidOwner::generate(),
             human: Some(crate::schema::identity_config::DidOwner::generate()),
@@ -285,7 +282,7 @@ mod tests {
         writer.commit_batch()?;
 
         let mut plan_found = false;
-        let reader = Reader::new(&repo, "mock1".to_string());
+        let reader = Reader::new(&repo, coord_did);
         for ev in reader.iter_events()? {
             if let EventPayload::Task(t) = ev?.payload {
                 if t.action == TaskAction::Plan && t.description == "Test Request" {
@@ -307,17 +304,14 @@ mod tests {
         let repo = &_tr.repo;
         let nancy_dir = temp_dir.path().join(".nancy");
         fs::create_dir_all(&nancy_dir)?;
-        let worker = DidOwner {
-            did: "mockworker".to_string(),
-            public_key_hex: "00".to_string(),
-            private_key_hex: "00".to_string(),
-        };
+        let worker = crate::schema::identity_config::DidOwner::generate();
+        let worker_did = worker.did.clone();
+        
+        let coord_owner = crate::schema::identity_config::DidOwner::generate();
+        let coord_did = coord_owner.did.clone();
+
         let coord_identity = Identity::Coordinator {
-            did: DidOwner {
-                did: "mock1".to_string(),
-                public_key_hex: "00".to_string(),
-                private_key_hex: "00".to_string(),
-            },
+            did: coord_owner,
             workers: vec![worker.clone()],
             dreamer: crate::schema::identity_config::DidOwner::generate(),
             human: Some(crate::schema::identity_config::DidOwner::generate()),
@@ -355,10 +349,10 @@ mod tests {
         writer.commit_batch()?;
 
         let mut assigned = false;
-        let reader = Reader::new(&repo, "mock1".to_string());
+        let reader = Reader::new(&repo, coord_did);
         for ev in reader.iter_events()? {
             if let EventPayload::CoordinatorAssignment(a) = ev?.payload {
-                if a.assignee_did == "mockworker" && a.task_ref == "impl1" {
+                if a.assignee_did == worker_did && a.task_ref == "impl1" {
                     assigned = true;
                 }
             }

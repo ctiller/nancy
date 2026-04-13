@@ -52,7 +52,21 @@ impl<'a> Reader<'a> {
 
         let iter = all_lines
             .into_iter()
-            .map(|line| serde_json::from_str::<EventEnvelope>(&line).map_err(anyhow::Error::from));
+            .map(|line| {
+                let env: EventEnvelope = serde_json::from_str(&line)?;
+                
+                // Native Cryptographic Ed25519 Signature Verification
+                let payload_str = serde_json::to_string(&env.payload)?;
+                let sig_bytes = hex::decode(&env.signature).context("Invalid hex signature bounds")?;
+                let uri = format!("did:key:{}", env.did);
+                let pk = did_key::resolve(&uri).map_err(|e| anyhow!("Failed to resolve DID URI smoothly: {:?}", e))?;
+                
+                use did_key::CoreSign;
+                pk.verify(payload_str.as_bytes(), &sig_bytes)
+                    .map_err(|_| anyhow!("Cryptographic signature verification failed efficiently for Event {}", env.id))?;
+                
+                Ok(env)
+            });
 
         Ok(iter)
     }
@@ -87,9 +101,19 @@ impl<'a> Reader<'a> {
             let content = std::str::from_utf8(blob.content())?;
             for (line_index, line) in content.trim().split('\n').enumerate() {
                 if !line.is_empty() {
-                    if let Ok(env) = serde_json::from_str::<serde_json::Value>(line) {
-                        if let Some(id) = env.get("id").and_then(|v| v.as_str()) {
-                            index.insert_event(id, &self.did, &log_file, line_index)?;
+                    if let Ok(env) = serde_json::from_str::<EventEnvelope>(line) {
+                        use did_key::CoreSign;
+                        if let Ok(payload_str) = serde_json::to_string(&env.payload) {
+                            if let Ok(sig_bytes) = hex::decode(&env.signature) {
+                                let uri = format!("did:key:{}", env.did);
+                                if let Ok(pk) = did_key::resolve(&uri) {
+                                    if pk.verify(payload_str.as_bytes(), &sig_bytes).is_ok() {
+                                        index.insert_event(&env.id, &self.did, &log_file, line_index)?;
+                                    } else {
+                                        tracing::error!("Signature spoof explicitly detected securely bound! Dropping event {}", env.id);
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -157,6 +181,23 @@ mod tests {
         assert_eq!(lookup_res.0, did);
         assert_eq!(lookup_res.2, 0, "Line index should be 0");
 
+        Ok(())
+    }
+
+    use did_key::CoreSign;
+
+    #[test]
+    fn test_explore_verify_api() -> Result<()> {
+        let key = did_key::generate::<Ed25519KeyPair>(None);
+        let did = key.fingerprint();
+        let payload_str = "hello".to_string();
+        let sig = key.sign(payload_str.as_bytes());
+        
+        let uri = format!("did:key:{}", did);
+        let public_key_from_did = did_key::resolve(&uri).unwrap();
+        // Use did_key::CoreSign which has verify
+        public_key_from_did.verify(payload_str.as_bytes(), &sig).unwrap();
+        
         Ok(())
     }
 }

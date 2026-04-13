@@ -29,20 +29,11 @@ async fn test_coordinator_generates_plan_from_task_request() -> Result<()> {
     let nancy_dir = temp_dir.path().join(".nancy");
     fs::create_dir_all(&nancy_dir)?;
 
-    let coord_did = "mock_coord_888".to_string();
-    let worker_did = "mock_worker_999".to_string();
-
+    let coord_owner = nancy::schema::identity_config::DidOwner::generate();
+    let worker_owner = nancy::schema::identity_config::DidOwner::generate();
     let coord_identity = Identity::Coordinator {
-        did: DidOwner {
-            did: coord_did.clone(),
-            public_key_hex: "00".to_string(),
-            private_key_hex: "00".to_string(),
-        },
-        workers: vec![DidOwner {
-            did: worker_did.clone(),
-            public_key_hex: "00".to_string(),
-            private_key_hex: "00".to_string(),
-        }],
+        did: coord_owner,
+        workers: vec![worker_owner],
         dreamer: nancy::schema::identity_config::DidOwner::generate(),
         human: Some(nancy::schema::identity_config::DidOwner::generate()),
     };
@@ -108,17 +99,13 @@ async fn test_coordinator_generates_review_plan_task_upon_plan_completion() -> R
     let nancy_dir = temp_dir.path().join(".nancy");
     fs::create_dir_all(&nancy_dir)?;
 
+    let coord_owner = nancy::schema::identity_config::DidOwner::generate();
+    let worker_owner = nancy::schema::identity_config::DidOwner::generate();
+    let worker_did = worker_owner.did.clone();
+
     let coord_identity = Identity::Coordinator {
-        did: DidOwner {
-            did: "coord".into(),
-            public_key_hex: "00".into(),
-            private_key_hex: "00".into(),
-        },
-        workers: vec![DidOwner {
-            did: "worker".into(),
-            public_key_hex: "00".into(),
-            private_key_hex: "00".into(),
-        }],
+        did: coord_owner,
+        workers: vec![worker_owner],
         dreamer: nancy::schema::identity_config::DidOwner::generate(),
         human: Some(nancy::schema::identity_config::DidOwner::generate()),
     };
@@ -148,7 +135,7 @@ async fn test_coordinator_generates_review_plan_task_upon_plan_completion() -> R
     let assign_id = writer.log_event(EventPayload::CoordinatorAssignment(
         nancy::schema::task::CoordinatorAssignmentPayload {
             task_ref: "plan_01".into(),
-            assignee_did: "worker".into(),
+            assignee_did: worker_did,
         },
     ))?;
     writer.log_event(EventPayload::AssignmentComplete(
@@ -192,17 +179,13 @@ async fn test_coordinator_inherits_task_parent_from_feature_branch() -> Result<(
     let nancy_dir = temp_dir.path().join(".nancy");
     fs::create_dir_all(&nancy_dir)?;
 
+    let coord_owner = nancy::schema::identity_config::DidOwner::generate();
+    let worker_owner = nancy::schema::identity_config::DidOwner::generate();
+    let worker_did = worker_owner.did.clone();
+
     let coord_identity = Identity::Coordinator {
-        did: DidOwner {
-            did: "coord".into(),
-            public_key_hex: "00".into(),
-            private_key_hex: "00".into(),
-        },
-        workers: vec![DidOwner {
-            did: "worker".into(),
-            public_key_hex: "00".into(),
-            private_key_hex: "00".into(),
-        }],
+        did: coord_owner,
+        workers: vec![worker_owner],
         dreamer: nancy::schema::identity_config::DidOwner::generate(),
         human: Some(nancy::schema::identity_config::DidOwner::generate()),
     };
@@ -432,12 +415,9 @@ async fn test_identify_assigned_task_discovers_payload_via_local_index() -> Resu
     let tree = repo.find_tree(tree_id)?;
     repo.commit(Some("refs/heads/main"), &sig, &sig, "init main", &tree, &[])?;
 
-    let worker_did = "worker1";
-    let worker_id = Identity::Grinder(DidOwner {
-        did: worker_did.into(),
-        public_key_hex: "00".into(),
-        private_key_hex: "00".into(),
-    });
+    let worker_owner = DidOwner::generate();
+    let worker_did = worker_owner.did.clone();
+    let worker_id = Identity::Grinder(worker_owner.clone());
     
     let worker_writer = Writer::new(&repo, worker_id.clone())?;
     let task_payload = EventPayload::Task(nancy::schema::task::TaskPayload {
@@ -452,18 +432,13 @@ async fn test_identify_assigned_task_discovers_payload_via_local_index() -> Resu
     worker_writer.log_event_with_id_override(task_payload, "task_eval_1".into())?;
     worker_writer.commit_batch()?;
 
-    let coord_did = "coord1";
+    let coord_owner = DidOwner::generate();
+    let coord_did_str = coord_owner.did.clone();
+    let coord_did = coord_did_str.as_str();
+    
     let coord_id = Identity::Coordinator {
-        did: DidOwner {
-            did: coord_did.into(),
-            public_key_hex: "00".into(),
-            private_key_hex: "00".into(),
-        },
-        workers: vec![DidOwner {
-            did: worker_did.into(),
-            public_key_hex: "00".into(),
-            private_key_hex: "00".into(),
-        }],
+        did: coord_owner,
+        workers: vec![worker_owner],
         dreamer: DidOwner::generate(),
         human: None,
     };
@@ -471,13 +446,13 @@ async fn test_identify_assigned_task_discovers_payload_via_local_index() -> Resu
     let coord_writer = Writer::new(&repo, coord_id.clone())?;
     let assignment = EventPayload::CoordinatorAssignment(nancy::schema::task::CoordinatorAssignmentPayload {
         task_ref: "task_eval_1".into(),
-        assignee_did: worker_did.into(),
+        assignee_did: worker_did.clone(),
     });
     coord_writer.log_event(assignment)?;
     coord_writer.commit_batch()?;
 
     // Ensure TaskManager inside identify_assigned_task inherently syncs index natively
-    let assigned = nancy::commands::grind::identify_assigned_task(&repo, worker_did, coord_did);
+    let assigned = nancy::commands::grind::identify_assigned_task(&repo, &worker_did, coord_did);
     
     assert!(assigned.is_some(), "Identify assigned task failed to cross-resolve raw payload via LocalIndex!");
     let (_, assignment_payload, raw_task_payload) = assigned.unwrap();

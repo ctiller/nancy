@@ -248,12 +248,9 @@ mod tests {
         let mut _tr = crate::debug::test_repo::TestRepo::new().unwrap();
         let repo = &_tr.repo;
 
+        let coord_owner = crate::schema::identity_config::DidOwner::generate();
         let id_obj = Identity::Coordinator {
-            did: DidOwner {
-                did: "coord".into(),
-                public_key_hex: "00".into(),
-                private_key_hex: "00".into(),
-            },
+            did: coord_owner,
             workers: vec![],
             dreamer: crate::schema::identity_config::DidOwner::generate(),
             human: Some(crate::schema::identity_config::DidOwner::generate()),
@@ -306,12 +303,9 @@ mod tests {
         let target_repo = &tr.repo;
 
         use crate::schema::identity_config::*;
+        let coord_owner = crate::schema::identity_config::DidOwner::generate();
         let coord_identity = Identity::Coordinator {
-            did: DidOwner {
-                did: "mock_test_1".to_string(),
-                public_key_hex: "00".to_string(),
-                private_key_hex: "00".to_string(),
-            },
+            did: coord_owner,
             workers: vec![],
             dreamer: crate::schema::identity_config::DidOwner::generate(),
             human: Some(crate::schema::identity_config::DidOwner::generate()),
