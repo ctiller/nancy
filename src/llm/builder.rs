@@ -3,6 +3,7 @@ use anyhow::Context;
 
 #[derive(Clone, Copy)]
 pub enum Kind {
+    Lite,
     Fast,
     Thinking,
     Flexible(f64),
@@ -30,6 +31,10 @@ pub struct LlmBuilder {
     task_priority: crate::llm::client::TaskPriorityFn,
     local_market_weight: f64,
     max_history: usize,
+}
+
+pub fn lite_llm(name: &str) -> LlmBuilder {
+    LlmBuilder::new(Kind::Lite, name)
 }
 
 pub fn fast_llm(name: &str) -> LlmBuilder {
@@ -219,6 +224,8 @@ impl LlmBuilder {
 
     pub fn resolve_model(kind: &Kind, version: &Version) -> schema::LlmModel {
         match (kind, version) {
+            (Kind::Lite, Version::V2_5) => schema::LlmModel::Gemini25FlashLite,
+            (Kind::Lite, Version::V3_1) => schema::LlmModel::Gemini31FlashLitePreview,
             (Kind::Fast, Version::V2_5) => schema::LlmModel::Gemini25Flash,
             (Kind::Fast, Version::V3_1) => schema::LlmModel::Gemini30FlashPreview,
             (Kind::Thinking, Version::V2_5) | (Kind::Flexible(_), Version::V2_5) => {
@@ -237,6 +244,14 @@ mod tests {
 
     #[test]
     fn test_resolve_model() {
+        assert_eq!(
+            LlmBuilder::resolve_model(&Kind::Lite, &Version::V2_5),
+            schema::LlmModel::Gemini25FlashLite
+        );
+        assert_eq!(
+            LlmBuilder::resolve_model(&Kind::Lite, &Version::V3_1),
+            schema::LlmModel::Gemini31FlashLitePreview
+        );
         assert_eq!(
             LlmBuilder::resolve_model(&Kind::Fast, &Version::V2_5),
             schema::LlmModel::Gemini25Flash
