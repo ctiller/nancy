@@ -187,7 +187,7 @@ pub async fn run_agent<P: AsRef<Path>, Processor: AgentTaskProcessor>(
                 let tool = ExploreFrameTool {
                     tree: tree_clone.clone(),
                 };
-                if let Ok(mut llm) = crate::llm::builder::fast_llm("status_rollup")
+                if let Ok(mut llm) = crate::llm::builder::lite_llm("status_rollup")
                     .tool(Box::new(tool))
                     .with_market_weight(0.1)
                     .build()

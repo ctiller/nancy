@@ -269,4 +269,19 @@ mod tests {
             schema::LlmModel::Gemini31ProPreview
         );
     }
+
+    #[test]
+    fn test_llm_constructors() {
+        let lite = lite_llm("test_lite");
+        assert!(lite.subagent.starts_with("test_lite_"));
+        assert!(matches!(lite.kind, Kind::Fast)); // in tests, it defaults to Fast
+
+        let fast = fast_llm("test_fast");
+        assert!(fast.subagent.starts_with("test_fast_"));
+        assert!(matches!(fast.kind, Kind::Fast));
+
+        let thinking = thinking_llm("test_thinking");
+        assert!(thinking.subagent.starts_with("test_thinking_"));
+        assert!(matches!(thinking.kind, Kind::Fast)); // in tests, it defaults to Fast
+    }
 }
