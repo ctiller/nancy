@@ -60,6 +60,7 @@ time = { version = "0.3", features = ["local-offset", "formatting", "macros"] }
 ansi-to-html = "0.2.2"
 axum-server = { version = "0.8.0", features = ["tls-rustls"] }
 rcgen = "0.14.7"
+backoff = { version = "0.4.0", features = ["tokio"] }
 
 [dev-dependencies]
 proptest = "1.4.0"

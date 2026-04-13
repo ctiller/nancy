@@ -1,6 +1,7 @@
 use crate::llm::api::{Gemini, GeminiResponse, Session, SystemInstruction, Tool};
 use anyhow::{Context, bail};
 use askama::Template;
+use backoff::backoff::Backoff;
 use schemars::JsonSchema;
 use serde::de::DeserializeOwned;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -56,24 +57,16 @@ pub struct LlmClient {
     pub local_market_weight: f64,
 }
 
-fn should_retry(err: &crate::llm::api::GeminiError) -> Option<Duration> {
+fn is_retryable(err: &crate::llm::api::GeminiError) -> bool {
     match err {
-        crate::llm::api::GeminiError::ResourceExhausted => Some(Duration::from_secs(10)),
+        crate::llm::api::GeminiError::ResourceExhausted => true,
         crate::llm::api::GeminiError::ApiStatus { status, .. } => {
-            if status.contains("429") {
-                Some(Duration::from_secs(10))
-            } else {
-                None
-            }
+            status.contains("429") || status.contains("500") || status.contains("502") || status.contains("503") || status.contains("504")
         }
         crate::llm::api::GeminiError::Reqwest(re) => {
-            if re.is_timeout() || re.is_connect() {
-                Some(Duration::from_secs(5))
-            } else {
-                None
-            }
+            re.is_timeout() || re.is_connect()
         }
-        _ => None,
+        _ => false,
     }
 }
 
@@ -479,6 +472,7 @@ impl LlmClient {
             let mut thought_str = String::new();
             // Loop for retries
             let mut retry_count = 0;
+            let mut backoff = backoff::ExponentialBackoff::default();
             let resp: GeminiResponse = loop {
                 let stream_handle = std::sync::Arc::new(std::sync::Mutex::new(
                     None::<crate::introspection::StreamHandle>,
@@ -547,15 +541,16 @@ impl LlmClient {
                 match ask_res {
                     Ok(r) => break r,
                     Err(e) => {
-                        if let Some(duration) = should_retry(&e) {
+                        if is_retryable(&e) {
                             if retry_count > 5 {
                                 bail!("Max retries exceeded for Gemini API: {}", e)
                             }
+                            let duration = backoff.next_backoff().unwrap_or(std::time::Duration::from_secs(10));
                             retry_count += 1;
                             crate::introspection::log(&format!(
-                                "⚠️ API Error: {}. Retrying in {}s (Attempt {}/5)",
+                                "⚠️ API Error: {}. Retrying in {:.1}s (Attempt {}/5)",
                                 e,
-                                duration.as_secs(),
+                                duration.as_secs_f32(),
                                 retry_count
                             ));
                             sleep(duration).await;
@@ -803,11 +798,10 @@ mod tests {
     }
 
     #[test]
-    fn test_should_retry_429() {
+    fn test_is_retryable() {
         let err = crate::llm::api::GeminiError::ResourceExhausted;
-
-        let duration = should_retry(&err);
-        assert_eq!(duration, Some(Duration::from_secs(10)));
+        let is_ret = is_retryable(&err);
+        assert_eq!(is_ret, true);
     }
 
     #[derive(Debug)]
