@@ -66,13 +66,15 @@ pub struct IdeationPromptTemplate<'a> {
 #[derive(Template)]
 #[template(
     source = r#"Task: {{ task_description }}
-Preconditions: {{ preconditions }}
+Preconditions:
+{% for cond in preconditions %}- {{ cond }}
+{% endfor %}
 
 {% if iteration == 1 %}Experts Ideations:
 {{ iter_context }}{% else %}Feedback from previous iterations:
 {{ iter_context }}{% endif %}
 
-Synthesize this into a cohesive plan, and return a JSON object with `tdd` containing the structured TddDocument object, and `tasks` containing the DAG implementation mapping. Use valid actions. Each task output requires a unique `id` and `depends_on` array expressing explicit topological DAG blocks. Empty arrays indicate no dependencies.
+Synthesize this into a cohesive plan, and return a JSON object with `tdd` containing the structured TddDocument object, and `tasks` containing the DAG implementation mapping. Use valid actions. Each task output requires a unique `id` and `depends_on` array expressing explicit topological DAG blocks. Empty arrays indicate no dependencies. For `preconditions` and `postconditions` mapping, ensure you output string arrays `[...]` representing explicitly testable bounds dynamically.
 
 Remember the overall system flow:
 1. This plan will be reviewed by an expert panel of agents.
@@ -82,7 +84,7 @@ Remember the overall system flow:
 )]
 pub struct SynthesisPromptTemplate<'a> {
     pub task_description: &'a str,
-    pub preconditions: &'a str,
+    pub preconditions: &'a [String],
     pub iter_context: &'a str,
     pub iteration: u32,
 }

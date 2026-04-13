@@ -31,8 +31,8 @@ pub enum TaskAction {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct TaskPayload {
     pub description: String,
-    pub preconditions: String,
-    pub postconditions: String,
+    pub preconditions: Vec<String>,
+    pub postconditions: Vec<String>,
     pub parent_branch: String,
     pub action: TaskAction,
     pub branch: String,

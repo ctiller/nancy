@@ -145,8 +145,8 @@ async fn handle_task_requests(
 
         let plan_task = EventPayload::Task(TaskPayload {
             description: r.description.clone(),
-            preconditions: "User Request".to_string(),
-            postconditions: "Generated Implementation DAG".to_string(),
+            preconditions: vec!["User Request".to_string()],
+            postconditions: vec!["Generated Implementation DAG".to_string()],
             parent_branch: target_branch.clone(),
             action: TaskAction::Plan,
             branch: target_branch,
