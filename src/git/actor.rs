@@ -207,7 +207,8 @@ impl GitActor {
                 }
                 GitRequest::Merge { branch_name, resp } => {
                     let res = self.with_repo(|repo| {
-                        let fetch_head = repo.find_reference(&branch_name)?;
+                        let fetch_head = repo.find_reference(&branch_name)
+                            .or_else(|_| repo.find_reference(&format!("refs/heads/{}", branch_name)))?;
                         let fetch_commit = repo.reference_to_annotated_commit(&fetch_head)?;
 
                         // Merge analysis

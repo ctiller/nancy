@@ -858,7 +858,7 @@ mod tests {
             description: "fake".into(),
             preconditions: vec![],
             postconditions: vec![],
-            parent_branch: "fake".into(),
+            parent_branch: "HEAD".into(),
             action: TaskAction::Implement,
             branch: "missing_branch_throws_errors".into(),
             plan: None,
@@ -917,7 +917,7 @@ mod tests {
             description: "fake".into(),
             preconditions: vec![],
             postconditions: vec![],
-            parent_branch: "fake".into(),
+            parent_branch: "HEAD".into(),
             action: TaskAction::Plan,
             branch: "working_branch".into(),
             plan: None,
@@ -936,7 +936,7 @@ mod tests {
             builder = builder.respond("Expert ideation...");
         }
 
-        builder = builder.respond(r#"{"tdd": {"title": "T", "summary": "S", "background_context": "", "goals": ["G"], "non_goals": [], "proposed_design": ["D"], "risks_and_tradeoffs": [], "alternatives_considered": []}, "tasks": [{"id": "t1", "description": "foo", "preconditions": "foo", "postconditions": "foo", "parent_branch": "foo", "action": "implement", "branch": "foo", "depends_on": []}]}"#);
+        builder = builder.respond(r#"{"tdd": {"title": "T", "summary": "S", "background_context": "", "goals": ["G"], "non_goals": [], "proposed_design": ["D"], "risks_and_tradeoffs": [], "alternatives_considered": []}, "tasks": [{"id": "t1", "description": "foo", "preconditions": ["foo"], "postconditions": ["foo"], "parent_branch": "foo", "action": "implement", "branch": "foo", "depends_on": []}]}"#);
 
         for _ in 0..30 {
             builder = builder
@@ -989,13 +989,13 @@ mod tests {
         let nancy_dir = td.path().join(".nancy");
         tokio::fs::create_dir_all(&nancy_dir).await?;
 
-        crate::llm::mock::builder::MockChatBuilder::new()
-            .respond(r#"{"passed": true, "failed_reason": "", "remedy_task_description": ""}"#)
+        let mut builder = crate::llm::mock::builder::MockChatBuilder::new()
             .respond("Implemented safely bounded!")
-            .respond(r#"{"passed": true, "failed_reason": "", "remedy_task_description": ""}"#)
-            .respond(r#"{"experts": ["Tester"]}"#)
-            .respond(r#"{"vote": "approve", "agree_notes": "LGTM", "disagree_notes": ""}"#)
-            .commit();
+            .respond(r#"{"experts": ["Tester"]}"#);
+        for _ in 0..10 {
+            builder = builder.respond(r#"{"vote": "approve", "agree_notes": "LGTM", "disagree_notes": ""}"#);
+        }
+        builder.commit();
 
         let identity = Identity::Grinder(DidOwner {
             did: "mock1".into(),
@@ -1007,7 +1007,7 @@ mod tests {
             description: "fake impl".into(),
             preconditions: vec![],
             postconditions: vec![],
-            parent_branch: "fake".into(),
+            parent_branch: "main".into(),
             action: TaskAction::Implement,
             branch: "working_branch".into(),
             plan: None,
@@ -1089,7 +1089,7 @@ mod tests {
             description: "fake".into(),
             preconditions: vec![],
             postconditions: vec![],
-            parent_branch: "fake".into(),
+            parent_branch: "HEAD".into(),
             action: TaskAction::Plan,
             branch: "working_branch".into(),
             plan: None,
@@ -1153,9 +1153,9 @@ mod tests {
             // Iteration 1: Return parse error array payload
             .respond(r#"["unparsable]"#)
             // Iteration 2: Return structural self-cycle to trigger DAG bounds
-            .respond(r#"{"tdd": {"title": "T", "summary": "S", "background_context": "", "goals": ["G"], "non_goals": [], "proposed_design": ["D"], "risks_and_tradeoffs": [], "alternatives_considered": []}, "tasks": [{"id": "t1", "description": "", "preconditions": "", "postconditions": "", "parent_branch": "", "action": "implement", "branch": "", "depends_on": ["t1"]}]}"#)
+            .respond(r#"{"tdd": {"title": "T", "summary": "S", "background_context": "", "goals": ["G"], "non_goals": [], "proposed_design": ["D"], "risks_and_tradeoffs": [], "alternatives_considered": []}, "tasks": [{"id": "t1", "description": "", "preconditions": [], "postconditions": [], "parent_branch": "", "action": "implement", "branch": "", "depends_on": ["t1"]}]}"#)
             // Iteration 3: Structurally valid mapping including a BlockedBy target naturally triggering events
-            .respond(r#"{"tdd": {"title": "T", "summary": "S", "background_context": "", "goals": ["G"], "non_goals": [], "proposed_design": ["D"], "risks_and_tradeoffs": [], "alternatives_considered": []}, "tasks": [{"id": "t1", "description": "", "preconditions": "", "postconditions": "", "parent_branch": "", "action": "implement", "branch": "", "depends_on": []}, {"id": "t2", "description": "", "preconditions": "", "postconditions": "", "parent_branch": "", "action": "implement", "branch": "", "depends_on": ["t1"]}]}"#);
+            .respond(r#"{"tdd": {"title": "T", "summary": "S", "background_context": "", "goals": ["G"], "non_goals": [], "proposed_design": ["D"], "risks_and_tradeoffs": [], "alternatives_considered": []}, "tasks": [{"id": "t1", "description": "", "preconditions": [], "postconditions": [], "parent_branch": "", "action": "implement", "branch": "", "depends_on": []}, {"id": "t2", "description": "", "preconditions": [], "postconditions": [], "parent_branch": "", "action": "implement", "branch": "", "depends_on": ["t1"]}]}"#);
 
         // Iteration 3 formal review mapping triggering rejection to evaluate coverage iteratively (Grace Round = 2 reviewers due to Mandatory Team Player)
         builder = builder
@@ -1163,7 +1163,7 @@ mod tests {
             .respond(r#"{"vote": "changes_required", "agree_notes": "", "disagree_notes": "Needs rework"}"#);
 
         // Iteration 4: Moderator resynthesizes plan
-        builder = builder.respond(r#"{"tdd": {"title": "T", "summary": "S", "background_context": "", "goals": ["G"], "non_goals": [], "proposed_design": ["D"], "risks_and_tradeoffs": [], "alternatives_considered": []}, "tasks": [{"id": "t1", "description": "", "preconditions": "", "postconditions": "", "parent_branch": "", "action": "implement", "branch": "", "depends_on": []}, {"id": "t2", "description": "", "preconditions": "", "postconditions": "", "parent_branch": "", "action": "implement", "branch": "", "depends_on": ["t1"]}]}"#);
+        builder = builder.respond(r#"{"tdd": {"title": "T", "summary": "S", "background_context": "", "goals": ["G"], "non_goals": [], "proposed_design": ["D"], "risks_and_tradeoffs": [], "alternatives_considered": []}, "tasks": [{"id": "t1", "description": "", "preconditions": [], "postconditions": [], "parent_branch": "", "action": "implement", "branch": "", "depends_on": []}, {"id": "t2", "description": "", "preconditions": [], "postconditions": [], "parent_branch": "", "action": "implement", "branch": "", "depends_on": ["t1"]}]}"#);
 
         // Iteration 4: Formal review accepts
         for _ in 0..30 {
@@ -1183,7 +1183,7 @@ mod tests {
             description: "fake".into(),
             preconditions: vec![],
             postconditions: vec![],
-            parent_branch: "fake".into(),
+            parent_branch: "HEAD".into(),
             action: TaskAction::Plan,
             branch: "working_branch".into(),
             plan: None,
