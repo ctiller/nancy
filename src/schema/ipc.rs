@@ -94,4 +94,5 @@ pub struct MarketStateResponse {
     pub pending_bids: Vec<PendingBidInfo>,
     pub active_leases: Vec<RequestModelResponse>,
     pub budget_pool_usd: f64,
+    pub subagent_costs: Vec<(String, f64)>,
 }

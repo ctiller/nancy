@@ -159,6 +159,29 @@ pub fn logs_view() -> Html {
                                         }})}
                                     </div>
                                 </div>
+                                <div class="glass-panel" style="padding: 20px;">
+                                    <h3>{ "Subagent Costs" }</h3>
+                                    <div style="display: flex; flex-direction: column; gap: 10px; max-height: 400px; overflow-y: auto;">
+                                        <table style="width: 100%; border-collapse: collapse; text-align: left;">
+                                            <thead>
+                                                <tr style="border-bottom: 1px solid rgba(255,255,255,0.2);">
+                                                    <th style="padding: 10px;">{"Subagent Path"}</th>
+                                                    <th style="padding: 10px;">{"Total Cost USD"}</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                { for state.subagent_costs.iter().map(|(agent, cost)| {
+                                                    html! {
+                                                        <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+                                                            <td style="padding: 10px; font-family: monospace; word-break: break-all;">{ agent.clone() }</td>
+                                                            <td style="padding: 10px; font-weight: bold; color: var(--accent-light);">{ format!("${:.5}", cost) }</td>
+                                                        </tr>
+                                                    }
+                                                })}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     }

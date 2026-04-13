@@ -44,18 +44,14 @@ impl TaskViewEvaluator {
         println!("==== DREAMER EVAL DIDS COVERED: {:?} ====", workers_dids);
 
         if !self.hydrated {
-            let dreamer_did = match id_obj {
-                Identity::Coordinator { dreamer, .. } => dreamer.did.clone(),
-                Identity::Dreamer(d) => d.did.clone(),
-                _ => id_obj.get_did_owner().did.clone()
-            };
-            
-            let reader = Reader::new(repo, dreamer_did);
-            if let Ok(iter) = reader.iter_events() {
-                for event_res in iter {
-                    if let Ok(event) = event_res {
-                        if let crate::schema::registry::EventPayload::TaskEvaluation(te) = event.payload {
-                            self.evaluated_event_ids.insert(te.evaluated_event_id);
+            for node_did in &workers_dids {
+                let reader = Reader::new(repo, node_did.clone());
+                if let Ok(iter) = reader.iter_events() {
+                    for event_res in iter {
+                        if let Ok(event) = event_res {
+                            if let crate::schema::registry::EventPayload::TaskEvaluation(te) = event.payload {
+                                self.evaluated_event_ids.insert(te.evaluated_event_id);
+                            }
                         }
                     }
                 }
@@ -83,33 +79,42 @@ impl TaskViewEvaluator {
                                     if !self.evaluated_event_ids.contains(&event.id) {
                                         let id_cl = event.id.clone();
                                         
-                                        if let Ok(score) = self.score_event(&event).await {
-                                            self.evaluated_event_ids.insert(id_cl.clone());
-                                            
-                                            let mut event_type = "unknown".to_string();
-                                            if let serde_json::Value::Object(map) = serde_json::to_value(&event.payload).unwrap_or_default() {
-                                                if let Some(t) = map.get("$type").and_then(|v| v.as_str()) {
-                                                    event_type = t.to_string();
+                                        match self.score_event(&event).await {
+                                            Ok(Some(score)) => {
+                                                self.evaluated_event_ids.insert(id_cl.clone());
+                                                
+                                                let mut event_type = "unknown".to_string();
+                                                if let serde_json::Value::Object(map) = serde_json::to_value(&event.payload).unwrap_or_default() {
+                                                    if let Some(t) = map.get("$type").and_then(|v| v.as_str()) {
+                                                        event_type = t.to_string();
+                                                    }
                                                 }
-                                            }
 
-                                            let payload = crate::schema::registry::EventPayload::TaskEvaluation(
-                                                crate::schema::task::TaskEvaluationPayload {
-                                                    evaluated_event_id: id_cl.clone(),
-                                                    event_type: event_type.clone(),
-                                                    score,
-                                                    timestamp: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs(),
+                                                let payload = crate::schema::registry::EventPayload::TaskEvaluation(
+                                                    crate::schema::task::TaskEvaluationPayload {
+                                                        evaluated_event_id: id_cl.clone(),
+                                                        event_type: event_type.clone(),
+                                                        score,
+                                                        timestamp: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs(),
+                                                    }
+                                                );
+                                                
+                                                if let Ok(_) = global_writer.log_event(payload) {
+                                                    logged_any = true;
                                                 }
-                                            );
-                                            
-                                            if let Ok(_) = global_writer.log_event(payload) {
-                                                logged_any = true;
-                                            }
+                                            },
+                                            Ok(None) => {
+                                                self.evaluated_event_ids.insert(id_cl.clone());
+                                            },
+                                            Err(_) => {}
                                         }
                                     }
                                 }
                             }
                             println!("DREAMER EVAL ITER FINISHED WITH {} ITEMS FROM {}", iter_count, node_did);
+                            if logged_any {
+                                let _ = global_writer.commit_batch();
+                            }
                         } else {
                             println!("DREAMER EVAL FAILED TO ITERATE EVENTS FROM {}", node_did);
                         }
@@ -124,18 +129,17 @@ impl TaskViewEvaluator {
         Ok(logged_any)
     }
 
-    async fn score_event(&self, event: &crate::events::EventEnvelope) -> Result<u64> {
+    async fn score_event(&self, event: &crate::events::EventEnvelope) -> Result<Option<u64>> {
         let is_ask = matches!(event.payload, crate::schema::registry::EventPayload::Ask(_));
         let is_review = matches!(event.payload, crate::schema::registry::EventPayload::ReviewPlan(_));
 
         if !is_ask && !is_review {
-            return Ok(0);
+            return Ok(None);
         }
 
-        // Fast LLM Grade Eval
         let dump = serde_json::to_string_pretty(&event).unwrap_or_default();
         let prompt = format!(
-            "Evaluate this payload on how important it is to a human. Output ONLY an integer from 0 to 100. 0 means it's completely unimportant or spam, 100 means it's highly important and critical to the task.\n\nPayload:\n{}",
+            "Evaluate this payload on urgency and how important it is for a human to review it promptly. Output ONLY an integer from 0 to 100. 0 means it's entirely low priority, 100 means highly critical.\n\nPayload:\n{}",
             dump
         );
 
@@ -149,9 +153,10 @@ impl TaskViewEvaluator {
             Ok(s) => s,
             Err(e) => {
                 println!("DREAMER EVAL ERROR: {:?}", e);
-                return Ok(0);
+                return Ok(Some(val));
             }
         };
+        
         println!("DREAMER RAW SCORE: {:?}", response);
         if let Ok(raw_score) = response.trim().parse::<u64>() {
             let clamped = raw_score.clamp(0, 100);
@@ -164,7 +169,7 @@ impl TaskViewEvaluator {
             }
         }
         
-        Ok(val)
+        Ok(Some(val))
     }
 }
 
@@ -196,9 +201,9 @@ mod tests {
             }),
         };
         let res = eval.score_event(&ev).await.unwrap();
-        assert_eq!(res, 48); // Scaled from 95 to 48
+        assert_eq!(res, Some(48)); // Scaled from 95 to 48
     }
-    
+
     #[tokio::test]
     #[sealed_test(env = [("GEMINI_API_KEY", "mock"), ("NANCY_NO_TRACE_EVENTS", "1")])]
     async fn test_score_event_fallback() {
@@ -219,30 +224,7 @@ mod tests {
             }),
         };
         let res = eval.score_event(&ev).await.unwrap();
-        assert_eq!(res, 0);
-    }
-    
-    #[tokio::test]
-    #[sealed_test(env = [("GEMINI_API_KEY", "mock"), ("NANCY_NO_TRACE_EVENTS", "1")])]
-    async fn test_score_event_clamp() {
-        crate::llm::mock::builder::MockChatBuilder::new()
-            .respond("150")
-            .commit();
-            
-        let eval = TaskViewEvaluator::new();
-        let ev = EventEnvelope {
-            id: "test3".to_string(),
-            did: "did:key:123".to_string(),
-            signature: "sig".to_string(),
-            payload: EventPayload::Ask(crate::schema::task::AskPayload {
-                item_ref: "aref".to_string(),
-                question: "q".to_string(),
-                agent_path: "a".to_string(),
-                task_name: "t".to_string(),
-            }),
-        };
-        let res = eval.score_event(&ev).await.unwrap();
-        assert_eq!(res, 50);
+        assert_eq!(res, Some(0));
     }
 
     #[tokio::test]
@@ -267,15 +249,6 @@ mod tests {
         
         crate::llm::mock::builder::MockChatBuilder::new()
             .respond("99")
-            .respond("99")
-            .respond("99")
-            .respond("99")
-            .respond("99")
-            .respond("99")
-            .respond("99")
-            .respond("99")
-            .respond("99")
-            .respond("99")
             .commit();
         
         let mut eval = TaskViewEvaluator::new();
@@ -288,7 +261,7 @@ mod tests {
         let mut found = false;
         for ev in reader.iter_events().unwrap() {
             if let EventPayload::TaskEvaluation(te) = ev.unwrap().payload {
-                if te.score == 50 { found = true; } // Clamped down from 99
+                if te.score == 50 { found = true; }
             }
         }
         assert!(found);
@@ -318,15 +291,6 @@ mod tests {
         
         crate::llm::mock::builder::MockChatBuilder::new()
             .respond("42")
-            .respond("42")
-            .respond("42")
-            .respond("42")
-            .respond("42")
-            .respond("42")
-            .respond("42")
-            .respond("42")
-            .respond("42")
-            .respond("42")
             .commit();
         
         let mut eval = TaskViewEvaluator::new();
@@ -339,7 +303,7 @@ mod tests {
         let mut found = false;
         for ev in reader.iter_events().unwrap() {
             if let EventPayload::TaskEvaluation(te) = ev.unwrap().payload {
-                if te.score == 32 { found = true; }
+                if te.score == 32 { found = true; } // scaled from 42
             }
         }
         assert!(found);

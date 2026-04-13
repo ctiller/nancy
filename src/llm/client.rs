@@ -513,7 +513,7 @@ impl LlmClient {
                         model: serde_json::from_value(serde_json::Value::String(gemini.model.clone())).unwrap_or(schema::LlmModel::TestMockModel),
                         input_tokens,
                         output_tokens,
-                        agent_path: String::new(),
+                        agent_path: self.subagent.clone(),
                         task_name: String::new(),
                     };
                     if let Ok(res) = client.post("http://localhost/llm-usage").json(&payload).send().await {

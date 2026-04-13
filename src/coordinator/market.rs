@@ -49,6 +49,7 @@ pub struct ArbitrationMarket {
     pub active_quotas: HashMap<schema::LlmModel, ActiveQuotas>,
     pub lease_history: HashMap<schema::LlmModel, VecDeque<u64>>,
     pub historical_rates: HashMap<schema::LlmModel, ConsumptionRates>,
+    pub subagent_costs: HashMap<String, f64>,
     pub budget_pool_usd: f64,
     pub config: CoordinatorConfig,
 }
@@ -122,6 +123,7 @@ impl ArbitrationMarket {
             lease_history: HashMap::new(),
             historical_rates,
             active_quotas,
+            subagent_costs: HashMap::new(),
             budget_pool_usd: initial_budget,
             config,
         }));
@@ -169,6 +171,8 @@ impl ArbitrationMarket {
         
         // Exact spend subtraction strictly safely mapped mathematically natively
         lock.budget_pool_usd -= actual_cost;
+        
+        *lock.subagent_costs.entry(payload.agent_path.clone()).or_insert(0.0) += actual_cost;
 
         let entry = lock.consumption_history.entry(payload.model.clone()).or_default();
         let now = SystemTime::now()
@@ -297,12 +301,16 @@ impl ArbitrationMarket {
         }).collect();
 
         let per_model_stats_vec: Vec<_> = per_model_stats.into_iter().collect();
+        
+        let mut subagent_costs_vec: Vec<_> = lock.subagent_costs.iter().map(|(k, v)| (k.clone(), *v)).collect();
+        subagent_costs_vec.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
         MarketStateResponse {
             per_model_stats: per_model_stats_vec,
             pending_bids,
             active_leases: lock.active_leases.clone(),
             budget_pool_usd: lock.budget_pool_usd,
+            subagent_costs: subagent_costs_vec,
         }
     }
 
@@ -519,6 +527,7 @@ mod tests {
                 lease_history: HashMap::new(),
                 historical_rates: HashMap::new(),
                 active_quotas,
+                subagent_costs: HashMap::new(),
                 budget_pool_usd: 0.0,
                 config,
             }));
