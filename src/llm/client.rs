@@ -394,27 +394,16 @@ impl LlmClient {
                     choices,
                 };
                 crate::introspection::set_frame_status("Waiting for Spot Market lease... ⏳");
-                let timeout_secs = crate::coordinator::market::LEASE_TIME_SECS.saturating_sub(crate::coordinator::market::TICK_TIME_SECS);
-                
-                loop {
-                    match client.post("http://localhost/request-model")
-                        .timeout(std::time::Duration::from_secs(timeout_secs))
-                        .json(&payload)
-                        .send().await {
-                        Ok(resp) => {
-                            if let Ok(res_data) = resp.json::<crate::schema::ipc::RequestModelResponse>().await {
-                                target_model = res_data.granted_model;
-                            }
-                            break;
-                        },
-                        Err(e) if e.is_timeout() => {
-                            tracing::debug!("Spot Market lease request timed out, retrying loop organically...");
-                            continue;
-                        },
-                        Err(e) => {
-                            tracing::warn!("Spot Market lease request failed fundamentally: {}", e);
-                            break;
+                match client.post("http://localhost/request-model")
+                    .json(&payload)
+                    .send().await {
+                    Ok(resp) => {
+                        if let Ok(res_data) = resp.json::<crate::schema::ipc::RequestModelResponse>().await {
+                            target_model = res_data.granted_model;
                         }
+                    },
+                    Err(e) => {
+                        tracing::warn!("Spot Market lease request failed fundamentally: {}", e);
                     }
                 }
 
@@ -506,8 +495,8 @@ impl LlmClient {
 
             let chat = resp;
             
-            let mut input_tokens = 1000;
-            let mut output_tokens = 1000;
+            let mut input_tokens = 0;
+            let mut output_tokens = 0;
             if let Some(usage) = &chat.usage_metadata {
                 if let Some(prompt) = usage.get("promptTokenCount").and_then(|t| t.as_u64()) {
                     input_tokens = prompt;

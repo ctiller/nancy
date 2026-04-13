@@ -29,6 +29,7 @@ pub struct LlmBuilder {
     loop_detection: bool,
     task_priority: crate::llm::client::TaskPriorityFn,
     local_market_weight: f64,
+    max_history: usize,
 }
 
 pub fn fast_llm(name: &str) -> LlmBuilder {
@@ -62,6 +63,7 @@ impl LlmBuilder {
             loop_detection: false,
             task_priority: default_fn,
             local_market_weight: 0.5,
+            max_history: 10000,
         }
     }
 
@@ -72,6 +74,11 @@ impl LlmBuilder {
 
     pub fn with_market_weight(mut self, weight: f64) -> Self {
         self.local_market_weight = weight.clamp(0.0, 1.0);
+        self
+    }
+
+    pub fn with_max_history(mut self, max: usize) -> Self {
+        self.max_history = max;
         self
     }
 
@@ -116,7 +123,7 @@ impl LlmBuilder {
         let api_key = std::env::var("GEMINI_API_KEY")
             .context("GEMINI_API_KEY environment variable is not set")?;
 
-        let session = crate::llm::api::Session::new(10000);
+        let session = crate::llm::api::Session::new(self.max_history);
 
         let mut loop_event_tx = None;
         let is_looping = std::sync::Arc::new(std::sync::Mutex::new(None::<String>));

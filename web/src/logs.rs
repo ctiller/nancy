@@ -140,6 +140,9 @@ pub fn logs_view() -> Html {
                                             <div style="background: rgba(0,0,0,0.3); padding: 12px; border-radius: 6px; border-left: 4px solid var(--accent-light);">
                                                 <div style="font-weight: bold; margin-bottom: 4px;">{ format!("Model: {}", lease.granted_model) }</div>
                                                 <div style="font-size: 0.85em; color: var(--text-muted);">
+                                                    { "Subagent: " } { lease.subagent_id.clone() }
+                                                </div>
+                                                <div style="font-size: 0.85em; color: var(--text-muted);">
                                                     { "Lease: " } { lease.lease_id.clone() }
                                                 </div>
                                                 <div style="font-size: 0.85em; color: var(--text-muted);">

@@ -8,6 +8,7 @@ pub struct AppView {
     pub tasks: HashMap<String, EventPayload>,
     pub requests: HashMap<String, EventPayload>,
     pub handled_requests: HashSet<String>,
+    pub handled_items: HashSet<String>,
     pub blocked_by: HashMap<String, HashSet<String>>,
     pub task_completions: HashSet<String>,
     pub completed_reports: HashMap<String, String>,
@@ -25,6 +26,7 @@ impl AppView {
             tasks: HashMap::new(),
             requests: HashMap::new(),
             handled_requests: HashSet::new(),
+            handled_items: HashSet::new(),
             blocked_by: HashMap::new(),
             task_completions: HashSet::new(),
             completed_reports: HashMap::new(),
@@ -132,16 +134,22 @@ impl AppView {
                 self.task_evaluations.insert(e.evaluated_event_id.clone(), e.clone());
             }
             EventPayload::Ask(a) => {
-                self.active_asks.insert(a.item_ref.clone(), a.clone());
+                if !self.handled_items.contains(&a.item_ref) {
+                    self.active_asks.insert(a.item_ref.clone(), a.clone());
+                }
             }
             EventPayload::ReviewPlan(p) => {
-                self.active_plan_reviews.insert(p.plan_ref.clone(), p.clone());
+                if !self.handled_items.contains(&p.plan_ref) {
+                    self.active_plan_reviews.insert(p.plan_ref.clone(), p.clone());
+                }
             }
             EventPayload::CancelItem(c) => {
+                self.handled_items.insert(c.item_ref.clone());
                 self.active_asks.remove(&c.item_ref);
                 self.active_plan_reviews.remove(&c.item_ref);
             }
             EventPayload::HumanResponse(hr) => {
+                self.handled_items.insert(hr.item_ref.clone());
                 self.active_asks.remove(&hr.item_ref);
                 self.active_plan_reviews.remove(&hr.item_ref);
             }

@@ -131,7 +131,7 @@ pub async fn run_agent<P: AsRef<Path>, Processor: AgentTaskProcessor>(
                 if crate::agent::SHUTDOWN.load(std::sync::atomic::Ordering::SeqCst) { break; }
                 
                 let snap = tree_clone.root_frame.snapshot();
-                if let Ok(mut llm) = crate::llm::builder::fast_llm("status_rollup").build() {
+                if let Ok(mut llm) = crate::llm::builder::fast_llm("status_rollup").with_market_weight(0.1).build() {
                     let json = serde_json::to_string(&snap).unwrap_or_default();
                     let prompt = format!("Summarize the current action being performed by this autonomous agent based on its internal frame state. Extract the lowest meaningful active task. If it is waiting on a quorum or executing a multi-agent review map, explicitly include the current round iteration and exact count of agents finished/in-progress/votes natively! Keep it very terse, 1 short sentence max.\n\nState:\n```json\n{}\n```", json);
                     if let Ok(result) = llm.ask::<String>(&prompt).await {

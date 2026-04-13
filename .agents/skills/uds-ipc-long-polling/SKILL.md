@@ -1,11 +1,11 @@
 ---
 name: UDS IPC & Stateful Long-Polling Mechanisms
-description: Rules for maintaining Axum long-polling architecture without deadlocks via Unix Domain Sockets
+description: Rules for maintaining Axum long-polling architecture without deadlocks via Unix Domain Sockets, explicitly including coordinator <-> agent (dreamer, grinder) interactions.
 ---
 
 # UDS IPC & Stateful Long-Polling
 
-Nancy orchestrates multi-agent operations asynchronously using an event-driven Axum IPC layout over a Unix Domain Socket (`.nancy/coordinator.sock`) instead of jittered `thread::sleep` loops.
+Nancy orchestrates multi-agent operations asynchronously using an event-driven Axum IPC layout over a Unix Domain Socket (`.nancy/coordinator.sock`) explicitly connecting the coordinator and agents (dreamer, grinder) instead of using jittered `thread::sleep` loops.
 
 ## Guidelines for Modifying Polling Loops
 

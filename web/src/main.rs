@@ -75,7 +75,6 @@ enum ActionSelection {
 fn command_view() -> Html {
     let pending_actions = use_state(|| PendingActions { asks: vec![], plan_reviews: vec![] });
     let selected_action = use_state(|| ActionSelection::None);
-    let interaction_text = use_state(|| String::new());
     
     // Main polling loop for Pending Actions
     {
@@ -119,7 +118,7 @@ fn command_view() -> Html {
     {
         let selected = (*selected_action).clone();
         use_effect_with(selected, move |sel| {
-            if matches!(sel, ActionSelection::NewTask) {
+            if !matches!(sel, ActionSelection::None) {
                 mountMonaco("monaco-container");
             }
             || ()
@@ -158,15 +157,13 @@ fn command_view() -> Html {
 
     let on_submit_response = {
         let selected = selected_action.clone();
-        let text_val = interaction_text.clone();
         Callback::from(move |_| {
-            let text = (*text_val).clone();
+            let text = getMonacoValue();
             let item_ref = match &*selected {
                 ActionSelection::Ask(a) => a.item_ref.clone(),
                 ActionSelection::PlanReview(p) => p.plan_ref.clone(),
                 _ => return,
             };
-            let text_clone = text_val.clone();
             let sel_clone = selected.clone();
             wasm_bindgen_futures::spawn_local(async move {
                 let req_body = serde_json::json!({
@@ -180,7 +177,6 @@ fn command_view() -> Html {
                     .await {
                     if resp.ok() {
                         sel_clone.set(ActionSelection::None);
-                        text_clone.set(String::new());
                     }
                 }
             });
@@ -281,25 +277,14 @@ fn command_view() -> Html {
                                 <div style="font-size: 1.1rem;">{ask.question.clone()}</div>
                             </div>
                             
-                            <textarea 
-                                style="flex: 1; width: 100%; padding: 12px; border-radius: 6px; background: rgba(0,0,0,0.4); border: 1px solid var(--panel-border); color: #fff; font-family: inherit; resize: none;"
-                                placeholder="Type your response here..."
-                                value={(*interaction_text).clone()}
-                                oninput={
-                                    let text_val = interaction_text.clone();
-                                    Callback::from(move |e: yew::InputEvent| {
-                                        let input: web_sys::HtmlTextAreaElement = e.target_unchecked_into();
-                                        text_val.set(input.value());
-                                    })
-                                }
-                            />
+                            <div id="monaco-container" style="flex: 1; width: 100%; border-radius: 8px; overflow: hidden; border: 1px solid var(--panel-border); box-shadow: inset 0 0 10px rgba(0,0,0,0.5);"></div>
                             
                             <div style="display: flex; justify-content: flex-end; align-items: center; gap: 12px; margin-top: 20px;">
                                 <button class="btn-secondary" onclick={
                                     let sel = selected_action.clone();
                                     Callback::from(move |_| sel.set(ActionSelection::None))
                                 }>{"Close"}</button>
-                                <button class="btn-primary" onclick={on_submit_response.clone()} disabled={interaction_text.trim().is_empty()}>
+                                <button class="btn-primary" onclick={on_submit_response.clone()}>
                                     {"Send Response"}
                                 </button>
                             </div>
@@ -323,19 +308,8 @@ fn command_view() -> Html {
                                 </ul>
                             </div>
                             
-                            <div style="margin-bottom: 16px;">
-                                <textarea 
-                                    style="width: 100%; padding: 12px; border-radius: 6px; background: rgba(0,0,0,0.4); border: 1px solid var(--panel-border); color: #fff; font-family: inherit; min-height: 80px;"
-                                    placeholder="Optional feedback if requesting changes..."
-                                    value={(*interaction_text).clone()}
-                                    oninput={
-                                        let text_val = interaction_text.clone();
-                                        Callback::from(move |e: yew::InputEvent| {
-                                            let input: web_sys::HtmlTextAreaElement = e.target_unchecked_into();
-                                            text_val.set(input.value());
-                                        })
-                                    }
-                                />
+                            <div style="flex: 0 0 120px; overflow: hidden; margin-bottom: 16px; border-radius: 6px; border: 1px solid var(--panel-border); box-shadow: inset 0 0 10px rgba(0,0,0,0.5);">
+                                <div id="monaco-container" style="width: 100%; height: 100%;"></div>
                             </div>
                             
                             <div style="display: flex; justify-content: flex-end; gap: 12px;">
@@ -346,18 +320,16 @@ fn command_view() -> Html {
                                 
                                 <button style="background: rgba(200, 50, 50, 0.4); border: 1px solid rgba(255,100,100,0.5); border-radius: 4px; padding: 10px 20px; color: white; cursor: pointer;" 
                                     onclick={
-                                        let text_val = interaction_text.clone();
                                         let sel = selected_action.clone();
                                         Callback::from(move |_| {
-                                            if text_val.trim().is_empty() {
-                                                text_val.set("Reject: Changes required on design.".to_string());
+                                            let mut text = getMonacoValue();
+                                            if text.trim().is_empty() {
+                                                text = "Reject: Changes required on design.".to_string();
                                             }
-                                            let text = (*text_val).clone();
                                             let item_ref = match &*sel {
                                                 ActionSelection::PlanReview(p) => p.plan_ref.clone(),
                                                 _ => return,
                                             };
-                                            let text_clone = text_val.clone();
                                             let sel_clone = sel.clone();
                                             wasm_bindgen_futures::spawn_local(async move {
                                                 let req_body = serde_json::json!({
@@ -371,7 +343,6 @@ fn command_view() -> Html {
                                                     .await {
                                                     if resp.ok() {
                                                         sel_clone.set(ActionSelection::None);
-                                                        text_clone.set(String::new());
                                                     }
                                                 }
                                             });
@@ -381,16 +352,13 @@ fn command_view() -> Html {
                                 </button>
                                 
                                 <button class="btn-primary" onclick={
-                                    let text_val = interaction_text.clone();
                                     let sel = selected_action.clone();
                                     Callback::from(move |_| {
-                                        text_val.set("Approve".to_string());
                                         let text = "Approve".to_string();
                                         let item_ref = match &*sel {
                                             ActionSelection::PlanReview(p) => p.plan_ref.clone(),
                                             _ => return,
                                         };
-                                        let text_clone = text_val.clone();
                                         let sel_clone = sel.clone();
                                         wasm_bindgen_futures::spawn_local(async move {
                                             let req_body = serde_json::json!({
@@ -404,7 +372,6 @@ fn command_view() -> Html {
                                                 .await {
                                                 if resp.ok() {
                                                     sel_clone.set(ActionSelection::None);
-                                                    text_clone.set(String::new());
                                                 }
                                             }
                                         });

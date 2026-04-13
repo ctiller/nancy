@@ -18,7 +18,7 @@ pub static SHUTDOWN_NOTIFY: tokio::sync::Notify = tokio::sync::Notify::const_new
 
 
 pub struct Coordinator {
-    repo: Repository,
+    workdir: std::path::PathBuf,
     identity: Identity,
     listener: Option<std::os::unix::net::UnixListener>,
 }
@@ -51,7 +51,7 @@ impl Coordinator {
         let listener = std::os::unix::net::UnixListener::bind(&socket_path)?;
         listener.set_nonblocking(true)?;
 
-        Ok(Self { repo, identity, listener: Some(listener) })
+        Ok(Self { workdir, identity, listener: Some(listener) })
     }
 
     pub async fn run_until<F>(&mut self, port: u16, bind_cb: Option<tokio::sync::oneshot::Sender<u16>>, mut condition: F) -> Result<()>
@@ -74,7 +74,7 @@ impl Coordinator {
         let shared_tx_ready = Arc::new(tx_ready);
         let (tx_updates, mut rx_updates) = tokio::sync::mpsc::unbounded_channel();
         let shared_identity = Arc::new(tokio::sync::RwLock::new(self.identity.clone()));
-        let coord_config = match crate::schema::coordinator_config::CoordinatorConfig::load(self.repo.workdir().unwrap()).await {
+        let coord_config = match crate::schema::coordinator_config::CoordinatorConfig::load(&self.workdir).await {
             Ok(c) => c,
             Err(_) => crate::schema::coordinator_config::CoordinatorConfig::default(),
         };
@@ -98,7 +98,7 @@ impl Coordinator {
             let _ = tx.send(actual_port);
         }
 
-        let mut docker_orch = match crate::coordinator::docker::DockerOrchestrator::new(self.repo.workdir().unwrap().to_path_buf()) {
+        let mut docker_orch = match crate::coordinator::docker::DockerOrchestrator::new(self.workdir.clone()) {
             Ok(orch) => Some(orch),
             Err(e) => {
                 tracing::warn!("Docker daemon unavailable! Coordinator will register assignments but Grinders will NOT be provisioned: {}", e);
@@ -109,8 +109,10 @@ impl Coordinator {
 
         while !condition(&AppView::new()) && !SHUTDOWN.load(Ordering::SeqCst) {
             let active_identity = { shared_identity.read().await.clone() };
+            // Ensure git resource descriptors drop each loop native avoiding OS handle exhaustion entirely seamlessly natively!
+            let active_repo = git2::Repository::open(&self.workdir)?;
 
-            let appview = AppView::hydrate(&self.repo, &active_identity, sync_engine.target_sync_grinder.as_deref());
+            let appview = AppView::hydrate(&active_repo, &active_identity, sync_engine.target_sync_grinder.as_deref());
             sync_engine.target_sync_grinder = None;
 
             // Test loop condition against synced view
@@ -120,7 +122,7 @@ impl Coordinator {
             }
 
             let mut logged_any = process_app_view_events(
-                &self.repo, 
+                &active_repo, 
                 &appview, 
                 &active_identity, 
                 &mut processed_completed_tasks, 
@@ -130,7 +132,7 @@ impl Coordinator {
             if let Some(ref mut d) = docker_orch {
                 let crashes = d.sync_deployments(&appview, &active_identity).await;
                 if !crashes.is_empty() {
-                    let writer = crate::events::writer::Writer::new(&self.repo, active_identity.clone()).expect("Failed to init writer");
+                    let writer = crate::events::writer::Writer::new(&active_repo, active_identity.clone()).expect("Failed to init writer");
                     for (report, logs) in crashes {
                         writer.attach_incident_log(&report.log_ref, &logs);
                         let _ = writer.log_event(crate::schema::registry::EventPayload::AgentCrashReport(report));

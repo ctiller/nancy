@@ -176,6 +176,7 @@ pub struct RequestModelResponse {
     pub lease_id: String,
     pub lease_duration_sec: u64,
     pub granted_at_unix: u64,
+    pub subagent_id: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]

@@ -113,6 +113,8 @@ impl ArbitrationMarket {
             }
         }
 
+        let initial_budget = config.daily_budget_usd / 24.0;
+
         let market = Arc::new(RwLock::new(Self {
             pending_bids: Vec::new(),
             active_leases: Vec::new(),
@@ -120,7 +122,7 @@ impl ArbitrationMarket {
             lease_history: HashMap::new(),
             historical_rates,
             active_quotas,
-            budget_pool_usd: 1.0,
+            budget_pool_usd: initial_budget,
             config,
         }));
 
@@ -358,61 +360,94 @@ impl ArbitrationMarket {
 
             // 4. Extract and flat-map bids into individual choice tickets
             let bids = std::mem::take(&mut lock.pending_bids);
-            let mut inflight_requests: Vec<Option<AuctionBid>> = bids.into_iter().map(Some).collect();
+            let mut inflight_requests: Vec<Option<AuctionBid>> = bids
+                .into_iter()
+                .filter(|b| !b.tx.is_closed())
+                .map(Some)
+                .collect();
 
-            let mut tickets = Vec::new();
-            for (idx, req) in inflight_requests.iter().enumerate() {
-                if let Some(bid) = req {
-                    for choice in &bid.payload.choices {
-                        tickets.push((choice.bid_value, idx, choice.clone()));
+            // Auction Fixed-Point Iteration Loop 
+            loop {
+                // Round 1 - find all bids that meet rpm/tpm/rpd constraints, ignoring $
+                let mut round_1_tickets = Vec::new();
+                for (idx, req) in inflight_requests.iter().enumerate() {
+                    if let Some(bid) = req {
+                        for choice in &bid.payload.choices {
+                            let (_, expected_tokens, expected_requests) = Self::expected_lease_metrics_for(&lock, &choice.name);
+                            
+                            let active = lock.active_quotas.entry(choice.name.clone()).or_default();
+                            
+                            let rpm_ok = active.rpm.map_or(true, |r| r >= expected_requests);
+                            let tpm_ok = active.tpm.map_or(true, |t| t >= expected_tokens);
+                            let rpd_ok = active.rpd.map_or(true, |rd| rd >= expected_requests);
+                            
+                            // Purely declarative in Round 1
+                            if rpm_ok && tpm_ok && rpd_ok {
+                                round_1_tickets.push((choice.bid_value, idx, choice.clone()));
+                            }
+                        }
                     }
                 }
-            }
-            
-            // Sort highest unconditionally globally establishing strict multi-model precedence exactly reliably
-            tickets.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
 
-            // 5. Grant leases eagerly bounding positive quotas globally cleanly!
-            for (_value, req_idx, choice) in tickets {
-                let Some(_bid) = inflight_requests[req_idx].as_ref() else {
-                    continue; // Reached if another choice from this same request previously satisfied it!
-                };
+                if round_1_tickets.is_empty() {
+                    break;
+                }
 
-                let (expected_cost, expected_tokens, expected_requests) = Self::expected_lease_metrics_for(&lock, &choice.name);
-                
-                let mut granted_choice = false;
-                if available_tick_budget >= expected_cost {
-                    let active = lock.active_quotas.entry(choice.name.clone()).or_default();
+                // Round 2 - sort by value (fallback to oldest natively if bids tie identically)
+                round_1_tickets.sort_by(|a, b| {
+                    b.0.partial_cmp(&a.0)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                        .then_with(|| a.1.cmp(&b.1))
+                });
+
+                let mut restart_round_1 = false;
+
+                // Round 3 - take most valuable until expected $ budget is < 0
+                for (_value, req_idx, choice) in round_1_tickets {
+                    let Some(_bid_data) = inflight_requests[req_idx].as_ref() else {
+                        continue; // Reached if another choice from this same request previously satisfied it!
+                    };
+
+                    let (expected_cost, expected_tokens, expected_requests) = Self::expected_lease_metrics_for(&lock, &choice.name);
                     
+                    let active = lock.active_quotas.entry(choice.name.clone()).or_default();
                     let rpm_ok = active.rpm.map_or(true, |r| r >= expected_requests);
                     let tpm_ok = active.tpm.map_or(true, |t| t >= expected_tokens);
                     let rpd_ok = active.rpd.map_or(true, |rd| rd >= expected_requests);
-                    
-                    if rpm_ok && tpm_ok && rpd_ok {
-                        if let Some(ref mut r) = active.rpm { *r -= expected_requests; }
-                        if let Some(ref mut t) = active.tpm { *t -= expected_tokens; }
-                        if let Some(ref mut rd) = active.rpd { *rd -= expected_requests; }
-                        granted_choice = true;
-                    }
-                }
 
-                if granted_choice {
-                    available_tick_budget -= expected_cost;
+                    // Dynamic assertion - if limits dwindled due to previous grants in Round 3, restart natively!
+                    if !(rpm_ok && tpm_ok && rpd_ok) {
+                        restart_round_1 = true;
+                        break;
+                    }
+
+                    if available_tick_budget < expected_cost { return; }
+
+                    // Execute and mutate allocations cleanly uniquely here!
+                    if let Some(ref mut r) = active.rpm { *r -= expected_requests; }
+                    if let Some(ref mut t) = active.tpm { *t -= expected_tokens; }
+                    if let Some(ref mut rd) = active.rpd { *rd -= expected_requests; }
                     
+                    available_tick_budget -= expected_cost;
+                        
+                    let bid_data = inflight_requests[req_idx].take().unwrap();
                     let lease_id = uuid::Uuid::new_v4().to_string();
                     let resp = RequestModelResponse {
                         granted_model: choice.name.clone(),
                         lease_id: lease_id.clone(),
                         lease_duration_sec: LEASE_TIME_SECS,
                         granted_at_unix: now,
+                        subagent_id: bid_data.payload.requester_id.clone(),
                     };
                     
                     lock.active_leases.push(resp.clone());
                     lock.lease_history.entry(choice.name.clone()).or_default().push_back(now);
                     
-                    // Consume the request eliminating all other fallback tickets functionally!
-                    let bid_data = inflight_requests[req_idx].take().unwrap();
                     let _ = bid_data.tx.send(resp);
+                }
+
+                if !restart_round_1 {
+                    break;
                 }
             }
 

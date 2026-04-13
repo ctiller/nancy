@@ -131,6 +131,7 @@ impl ReviewSession {
                     .system_prompt(&sys_prompt)
                     .tools(tools)
                     .with_loop_detection()
+                    .with_max_history(3)
                     .build()?;
                     
                 self.reviewers.insert(expert_id.clone(), new_client);
