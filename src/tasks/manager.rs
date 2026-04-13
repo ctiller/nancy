@@ -29,7 +29,9 @@ impl<'a> TaskManager<'a> {
                     let cached_hash = self.index.get_branch_commit(did)?;
                     if cached_hash.as_deref() != Some(&latest_hash) {
                         let reader = Reader::new(self.repo, did.to_string());
-                        reader.sync_index(self.index)?;
+                        if let Err(e) = reader.sync_index(self.index) {
+                            tracing::debug!("Skipping index sync for branch {}: {}", name, e);
+                        }
                     }
                 }
             }
