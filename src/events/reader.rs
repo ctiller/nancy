@@ -32,7 +32,10 @@ impl<'a> Reader<'a> {
                 break;
             }
         }
-        let events_tree_oid = events_tree_oid.context("events directory missing")?;
+        let events_tree_oid = match events_tree_oid {
+            Some(oid) => oid,
+            None => return Ok(Vec::new().into_iter()),
+        };
 
         let events_entries = self.repo.read_tree(&events_tree_oid).await?;
 
@@ -99,7 +102,10 @@ impl<'a> Reader<'a> {
                 break;
             }
         }
-        let events_tree_oid = events_tree_oid.context("events directory missing")?;
+        let events_tree_oid = match events_tree_oid {
+            Some(oid) => oid,
+            None => return Ok(()),
+        };
 
         let events_entries = self.repo.read_tree(&events_tree_oid).await?;
 

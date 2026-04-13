@@ -856,8 +856,8 @@ mod tests {
 
         let payload = TaskPayload {
             description: "fake".into(),
-            preconditions: "fake".into(),
-            postconditions: "fake".into(),
+            preconditions: vec![],
+            postconditions: vec![],
             parent_branch: "fake".into(),
             action: TaskAction::Implement,
             branch: "missing_branch_throws_errors".into(),
@@ -915,8 +915,8 @@ mod tests {
 
         let payload = TaskPayload {
             description: "fake".into(),
-            preconditions: "fake".into(),
-            postconditions: "fake".into(),
+            preconditions: vec![],
+            postconditions: vec![],
             parent_branch: "fake".into(),
             action: TaskAction::Plan,
             branch: "working_branch".into(),
@@ -1005,8 +1005,8 @@ mod tests {
 
         let payload = TaskPayload {
             description: "fake impl".into(),
-            preconditions: "fake".into(),
-            postconditions: "fake".into(),
+            preconditions: vec![],
+            postconditions: vec![],
             parent_branch: "fake".into(),
             action: TaskAction::Implement,
             branch: "working_branch".into(),
@@ -1087,8 +1087,8 @@ mod tests {
 
         let payload = TaskPayload {
             description: "fake".into(),
-            preconditions: "fake".into(),
-            postconditions: "fake".into(),
+            preconditions: vec![],
+            postconditions: vec![],
             parent_branch: "fake".into(),
             action: TaskAction::Plan,
             branch: "working_branch".into(),
@@ -1181,8 +1181,8 @@ mod tests {
 
         let payload = TaskPayload {
             description: "fake".into(),
-            preconditions: "fake".into(),
-            postconditions: "fake".into(),
+            preconditions: vec![],
+            postconditions: vec![],
             parent_branch: "fake".into(),
             action: TaskAction::Plan,
             branch: "working_branch".into(),
@@ -1210,8 +1210,8 @@ mod tests {
         super::TaskDefinition {
             id: id.to_string(),
             description: "".into(),
-            preconditions: "".into(),
-            postconditions: "".into(),
+            preconditions: vec![],
+            postconditions: vec![],
             parent_branch: "".into(),
             action: super::TaskAction::Plan,
             branch: "".into(),

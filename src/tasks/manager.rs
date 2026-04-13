@@ -105,8 +105,8 @@ mod tests {
 
         writer.log_event(EventPayload::Task(TaskPayload {
             description: "A test task".to_string(),
-            preconditions: "none".to_string(),
-            postconditions: "none".to_string(),
+            preconditions: vec![],
+            postconditions: vec![],
             parent_branch: "master".to_string(),
             action: crate::schema::task::TaskAction::Implement,
             branch: "refs/heads/nancy/tasks/test".to_string(),

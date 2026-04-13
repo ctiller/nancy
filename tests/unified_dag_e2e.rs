@@ -130,8 +130,8 @@ async fn test_coordinator_generates_review_plan_task_upon_plan_completion() -> R
     // Mock a Plan Task being Completed bounding the Review constraint Generation
     let plan_task = EventPayload::Task(nancy::schema::task::TaskPayload {
         description: "Plan Generation".into(),
-        preconditions: "".into(),
-        postconditions: "".into(),
+        preconditions: vec![],
+        postconditions: vec![],
         parent_branch: "".into(),
         action: TaskAction::Plan,
         branch: "refs/heads/nancy/plans/mock_01".into(),
@@ -222,8 +222,8 @@ async fn test_coordinator_inherits_task_parent_from_feature_branch() -> Result<(
     // Mock the dependency injection BlockedBy mapping from a parent review
     let review_plan = EventPayload::Task(nancy::schema::task::TaskPayload {
         description: "Review Plan target".into(),
-        preconditions: "mock".into(),
-        postconditions: "mock".into(),
+        preconditions: vec![],
+        postconditions: vec![],
         parent_branch: "master".into(),
         action: TaskAction::Plan,
         branch: "refs/heads/nancy/tasks/parent_feat".into(),
@@ -233,8 +233,8 @@ async fn test_coordinator_inherits_task_parent_from_feature_branch() -> Result<(
 
     let task_payload = EventPayload::Task(nancy::schema::task::TaskPayload {
         description: "Implementation bounds execution!".into(),
-        preconditions: "".into(),
-        postconditions: "".into(),
+        preconditions: vec![],
+        postconditions: vec![],
         parent_branch: "".into(),
         action: TaskAction::Implement,
         branch: "refs/heads/nancy/tasks/work_088".into(),
@@ -294,8 +294,8 @@ async fn test_appview_pagerank_drops_blocked_tasks() -> Result<()> {
     let mut appview = AppView::new();
     let task_ev = EventPayload::Task(nancy::schema::task::TaskPayload {
         description: "".into(),
-        preconditions: "".into(),
-        postconditions: "".into(),
+        preconditions: vec![],
+        postconditions: vec![],
         parent_branch: "".into(),
         action: TaskAction::Implement,
         branch: "fake".into(),
@@ -369,8 +369,8 @@ async fn test_worktree_extermination_and_ledger_consistency() -> Result<()> {
 
     let payload = nancy::schema::task::TaskPayload {
         description: "Execution Wipe Test".into(),
-        preconditions: "".into(),
-        postconditions: "".into(),
+        preconditions: vec![],
+        postconditions: vec![],
         parent_branch: "main".into(),
         action: TaskAction::Implement,
         branch: "refs/heads/nancy/tasks/working_09".into(),
@@ -442,8 +442,8 @@ async fn test_identify_assigned_task_discovers_payload_via_local_index() -> Resu
     let worker_writer = Writer::new(&async_repo, worker_id.clone())?;
     let task_payload = EventPayload::Task(nancy::schema::task::TaskPayload {
         description: "Task authored by worker".into(),
-        preconditions: "".into(),
-        postconditions: "".into(),
+        preconditions: vec![],
+        postconditions: vec![],
         parent_branch: "main".into(),
         action: TaskAction::Implement,
         branch: "refs/heads/nancy/tasks/worker_task".into(),

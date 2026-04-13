@@ -75,8 +75,8 @@ mod tests {
         let task_event =
             crate::schema::registry::EventPayload::Task(crate::schema::task::TaskPayload {
                 description: "mock".to_string(),
-                preconditions: "mock".to_string(),
-                postconditions: "mock".to_string(),
+                preconditions: vec![],
+                postconditions: vec![],
                 parent_branch: "mock".to_string(),
                 action: crate::schema::task::TaskAction::Implement,
                 branch: "mock".to_string(),

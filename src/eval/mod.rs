@@ -329,8 +329,8 @@ mod tests {
         let task = crate::schema::registry::EventPayload::Task(crate::schema::task::TaskPayload {
             action: crate::schema::task::TaskAction::Plan,
             description: "Some nested plan task generated".to_string(),
-            preconditions: "".to_string(),
-            postconditions: "".to_string(),
+            preconditions: vec![],
+            postconditions: vec![],
             parent_branch: "master".to_string(),
             branch: "TBD".to_string(),
             plan: None,

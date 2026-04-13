@@ -328,8 +328,8 @@ mod tests {
         let implement_payload = EventPayload::Task(TaskPayload {
             action: TaskAction::Implement,
             description: "".to_string(),
-            preconditions: "".to_string(),
-            postconditions: "".to_string(),
+            preconditions: vec![],
+            postconditions: vec![],
             parent_branch: "master".to_string(),
             branch: "TBD".to_string(),
             plan: None,

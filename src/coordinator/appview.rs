@@ -509,8 +509,8 @@ mod tests {
 
         let task_event = EventPayload::Task(TaskPayload {
             description: "Some action".into(),
-            preconditions: "none".into(),
-            postconditions: "done".into(),
+            preconditions: vec![],
+            postconditions: vec![],
             parent_branch: "master".into(),
             action: TaskAction::Plan,
             branch: "refs/heads/nancy/plans/test".into(),
@@ -530,8 +530,8 @@ mod tests {
 
         let review_plan = EventPayload::Task(TaskPayload {
             description: "Review plan".into(),
-            preconditions: "".into(),
-            postconditions: "".into(),
+            preconditions: vec![],
+            postconditions: vec![],
             parent_branch: "master".into(),
             action: TaskAction::Plan,
             branch: "refs/heads/nancy/tasks/review-id".into(),
@@ -541,8 +541,8 @@ mod tests {
         // This task depends on ReviewPlan
         let child_task = EventPayload::Task(TaskPayload {
             description: "Implement task".into(),
-            preconditions: "".into(),
-            postconditions: "".into(),
+            preconditions: vec![],
+            postconditions: vec![],
             parent_branch: "master".into(),
             action: TaskAction::Implement,
             branch: "refs/heads/nancy/tasks/impl-id".into(),
@@ -577,8 +577,8 @@ mod tests {
         view.apply_event(
             &EventPayload::Task(TaskPayload {
                 description: "T1".into(),
-                preconditions: default_fields().0,
-                postconditions: default_fields().1,
+                preconditions: vec![],
+                postconditions: vec![],
                 parent_branch: "master".into(),
                 action: crate::schema::task::TaskAction::Implement,
                 branch: "refs/heads/nancy/tasks/t1".into(),
@@ -589,8 +589,8 @@ mod tests {
         view.apply_event(
             &EventPayload::Task(TaskPayload {
                 description: "T2".into(),
-                preconditions: default_fields().0,
-                postconditions: default_fields().1,
+                preconditions: vec![],
+                postconditions: vec![],
                 parent_branch: "master".into(),
                 action: crate::schema::task::TaskAction::Implement,
                 branch: "refs/heads/nancy/tasks/t2".into(),
@@ -601,8 +601,8 @@ mod tests {
         view.apply_event(
             &EventPayload::Task(TaskPayload {
                 description: "T3".into(),
-                preconditions: default_fields().0,
-                postconditions: default_fields().1,
+                preconditions: vec![],
+                postconditions: vec![],
                 parent_branch: "master".into(),
                 action: crate::schema::task::TaskAction::Implement,
                 branch: "refs/heads/nancy/tasks/t3".into(),
