@@ -30,6 +30,23 @@ enum Commands {
     Cleanup,
     /// Run the dreamer background administrative agent loop
     Dreamer,
+    /// Interrogate and debug internal state
+    Debug {
+        #[command(subcommand)]
+        command: DebugCommands,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum DebugCommands {
+    /// Debug tasks assignments
+    Tasks(DebugTasksArgs),
+}
+
+#[derive(clap::Args, Debug)]
+pub struct DebugTasksArgs {
+    #[arg(short, long)]
+    pub coord_did: String,
 }
 
 #[derive(clap::Args, Debug)]
@@ -82,6 +99,11 @@ pub(crate) async fn execute_command(args: &Args, cwd: PathBuf) -> Result<()> {
         Commands::Dreamer => {
             nancy::commands::dreamer::dreamer(cwd, None, None).await?;
         }
+        Commands::Debug { command } => match command {
+            DebugCommands::Tasks(args) => {
+                nancy::commands::debug_tasks::debug_tasks(cwd, args.coord_did.clone()).await?;
+            }
+        },
     }
 
     Ok(())

@@ -1,0 +1,110 @@
+use anyhow::Result;
+use git2::Repository;
+use std::path::PathBuf;
+
+pub async fn debug_tasks(cwd: PathBuf, coord_did: String) -> Result<()> {
+    let repo = Repository::open(&cwd)?;
+    let local_index = crate::events::index::LocalIndex::new(&cwd.join(".nancy"))?;
+
+    let manager = crate::tasks::manager::TaskManager::new(&repo, &local_index);
+    manager.refresh_cache()?;
+
+    println!("Coordinator log: {}", coord_did);
+
+    let reader = crate::events::reader::Reader::new(&repo, coord_did);
+    for res in reader.iter_events()? {
+        let env = res?;
+        println!("Event ID: {}", env.id);
+        if let crate::schema::registry::EventPayload::CoordinatorAssignment(assignment) = env.payload {
+            println!(
+                "  Found Assignment: assignee={}, target_ref={}",
+                assignment.assignee_did, assignment.task_ref
+            );
+
+            if let Ok(Some((did, _, _))) = local_index.lookup_event(&assignment.task_ref) {
+                println!("    -> Found via LocalIndex on DID: {}", did);
+            } else {
+                println!("    -> NOT FOUND in LocalIndex!");
+            }
+        } else if let crate::schema::registry::EventPayload::Task(t) = env.payload {
+            println!("  Found Task on coord log: {}", t.description);
+        }
+    }
+    
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::events::writer::Writer;
+    use crate::schema::identity_config::{DidOwner, Identity};
+    use did_key::{Ed25519KeyPair, KeyMaterial, Fingerprint};
+    use std::fs;
+    use tempfile::TempDir;
+
+    #[tokio::test]
+    async fn test_debug_tasks_cli_bounds() -> Result<()> {
+        let temp_dir = TempDir::new()?;
+        let repo = git2::Repository::init(temp_dir.path())?;
+        
+        fs::create_dir_all(temp_dir.path().join(".nancy"))?;
+        let key = did_key::generate::<Ed25519KeyPair>(None);
+        let did = key.fingerprint();
+        
+        let identity = Identity::Coordinator {
+            did: DidOwner {
+                did: did.clone(),
+                public_key_hex: hex::encode(key.public_key_bytes()),
+                private_key_hex: hex::encode(key.private_key_bytes()),
+            },
+            workers: vec![],
+            dreamer: DidOwner::generate(),
+            human: None,
+        };
+        
+        let writer = Writer::new(&repo, identity)?;
+        writer.log_event(crate::schema::registry::EventPayload::TaskRequest(
+            crate::schema::task::TaskRequestPayload {
+                requestor: "human".to_string(),
+                description: "mock task".to_string(),
+            }
+        ))?;
+        
+        let task_event = crate::schema::registry::EventPayload::Task(
+            crate::schema::task::TaskPayload {
+                description: "mock".to_string(),
+                preconditions: "mock".to_string(),
+                postconditions: "mock".to_string(),
+                parent_branch: "mock".to_string(),
+                action: crate::schema::task::TaskAction::Implement,
+                branch: "mock".to_string(),
+                plan: None,
+            }
+        );
+        let task_id = writer.log_event(task_event)?;
+        
+        // This assignment simulates the bug we diagnosed
+        writer.log_event(crate::schema::registry::EventPayload::CoordinatorAssignment(
+            crate::schema::task::CoordinatorAssignmentPayload {
+                assignee_did: "worker".to_string(),
+                task_ref: task_id,
+            }
+        ))?;
+        
+        // Ensure another assignment fails lookup explicitly mapped gracefully for coverage
+        writer.log_event(crate::schema::registry::EventPayload::CoordinatorAssignment(
+            crate::schema::task::CoordinatorAssignmentPayload {
+                assignee_did: "worker".to_string(),
+                task_ref: "missing_hash_coverage".to_string(),
+            }
+        ))?;
+        
+        writer.commit_batch()?;
+
+        // Ensure command succeeds reading the trace natively
+        debug_tasks(temp_dir.path().to_path_buf(), did).await?;
+        
+        Ok(())
+    }
+}

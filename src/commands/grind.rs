@@ -155,14 +155,19 @@ pub fn identify_assigned_task(
         return None;
     }
 
-    let root = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-    let local_index = match crate::events::index::LocalIndex::new(&root.join(".nancy")) {
+    let nancy_dir = repo.workdir().unwrap().join(".nancy");
+    let local_index = match crate::events::index::LocalIndex::new(&nancy_dir) {
         Ok(idx) => idx,
         Err(e) => {
-            tracing::error!("Failed to instantiate LocalIndex: {}", e);
+            tracing::error!("Failed to instantiate LocalIndex at {:?}: {}", nancy_dir, e);
             return None;
         }
     };
+
+    let manager = crate::tasks::manager::TaskManager::new(repo, &local_index);
+    if let Err(e) = manager.refresh_cache() {
+        tracing::error!("Failed to refresh LocalIndex cache: {}", e);
+    }
 
     for (task_id, assignment) in pending_assignments {
         let task_ref = &assignment.task_ref;

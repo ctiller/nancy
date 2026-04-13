@@ -5,3 +5,4 @@ pub mod dreamer;
 pub mod eval;
 pub mod grind;
 pub mod init;
+pub mod debug_tasks;

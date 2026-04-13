@@ -413,3 +413,76 @@ async fn test_worktree_extermination_and_ledger_consistency() -> Result<()> {
     // Property 20: Feature Parity against ADR 0030 limits. The exact mappings defined in ADR 0030 trace the entire DAG correctly via `Coordinator::evaluate_review_completion` explicitly terminating.
     Ok(())
 }
+
+#[tokio::test]
+#[sealed_test]
+async fn test_identify_assigned_task_discovers_payload_via_local_index() -> Result<()> {
+    let temp_dir = TempDir::new()?;
+    let root = temp_dir.path();
+    let repo = Repository::init(root)?;
+
+    let nancy_dir = root.join(".nancy");
+    fs::create_dir_all(&nancy_dir)?;
+
+
+    
+    let mut index = repo.index()?;
+    let tree_id = index.write_tree()?;
+    let sig = git2::Signature::now("A", "B")?;
+    let tree = repo.find_tree(tree_id)?;
+    repo.commit(Some("refs/heads/main"), &sig, &sig, "init main", &tree, &[])?;
+
+    let worker_did = "worker1";
+    let worker_id = Identity::Grinder(DidOwner {
+        did: worker_did.into(),
+        public_key_hex: "00".into(),
+        private_key_hex: "00".into(),
+    });
+    
+    let worker_writer = Writer::new(&repo, worker_id.clone())?;
+    let task_payload = EventPayload::Task(nancy::schema::task::TaskPayload {
+        description: "Task authored by worker".into(),
+        preconditions: "".into(),
+        postconditions: "".into(),
+        parent_branch: "main".into(),
+        action: TaskAction::Implement,
+        branch: "refs/heads/nancy/tasks/worker_task".into(),
+        plan: None,
+    });
+    worker_writer.log_event_with_id_override(task_payload, "task_eval_1".into())?;
+    worker_writer.commit_batch()?;
+
+    let coord_did = "coord1";
+    let coord_id = Identity::Coordinator {
+        did: DidOwner {
+            did: coord_did.into(),
+            public_key_hex: "00".into(),
+            private_key_hex: "00".into(),
+        },
+        workers: vec![DidOwner {
+            did: worker_did.into(),
+            public_key_hex: "00".into(),
+            private_key_hex: "00".into(),
+        }],
+        dreamer: DidOwner::generate(),
+        human: None,
+    };
+    
+    let coord_writer = Writer::new(&repo, coord_id.clone())?;
+    let assignment = EventPayload::CoordinatorAssignment(nancy::schema::task::CoordinatorAssignmentPayload {
+        task_ref: "task_eval_1".into(),
+        assignee_did: worker_did.into(),
+    });
+    coord_writer.log_event(assignment)?;
+    coord_writer.commit_batch()?;
+
+    // Ensure TaskManager inside identify_assigned_task inherently syncs index natively
+    let assigned = nancy::commands::grind::identify_assigned_task(&repo, worker_did, coord_did);
+    
+    assert!(assigned.is_some(), "Identify assigned task failed to cross-resolve raw payload via LocalIndex!");
+    let (_, assignment_payload, raw_task_payload) = assigned.unwrap();
+    assert_eq!(assignment_payload.task_ref, "task_eval_1");
+    assert_eq!(raw_task_payload.description, "Task authored by worker");
+    
+    Ok(())
+}

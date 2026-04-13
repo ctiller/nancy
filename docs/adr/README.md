@@ -64,3 +64,5 @@ This directory contains the documented architectural and design decisions for Na
 * [0058: Arbitration Market USD Budgeting](0058-arbitration-market-usd-budgeting.md) - Bounds financial tracking dynamically cleanly.
 * [0059: Environment-Driven UDS Socket Discovery](0059-environment-driven-uds-socket-discovery.md) - Standardizes mapping `NANCY_COORDINATOR_SOCKET_PATH` for robust native Sandbox Docker boundary evaluation smoothly.
 * [0060: LLM Streaming Introspection and Ledger Rollup](0060-llm-streaming-introspection-and-ledger-rollup.md) - Integrates unified Server-Sent Events natively buffering thoughts to UI graphs safely.
+* [0061: Grinder AppView Isolation and Event Resolution](0061-grinder-appview-isolation-and-event-resolution.md) - Mandates resolving remote configurations organically bounds decoupling `AppView` dependency statically cleanly securely seamlessly.
+* [0062: Accumulate Native Debug Utilities](0062-accumulate-native-debug-utilities.md) - Details strategy of standardizing ad-hoc test scripts inside dedicated `nancy debug *` subcommands.
