@@ -398,6 +398,9 @@ impl Gemini {
                         continue;
                     }
                     if let Ok(parsed_chunk) = serde_json::from_str::<GeminiResponse>(data) {
+                        if parsed_chunk.usage_metadata.is_some() {
+                            aggregated_response.usage_metadata = parsed_chunk.usage_metadata.clone();
+                        }
                         if let Some(cands) = &parsed_chunk.candidates {
                             for cand in cands {
                                 if aggregated_response.candidates.as_ref().unwrap().is_empty() {
