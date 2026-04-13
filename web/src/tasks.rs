@@ -263,6 +263,25 @@ pub fn tasks_view() -> Html {
                     {node_type_upper}
                 </text>
 
+                { if n.cost_usd > 0.0 {
+                    let cost_str = format!("${:.4}", n.cost_usd);
+                    html! {
+                        <text 
+                            x={((NODE_WIDTH / 2.0) - 12.0).to_string()} 
+                            y={(-(NODE_HEIGHT / 2.0) + 24.0).to_string()} 
+                            fill="red" 
+                            font-family="monospace" 
+                            font-size="0.8rem" 
+                            font-weight="bold"
+                            text-anchor="end"
+                        >
+                            {cost_str}
+                        </text>
+                    }
+                } else {
+                    html! {}
+                } }
+
                 <text 
                     fill="var(--text-muted)" 
                     font-family="monospace" 

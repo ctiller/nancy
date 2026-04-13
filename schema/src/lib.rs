@@ -55,6 +55,8 @@ pub struct TopologyNode {
     pub is_completed: bool,
     pub x: f64,
     pub y: f64,
+    #[serde(default)]
+    pub cost_usd: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -129,3 +129,9 @@ pub struct ReviewPlanPayload {
     pub task_name: String,
     pub document: TddDocument,
 }
+
+#[derive(Debug, Serialize, Deserialize, Clone, JsonSchema)]
+pub struct TaskSpendPayload {
+    pub task_ref: String,
+    pub cost_usd: f64,
+}

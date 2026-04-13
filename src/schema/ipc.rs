@@ -57,6 +57,7 @@ pub struct LlmUsagePayload {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct LlmUsageResponse {
     pub status: String,
+    pub cost_usd: f64,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

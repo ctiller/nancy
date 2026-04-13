@@ -162,7 +162,7 @@ impl ArbitrationMarket {
     pub async fn record_consumption(
         market: &SharedArbitrationMarket,
         payload: LlmUsagePayload,
-    ) {
+    ) -> f64 {
         let mut lock = market.write().await;
         let model_cost_schema = Self::cost_for(payload.model, payload.input_tokens);
         let actual_cost = (payload.input_tokens as f64 * model_cost_schema.input) + (payload.output_tokens as f64 * model_cost_schema.output);
@@ -195,6 +195,7 @@ impl ArbitrationMarket {
                 break;
             }
         }
+        actual_cost
     }
 
     fn merge_metrics(target: &mut UsageMetrics, rec: &UsageMetrics) {
@@ -421,7 +422,7 @@ impl ArbitrationMarket {
                         break;
                     }
 
-                    if available_tick_budget < expected_cost { return; }
+                    if available_tick_budget < expected_cost { break; }
 
                     // Execute and mutate allocations cleanly uniquely here!
                     if let Some(ref mut r) = active.rpm { *r -= expected_requests; }

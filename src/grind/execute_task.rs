@@ -475,6 +475,7 @@ pub async fn execute<'a>(
     writer: &crate::events::writer::Writer<'a>,
 ) -> Result<()> {
     tracing::info!("Executing {:?} task: {}", task_payload.action, task_ref);
+    unsafe { std::env::set_var("NANCY_TASK_ID", task_ref); }
 
     let workdir = repo.workdir().context("Bare repository missing WorkDir")?;
     let safe_ref = task_ref.replace(":", "_").replace("/", "_");

@@ -516,7 +516,18 @@ impl LlmClient {
                         agent_path: String::new(),
                         task_name: String::new(),
                     };
-                    let _ = client.post("http://localhost/llm-usage").json(&payload).send().await;
+                    if let Ok(res) = client.post("http://localhost/llm-usage").json(&payload).send().await {
+                        if let Ok(usage_res) = res.json::<crate::schema::ipc::LlmUsageResponse>().await {
+                            if let Ok(task_ref) = std::env::var("NANCY_TASK_ID") {
+                                self.emit_trace_event(crate::schema::registry::EventPayload::TaskSpend(
+                                    crate::schema::task::TaskSpendPayload {
+                                        task_ref,
+                                        cost_usd: usage_res.cost_usd,
+                                    }
+                                )).await;
+                            }
+                        }
+                    }
                 }
             }
 

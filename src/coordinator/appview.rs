@@ -18,6 +18,7 @@ pub struct AppView {
     pub task_evaluations: HashMap<String, crate::schema::task::TaskEvaluationPayload>, // evaluated_event_id -> payload
     pub active_asks: HashMap<String, crate::schema::task::AskPayload>,
     pub active_plan_reviews: HashMap<String, crate::schema::task::ReviewPlanPayload>,
+    pub task_costs: HashMap<String, f64>,
 }
 
 impl AppView {
@@ -36,6 +37,7 @@ impl AppView {
             task_evaluations: HashMap::new(),
             active_asks: HashMap::new(),
             active_plan_reviews: HashMap::new(),
+            task_costs: HashMap::new(),
         }
     }
 
@@ -152,6 +154,9 @@ impl AppView {
                 self.handled_items.insert(hr.item_ref.clone());
                 self.active_asks.remove(&hr.item_ref);
                 self.active_plan_reviews.remove(&hr.item_ref);
+            }
+            EventPayload::TaskSpend(s) => {
+                *self.task_costs.entry(s.task_ref.clone()).or_insert(0.0) += s.cost_usd;
             }
             _ => {}
         }
@@ -288,6 +293,7 @@ impl AppView {
                     is_completed: self.handled_requests.contains(id),
                     x: 0.0,
                     y: 0.0,
+                    cost_usd: 0.0,
                 });
             }
         }
@@ -302,6 +308,7 @@ impl AppView {
                 
                 let active_agent = self.assignments.get(id).cloned();
                 let is_completed = self.task_completions.contains(id);
+                let cost_usd = *self.task_costs.get(id).unwrap_or(&0.0);
 
                 nodes.push(schema::TopologyNode {
                     id: id.clone(),
@@ -311,6 +318,7 @@ impl AppView {
                     is_completed,
                     x: 0.0,
                     y: 0.0,
+                    cost_usd,
                 });
             }
         }
@@ -334,6 +342,7 @@ impl AppView {
                 is_completed: false,
                 x: 0.0,
                 y: 0.0,
+                cost_usd: 0.0,
             });
         }
         
@@ -346,6 +355,7 @@ impl AppView {
                 is_completed: false,
                 x: 0.0,
                 y: 0.0,
+                cost_usd: 0.0,
             });
         }
 

@@ -5,8 +5,8 @@ use super::llm::{
     LlmPromptPayload, LlmResponsePayload, LlmToolCallPayload, LlmToolResponsePayload,
 };
 use super::task::{
-    AssignmentCompletePayload, BlockedByPayload, CoordinatorAssignmentPayload,
-    ReviewFeedbackPayload, TaskPayload, TaskRequestPayload,
+    AssignmentCompletePayload, BlockedByPayload, CoordinatorAssignmentPayload, ReviewFeedbackPayload,
+    TaskPayload, TaskRequestPayload, TaskSpendPayload,
     AskPayload, CancelItemPayload, SeenPayload, ResponsePayload, ReviewPlanPayload,
 };
 
@@ -51,4 +51,6 @@ pub enum EventPayload {
     ReviewPlan(ReviewPlanPayload),
     #[serde(rename = "human_response")]
     HumanResponse(ResponsePayload),
+    #[serde(rename = "task_spend")]
+    TaskSpend(crate::schema::task::TaskSpendPayload),
 }

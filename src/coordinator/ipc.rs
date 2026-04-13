@@ -128,8 +128,8 @@ async fn llm_usage_handler(
     State(state): State<IpcState>,
     Json(payload): Json<LlmUsagePayload>,
 ) -> impl IntoResponse {
-    crate::coordinator::market::ArbitrationMarket::record_consumption(&state.token_market, payload).await;
-    (StatusCode::OK, Json(LlmUsageResponse { status: "recorded".to_string() })).into_response()
+    let cost = crate::coordinator::market::ArbitrationMarket::record_consumption(&state.token_market, payload).await;
+    (StatusCode::OK, Json(LlmUsageResponse { status: "recorded".to_string(), cost_usd: cost })).into_response()
 }
 
 pub async fn task_priority_handler(
