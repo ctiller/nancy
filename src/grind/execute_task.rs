@@ -50,7 +50,7 @@ struct TaskDefinition {
     pub description: String,
     pub preconditions: String,
     pub postconditions: String,
-    pub validation_strategy: String,
+    pub parent_branch: String,
     pub action: TaskAction,
     pub branch: String,
     #[serde(default)]
@@ -147,7 +147,7 @@ async fn handle_plan_task(
     task_ref: &str,
     task_payload: &TaskPayload,
     writer: &Writer<'_>,
-) -> Result<String> {
+) -> Result<(crate::schema::task::AssignmentStatus, String)> {
     crate::introspection::frame("handle_plan_task", async {
         crate::introspection::log("Initializing planning phase...");
         let all_personas = crate::personas::get_all_personas();
@@ -367,7 +367,7 @@ async fn handle_plan_task(
                 description: t.description,
                 preconditions: t.preconditions,
                 postconditions: t.postconditions,
-                validation_strategy: t.validation_strategy,
+                parent_branch: t.parent_branch,
                 action: t.action,
                 branch: t.branch,
                 plan: Some(persistent_plan_path.display().to_string()),
@@ -388,122 +388,224 @@ async fn handle_plan_task(
         }
         
         crate::introspection::log("Plan successfully generated.");
-        return Ok(format!("Plan successfully generated via Multi-Agent loops functionally."));
+        return Ok((crate::schema::task::AssignmentStatus::Completed, format!("Plan successfully generated via Multi-Agent loops functionally.")));
         }
     }).await
     }).await
 }
-async fn handle_implement_task(
-    target_path: &std::path::Path,
-    task_ref: &str,
-    task_payload: &TaskPayload,
-    _writer: &Writer<'_>,
-) -> Result<String> {
-    let tools = crate::tools::AgentToolsBuilder::new()
-        .with_read_path(target_path)
-        .with_write_path(target_path)
-        .context(&task_payload.description, "implementer")
-        .build();
-
-    let mut client = crate::llm::thinking_llm("implementer")
-        .tools(tools)
-        .system_prompt(&crate::grind::prompts::implementer_system_prompt(
-            &target_path,
-        ))
-        .with_task_priority(appview_task_priority(task_ref.to_string()))
-        .with_market_weight(0.8)
-        .build()?;
-
-    let out = client.ask::<String>(&task_payload.description).await?;
-    Ok(format!("Implementation generation outputs: {}", out.len()))
+#[derive(serde::Deserialize, schemars::JsonSchema)]
+struct PrecondResult {
+    passed: bool,
+    failed_reason: String,
+    remedy_task_description: String,
 }
 
-async fn handle_review_task(
+pub async fn handle_implement_task(
     target_path: &std::path::Path,
-    _repo: &Repository,
+    repo: &Repository,
     task_ref: &str,
     task_payload: &TaskPayload,
-    _writer: &Writer<'_>,
-) -> Result<String> {
-    let target_repo = Repository::open(target_path)?;
-    let head_minus_one = target_repo
-        .revparse_single("HEAD~1")
-        .map(|obj| obj.id().to_string())
-        .unwrap_or_else(|_| "4b825dc642cb6eb9a060e54bf8d69288fbee4904".to_string());
-    let mut session = crate::pre_review::session::ReviewSession::new(target_path.to_path_buf());
-
-    let mut coordinator_client = crate::llm::fast_llm("review_coordinator")
-        .system_prompt(crate::grind::prompts::review_team_selection_prompt())
-        .with_task_priority(appview_task_priority(task_ref.to_string()))
-        .with_market_weight(0.7)
+    writer: &Writer<'_>,
+) -> Result<(crate::schema::task::AssignmentStatus, String)> {
+    // 1. Verify Preconditions
+    let mut precond_checker = crate::llm::fast_llm("precondition_checker")
+        .system_prompt(&crate::grind::prompts::implementer_system_prompt(&target_path))
         .build()?;
-
-    let team_selection = coordinator_client
-        .ask::<TeamSelectionPayload>("Select team based on diff bounds...")
-        .await?;
-
-    let begin_oid = git2::Oid::from_str(&head_minus_one)?;
-    let t_begin = match target_repo.find_commit(begin_oid) {
-        Ok(commit) => commit.tree()?,
-        Err(_) => target_repo.find_tree(begin_oid)?,
-    };
-    let t_end = target_repo
-        .revparse_single("HEAD")?
-        .peel_to_commit()?
-        .tree()?;
-    let diff = target_repo.diff_tree_to_tree(Some(&t_begin), Some(&t_end), None)?;
-
-    let mut diff_text = String::new();
-    diff.print(git2::DiffFormat::Patch, |_delta, _hunk, line| {
-        let origin = line.origin();
-        if origin == '+' || origin == '-' || origin == ' ' {
-            diff_text.push(origin);
+    
+    if !task_payload.preconditions.trim().is_empty() && task_payload.preconditions.to_lowercase() != "none" {
+        let check_prompt = format!("Check if the following preconditions are currently met in the codebase:\n\nPreconditions: {}\n\nReturn a JSON object with `passed` (boolean), `failed_reason` (string explaining why), and `remedy_task_description` (string describing a new task to fix this if it failed, otherwise empty string).", task_payload.preconditions);
+        
+        let check_res = precond_checker.ask::<PrecondResult>(&check_prompt).await?;
+        if !check_res.passed {
+            let remedy = TaskPayload {
+                description: check_res.remedy_task_description,
+                preconditions: "None".into(),
+                postconditions: task_payload.preconditions.clone(),
+                parent_branch: task_payload.branch.clone(),
+                action: TaskAction::Implement,
+                branch: format!("{}_remedy", task_payload.branch),
+                plan: task_payload.plan.clone(),
+            };
+            let remedy_id = writer.log_event(crate::schema::registry::EventPayload::Task(remedy))?;
+            writer.log_event(crate::schema::registry::EventPayload::BlockedBy(crate::schema::task::BlockedByPayload {
+                source: task_ref.to_string(),
+                target: remedy_id,
+            }))?;
+            return Ok((crate::schema::task::AssignmentStatus::Blocked, format!("Blocked by precondition failure: {}", check_res.failed_reason)));
         }
-        diff_text.push_str(std::str::from_utf8(line.content()).unwrap_or(""));
-        true
-    })?;
+    }
 
-    let review_context = format!("Git Diff:\n{}", diff_text);
-    let task_prompt = crate::pre_review::runner::reviewer_task_prompt(
-        1,
-        15,
-        &task_payload.description,
-        &review_context,
-        "{}",
-    );
+    let mut iteration = 0;
+    let mut feedback = String::new();
+    
+    loop {
+        iteration += 1;
+        if iteration > 10 {
+            return Ok((crate::schema::task::AssignmentStatus::Failed, "Exceeded implementation max loops".into()));
+        }
 
-    let formal_panel = session.enforce_quorum(
-        &team_selection.experts,
-        crate::personas::PersonaRole::CodeReview,
-    );
-    let outputs = session
-        .ask_reviewers::<crate::pre_review::schema::ReviewOutput>(
-            &formal_panel,
-            &task_prompt,
-            "code review round 1",
-        )
-        .await?;
+        // 2. Implement
+        let tools = crate::tools::AgentToolsBuilder::new()
+            .with_read_path(target_path)
+            .with_write_path(target_path)
+            .context(&task_payload.description, "implementer")
+            .build();
 
-    let mut synthesis_client = crate::llm::fast_llm("review_synthesis")
-        .system_prompt(&crate::grind::prompts::review_synthesis_prompt(
-            &target_path,
-        ))
-        .with_task_priority(appview_task_priority(task_ref.to_string()))
-        .with_market_weight(0.6)
-        .build()?;
+        let mut client = crate::llm::thinking_llm("implementer")
+            .tools(tools)
+            .system_prompt(&crate::grind::prompts::implementer_system_prompt(&target_path))
+            .with_market_weight(0.8)
+            .build()?;
+        
+        let impl_prompt = if feedback.is_empty() {
+             task_payload.description.clone()
+        } else {
+             format!("Previous attempt failed with feedback:\n{}\n\nPlease address this feedback and try again. Task: {}", feedback, task_payload.description)
+        };
+        
+        let _out = client.ask::<String>(&impl_prompt).await?;
 
-    let valid_outputs: std::collections::HashMap<_, _> = outputs
-        .into_iter()
-        .filter_map(|(id, x)| x.ok().map(|o| (id, o)))
-        .collect();
-    let synthesis_str = serde_json::to_string(&valid_outputs)?;
+        // 3. Postconditions
+        if !task_payload.postconditions.trim().is_empty() && task_payload.postconditions.to_lowercase() != "none" {
+            let postcond_prompt = format!("Check if the following postconditions are met in the codebase:\n\nPostconditions: {}\n\nReturn JSON with `passed` (bool), `failed_reason` (string), and `remedy_task_description` (string, empty if none).", task_payload.postconditions);
+            let post_res = precond_checker.ask::<PrecondResult>(&postcond_prompt).await?;
+            if !post_res.passed {
+                feedback = format!("Postconditions failed: {}", post_res.failed_reason);
+                continue;
+            }
+        }
 
-    let report = synthesis_client
-        .ask::<crate::schema::task::ReviewReportPayload>(&synthesis_str)
-        .await?;
+        // 4. Pre-reviewers
+        let head_minus_one = repo
+            .revparse_single("HEAD~1")
+            .map(|obj| obj.id().to_string())
+            .unwrap_or_else(|_| "4b825dc642cb6eb9a060e54bf8d69288fbee4904".to_string());
+        
+        let mut session = crate::pre_review::session::ReviewSession::new(target_path.to_path_buf());
+        let mut coordinator_client = crate::llm::fast_llm("review_coordinator")
+            .system_prompt(crate::grind::prompts::review_team_selection_prompt())
+            .with_market_weight(0.7)
+            .build()?;
 
-    Ok(serde_json::to_string(&report)?)
+        // Need the payload struct for team selection
+        #[derive(serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+        struct TeamSelectionPayload {
+            pub experts: Vec<String>,
+        }
+
+        let team_selection = coordinator_client
+            .ask::<TeamSelectionPayload>("Select team based on diff bounds...")
+            .await?;
+
+        let begin_oid = git2::Oid::from_str(&head_minus_one)?;
+        let t_begin_tree = match repo.find_commit(begin_oid) {
+            Ok(commit) => commit.tree()?,
+            Err(_) => repo.find_tree(begin_oid)?,
+        };
+        
+        // Ensure worktree HEAD is resolved successfully! Wait, the target_repo is the worktree...
+        // let target_repo = Repository::open(target_path)?;
+        // Use target_repo. Diff it.
+        let target_repo = Repository::open(target_path)?;
+        let t_end = target_repo
+            .revparse_single("HEAD")?
+            .peel_to_commit()?
+            .tree()?;
+            
+        let diff = target_repo.diff_tree_to_tree(Some(&t_begin_tree), Some(&t_end), None)?;
+        let mut diff_text = String::new();
+        diff.print(git2::DiffFormat::Patch, |_delta, _hunk, line| {
+            let origin = line.origin();
+            if origin == '+' || origin == '-' || origin == ' ' {
+                diff_text.push(origin);
+            }
+            diff_text.push_str(std::str::from_utf8(line.content()).unwrap_or(""));
+            true
+        })?;
+
+        let review_context = format!("Git Diff:\n{}", diff_text);
+        let task_prompt = crate::pre_review::runner::reviewer_task_prompt(
+            1,
+            10 - iteration,
+            &task_payload.description,
+            &review_context,
+            "{}",
+        );
+
+        let formal_panel = session.enforce_quorum(
+            &team_selection.experts,
+            crate::personas::PersonaRole::CodeReview,
+        );
+        let outputs = session
+            .ask_reviewers::<crate::pre_review::schema::ReviewOutput>(
+                &formal_panel,
+                &task_prompt,
+                &format!("code review round {}", iteration),
+            )
+            .await?;
+
+        let mut synthesis_client = crate::llm::fast_llm("review_synthesis")
+            .system_prompt(&crate::grind::prompts::review_synthesis_prompt(&target_path))
+            .with_market_weight(0.6)
+            .build()?;
+
+        let valid_outputs: std::collections::HashMap<_, _> = outputs
+            .into_iter()
+            .filter_map(|(id, x)| x.ok().map(|o| (id, o)))
+            .collect();
+            
+        let mut all_approved = true;
+        for out in valid_outputs.values() {
+            if matches!(out.vote, crate::pre_review::schema::ReviewVote::ChangesRequired) {
+                all_approved = false;
+                break;
+            }
+        }
+
+        if !all_approved {
+            let synthesis_str = serde_json::to_string(&valid_outputs)?;
+            let report = synthesis_client
+                .ask::<crate::schema::task::ReviewReportPayload>(&synthesis_str)
+                .await?;
+            
+            feedback = format!("Code review failed! Please address these issues:\n{}", report.general_notes);
+            continue;
+        }
+
+        // 5. Fast-Forward Merge
+        let checkout_status = tokio::process::Command::new("git")
+            .arg("checkout")
+            .arg(&task_payload.parent_branch)
+            .current_dir(target_path)
+            .status()
+            .await?;
+            
+        if checkout_status.success() {
+            let merge_status = tokio::process::Command::new("git")
+                .arg("merge")
+                .arg("--ff-only")
+                .arg(&task_payload.branch)
+                .current_dir(target_path)
+                .status()
+                .await?;
+                
+            if !merge_status.success() {
+                // abort and go back
+                let _ = tokio::process::Command::new("git").arg("merge").arg("--abort").current_dir(target_path).status().await;
+                let _ = tokio::process::Command::new("git").arg("checkout").arg(&task_payload.branch).current_dir(target_path).status().await;
+                
+                feedback = format!("Merge to parent branch '{}' was not a fast-forward. Please rebase your branch on top of '{}' to resolve conflicts.", task_payload.parent_branch, task_payload.parent_branch);
+                continue;
+            }
+        } else {
+            // failed to checkout parent branch?
+            return Ok((crate::schema::task::AssignmentStatus::Failed, format!("Failed to find/checkout parent branch: {}", task_payload.parent_branch)));
+        }
+
+        return Ok((crate::schema::task::AssignmentStatus::Completed, "Successfully implemented and merged.".into()));
+    }
 }
+
 
 pub async fn execute<'a>(
     repo: &'a Repository,
@@ -625,19 +727,17 @@ pub async fn execute<'a>(
     }
 
     // The writer is provided organically by the orchestrator polling loop
-    let report_str = match task_payload.action {
+    let (status, report_str) = match task_payload.action {
         TaskAction::Plan => handle_plan_task(&target_path, task_ref, task_payload, &writer).await?,
         TaskAction::Implement => {
-            handle_implement_task(&target_path, task_ref, task_payload, &writer).await?
-        }
-        TaskAction::ReviewImplementation => {
-            handle_review_task(&target_path, repo, task_ref, task_payload, &writer).await?
+            handle_implement_task(&target_path, repo, task_ref, task_payload, &writer).await?
         }
     };
 
     writer.log_event(EventPayload::AssignmentComplete(
         AssignmentCompletePayload {
             assignment_ref: assignment_id.to_string(),
+            status,
             report: report_str,
         },
     ))?;
@@ -690,7 +790,7 @@ mod tests {
             description: "fake".into(),
             preconditions: "fake".into(),
             postconditions: "fake".into(),
-            validation_strategy: "fake".into(),
+            parent_branch: "fake".into(),
             action: TaskAction::Implement,
             branch: "missing_branch_throws_errors".into(),
             plan: None,
@@ -749,7 +849,7 @@ mod tests {
             description: "fake".into(),
             preconditions: "fake".into(),
             postconditions: "fake".into(),
-            validation_strategy: "fake".into(),
+            parent_branch: "fake".into(),
             action: TaskAction::Plan,
             branch: "working_branch".into(),
             plan: None,
@@ -799,87 +899,7 @@ mod tests {
         Ok(())
     }
 
-    #[tokio::test]
-    #[sealed_test(env = [
-        ("GEMINI_API_KEY", "mock"),
-        ("NANCY_NO_TRACE_EVENTS", "1")
-    ])]
-    async fn test_execute_review_bounds() -> anyhow::Result<()> {
-        let mut _tr = crate::debug::test_repo::TestRepo::new()?;
-        let td = &_tr.td;
-        let repo = &_tr.repo;
 
-        let mut index = repo.index()?;
-        let tree_id = index.write_tree()?;
-        let tree = repo.find_tree(tree_id)?;
-        let sig = git2::Signature::now("Mock", "mock@mock.com")?;
-        let commit_id1 = repo.commit(Some("refs/heads/main"), &sig, &sig, "init1", &tree, &[])?;
-        let commit1 = repo.find_commit(commit_id1)?;
-
-        let path = td.path().join("file.patch");
-        tokio::fs::write(&path, "1").await?;
-        let mut index2 = repo.index()?;
-        index2.add_path(std::path::Path::new("file.patch"))?;
-        let tree_id2 = index2.write_tree()?;
-        let tree2 = repo.find_tree(tree_id2)?;
-
-        let commit_id = repo.commit(
-            Some("refs/heads/main"),
-            &sig,
-            &sig,
-            "init",
-            &tree2,
-            &[&commit1],
-        )?;
-        let commit = repo.find_commit(commit_id)?;
-        repo.branch("working_branch", &commit, false)?;
-
-        let nancy_dir = td.path().join(".nancy");
-        tokio::fs::create_dir_all(&nancy_dir).await?;
-
-        crate::llm::mock::builder::MockChatBuilder::new()
-            .respond(r#"{"experts": ["The Pedant"]}"#) // TeamSelection
-            .respond(r#"{"vote": "approve", "agree_notes": "", "disagree_notes": ""}"#) // Review Output 1
-            .respond(r#"{"vote": "approve", "agree_notes": "", "disagree_notes": ""}"#) // Review Output 2 (Team Player)
-            .respond(r#"{"experts": ["The Pedant"], "vote": "approve", "agree_notes": "", "disagree_notes": "", "consensus": "approve", "recommended_tasks": [], "general_notes": ""}"#) // Synthesis
-            .commit();
-
-        let identity = Identity::Grinder(DidOwner {
-            did: "mock1".into(),
-            public_key_hex: "00".into(),
-            private_key_hex: "00".into(),
-        });
-
-        let payload = TaskPayload {
-            description: "fake review".into(),
-            preconditions: "fake".into(),
-            postconditions: "fake".into(),
-            validation_strategy: "fake".into(),
-            action: TaskAction::ReviewImplementation,
-            branch: "working_branch".into(),
-            plan: None,
-        };
-
-        let writer = Writer::new(repo, identity.clone())?;
-
-        let res = execute(
-            &repo,
-            &identity,
-            "assign_review",
-            "task_ref_review",
-            &payload,
-            &writer,
-        )
-        .await;
-
-        assert!(
-            res.is_ok(),
-            "Safely compiled execution trace logic naturally bounds the mock dynamically: {:?}",
-            res
-        );
-
-        Ok(())
-    }
 
     #[tokio::test]
     #[sealed_test(env = [
@@ -916,7 +936,7 @@ mod tests {
             description: "fake impl".into(),
             preconditions: "fake".into(),
             postconditions: "fake".into(),
-            validation_strategy: "fake".into(),
+            parent_branch: "fake".into(),
             action: TaskAction::Implement,
             branch: "working_branch".into(),
             plan: None,
@@ -998,7 +1018,7 @@ mod tests {
             description: "fake".into(),
             preconditions: "fake".into(),
             postconditions: "fake".into(),
-            validation_strategy: "fake".into(),
+            parent_branch: "fake".into(),
             action: TaskAction::Plan,
             branch: "working_branch".into(),
             plan: None,
@@ -1092,7 +1112,7 @@ mod tests {
             description: "fake".into(),
             preconditions: "fake".into(),
             postconditions: "fake".into(),
-            validation_strategy: "fake".into(),
+            parent_branch: "fake".into(),
             action: TaskAction::Plan,
             branch: "working_branch".into(),
             plan: None,
@@ -1121,7 +1141,7 @@ mod tests {
             description: "".into(),
             preconditions: "".into(),
             postconditions: "".into(),
-            validation_strategy: "".into(),
+            parent_branch: "".into(),
             action: super::TaskAction::Plan,
             branch: "".into(),
             depends_on: deps.into_iter().map(String::from).collect(),

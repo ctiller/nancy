@@ -118,11 +118,17 @@ impl AppView {
                     .insert(b.source.clone());
             }
             EventPayload::AssignmentComplete(c) => {
-                if let Some(target_ref) = self.assignment_targets.get(&c.assignment_ref) {
-                    self.assignments.remove(target_ref);
-                    self.task_completions.insert(target_ref.clone());
-                    self.completed_reports
-                        .insert(target_ref.clone(), c.report.clone());
+                if c.status == crate::schema::task::AssignmentStatus::Completed {
+                    if let Some(target_ref) = self.assignment_targets.get(&c.assignment_ref) {
+                        self.assignments.remove(target_ref);
+                        self.task_completions.insert(target_ref.clone());
+                        self.completed_reports
+                            .insert(target_ref.clone(), c.report.clone());
+                    }
+                } else {
+                    if let Some(target_ref) = self.assignment_targets.get(&c.assignment_ref) {
+                        self.assignments.remove(target_ref);
+                    }
                 }
             }
             EventPayload::CoordinatorAssignment(a) => {
@@ -485,7 +491,7 @@ mod tests {
             description: "Some action".into(),
             preconditions: "none".into(),
             postconditions: "done".into(),
-            validation_strategy: "noop".into(),
+            parent_branch: "master".into(),
             action: TaskAction::Plan,
             branch: "refs/heads/nancy/plans/test".into(),
             plan: None,
@@ -506,7 +512,7 @@ mod tests {
             description: "Review plan".into(),
             preconditions: "".into(),
             postconditions: "".into(),
-            validation_strategy: "".into(),
+            parent_branch: "master".into(),
             action: TaskAction::Plan,
             branch: "refs/heads/nancy/tasks/review-id".into(),
             plan: None,
@@ -517,7 +523,7 @@ mod tests {
             description: "Implement task".into(),
             preconditions: "".into(),
             postconditions: "".into(),
-            validation_strategy: "".into(),
+            parent_branch: "master".into(),
             action: TaskAction::Implement,
             branch: "refs/heads/nancy/tasks/impl-id".into(),
             plan: None,
@@ -541,44 +547,7 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_appview_implement_task_lookup() {
-        let mut appview = AppView::new();
 
-        let implement_task = EventPayload::Task(TaskPayload {
-            description: "Worker".into(),
-            preconditions: "".into(),
-            postconditions: "".into(),
-            validation_strategy: "".into(),
-            action: TaskAction::Implement,
-            branch: "refs/heads/nancy/tasks/impl-id".into(),
-            plan: None,
-        });
-
-        let review_impl = EventPayload::Task(TaskPayload {
-            description: "Review worker".into(),
-            preconditions: "".into(),
-            postconditions: "".into(),
-            validation_strategy: "".into(),
-            action: TaskAction::ReviewImplementation,
-            branch: "refs/heads/nancy/tasks/review-impl-id".into(),
-            plan: None,
-        });
-
-        appview.apply_event(&implement_task, "impl-id");
-        appview.apply_event(&review_impl, "review-impl-id");
-
-        appview.apply_event(
-            &EventPayload::BlockedBy(BlockedByPayload {
-                source: "impl-id".to_string(),
-                target: "review-impl-id".to_string(),
-            }),
-            "bb2",
-        );
-
-        let implement_target = appview.get_implement_task_id("review-impl-id");
-        assert_eq!(implement_target, Some("impl-id".to_string()));
-    }
 
     #[test]
     fn test_pagerank_highest_impact() {
@@ -592,7 +561,7 @@ mod tests {
                 description: "T1".into(),
                 preconditions: default_fields().0,
                 postconditions: default_fields().1,
-                validation_strategy: default_fields().2,
+                parent_branch: "master".into(),
                 action: crate::schema::task::TaskAction::Implement,
                 branch: "refs/heads/nancy/tasks/t1".into(),
                 plan: None,
@@ -604,7 +573,7 @@ mod tests {
                 description: "T2".into(),
                 preconditions: default_fields().0,
                 postconditions: default_fields().1,
-                validation_strategy: default_fields().2,
+                parent_branch: "master".into(),
                 action: crate::schema::task::TaskAction::Implement,
                 branch: "refs/heads/nancy/tasks/t2".into(),
                 plan: None,
@@ -616,7 +585,7 @@ mod tests {
                 description: "T3".into(),
                 preconditions: default_fields().0,
                 postconditions: default_fields().1,
-                validation_strategy: default_fields().2,
+                parent_branch: "master".into(),
                 action: crate::schema::task::TaskAction::Implement,
                 branch: "refs/heads/nancy/tasks/t3".into(),
                 plan: None,
@@ -658,6 +627,7 @@ mod tests {
         view.apply_event(
             &EventPayload::AssignmentComplete(crate::schema::task::AssignmentCompletePayload {
                 assignment_ref: "assignment_event_id".into(),
+                status: crate::schema::task::AssignmentStatus::Completed,
                 report: "done".into(),
             }),
             "e3",

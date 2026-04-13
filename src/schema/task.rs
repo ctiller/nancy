@@ -26,7 +26,6 @@ pub struct TaskRequestPayload {
 pub enum TaskAction {
     Plan,
     Implement,
-    ReviewImplementation,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -34,7 +33,7 @@ pub struct TaskPayload {
     pub description: String,
     pub preconditions: String,
     pub postconditions: String,
-    pub validation_strategy: String,
+    pub parent_branch: String,
     pub action: TaskAction,
     pub branch: String,
     pub plan: Option<String>,
@@ -46,9 +45,18 @@ pub struct CoordinatorAssignmentPayload {
     pub assignee_did: String,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AssignmentStatus {
+    Completed,
+    Blocked,
+    Failed,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AssignmentCompletePayload {
     pub assignment_ref: String,
+    pub status: AssignmentStatus,
     pub report: String,
 }
 
