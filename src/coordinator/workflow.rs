@@ -338,7 +338,7 @@ mod tests {
             description: "".to_string(),
             preconditions: "".to_string(),
             postconditions: "".to_string(),
-            validation_strategy: "".to_string(),
+            parent_branch: "master".to_string(),
             branch: "TBD".to_string(),
             plan: None,
         });

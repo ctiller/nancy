@@ -379,8 +379,8 @@ async fn handle_plan_task(
                 for dep in t.depends_on {
                     if let Some(dep_ev_id) = task_id_mappings.get(&dep) {
                         let _ = writer.log_event(EventPayload::BlockedBy(crate::schema::task::BlockedByPayload {
-                            source: task_ev_id.clone(),
-                            target: dep_ev_id.clone(),
+                            source: dep_ev_id.clone(),
+                            target: task_ev_id.clone(),
                         }));
                     }
                 }
@@ -428,8 +428,8 @@ pub async fn handle_implement_task(
             };
             let remedy_id = writer.log_event(crate::schema::registry::EventPayload::Task(remedy))?;
             writer.log_event(crate::schema::registry::EventPayload::BlockedBy(crate::schema::task::BlockedByPayload {
-                source: task_ref.to_string(),
-                target: remedy_id,
+                source: remedy_id,
+                target: task_ref.to_string(),
             }))?;
             return Ok((crate::schema::task::AssignmentStatus::Blocked, format!("Blocked by precondition failure: {}", check_res.failed_reason)));
         }
@@ -868,7 +868,7 @@ mod tests {
             builder = builder.respond("Expert ideation...");
         }
 
-        builder = builder.respond(r#"{"tdd": {"title": "T", "summary": "S", "background_context": "", "goals": ["G"], "non_goals": [], "proposed_design": ["D"], "risks_and_tradeoffs": [], "alternatives_considered": []}, "tasks": [{"id": "t1", "description": "foo", "preconditions": "foo", "postconditions": "foo", "validation_strategy": "foo", "action": "implement", "branch": "foo", "depends_on": []}]}"#);
+        builder = builder.respond(r#"{"tdd": {"title": "T", "summary": "S", "background_context": "", "goals": ["G"], "non_goals": [], "proposed_design": ["D"], "risks_and_tradeoffs": [], "alternatives_considered": []}, "tasks": [{"id": "t1", "description": "foo", "preconditions": "foo", "postconditions": "foo", "parent_branch": "foo", "action": "implement", "branch": "foo", "depends_on": []}]}"#);
 
         for _ in 0..6 {
             builder = builder
@@ -923,7 +923,11 @@ mod tests {
         tokio::fs::create_dir_all(&nancy_dir).await?;
 
         crate::llm::mock::builder::MockChatBuilder::new()
+            .respond(r#"{"passed": true, "failed_reason": "", "remedy_task_description": ""}"#)
             .respond("Implemented safely bounded!")
+            .respond(r#"{"passed": true, "failed_reason": "", "remedy_task_description": ""}"#)
+            .respond(r#"{"experts": ["Tester"]}"#)
+            .respond(r#"{"vote": "approve", "agree_notes": "LGTM", "disagree_notes": ""}"#)
             .commit();
 
         let identity = Identity::Grinder(DidOwner {
@@ -1082,9 +1086,9 @@ mod tests {
             // Iteration 1: Return parse error array payload
             .respond(r#"["unparsable]"#)
             // Iteration 2: Return structural self-cycle to trigger DAG bounds
-            .respond(r#"{"tdd": {"title": "T", "summary": "S", "background_context": "", "goals": ["G"], "non_goals": [], "proposed_design": ["D"], "risks_and_tradeoffs": [], "alternatives_considered": []}, "tasks": [{"id": "t1", "description": "", "preconditions": "", "postconditions": "", "validation_strategy": "", "action": "implement", "branch": "", "depends_on": ["t1"]}]}"#)
+            .respond(r#"{"tdd": {"title": "T", "summary": "S", "background_context": "", "goals": ["G"], "non_goals": [], "proposed_design": ["D"], "risks_and_tradeoffs": [], "alternatives_considered": []}, "tasks": [{"id": "t1", "description": "", "preconditions": "", "postconditions": "", "parent_branch": "", "action": "implement", "branch": "", "depends_on": ["t1"]}]}"#)
             // Iteration 3: Structurally valid mapping including a BlockedBy target naturally triggering events
-            .respond(r#"{"tdd": {"title": "T", "summary": "S", "background_context": "", "goals": ["G"], "non_goals": [], "proposed_design": ["D"], "risks_and_tradeoffs": [], "alternatives_considered": []}, "tasks": [{"id": "t1", "description": "", "preconditions": "", "postconditions": "", "validation_strategy": "", "action": "implement", "branch": "", "depends_on": []}, {"id": "t2", "description": "", "preconditions": "", "postconditions": "", "validation_strategy": "", "action": "implement", "branch": "", "depends_on": ["t1"]}]}"#);
+            .respond(r#"{"tdd": {"title": "T", "summary": "S", "background_context": "", "goals": ["G"], "non_goals": [], "proposed_design": ["D"], "risks_and_tradeoffs": [], "alternatives_considered": []}, "tasks": [{"id": "t1", "description": "", "preconditions": "", "postconditions": "", "parent_branch": "", "action": "implement", "branch": "", "depends_on": []}, {"id": "t2", "description": "", "preconditions": "", "postconditions": "", "parent_branch": "", "action": "implement", "branch": "", "depends_on": ["t1"]}]}"#);
 
         // Iteration 3 formal review mapping triggering rejection to evaluate coverage iteratively (Grace Round = 2 reviewers due to Mandatory Team Player)
         builder = builder
@@ -1092,7 +1096,7 @@ mod tests {
             .respond(r#"{"vote": "changes_required", "agree_notes": "", "disagree_notes": "Needs rework"}"#);
 
         // Iteration 4: Moderator resynthesizes plan
-        builder = builder.respond(r#"{"tdd": {"title": "T", "summary": "S", "background_context": "", "goals": ["G"], "non_goals": [], "proposed_design": ["D"], "risks_and_tradeoffs": [], "alternatives_considered": []}, "tasks": [{"id": "t1", "description": "", "preconditions": "", "postconditions": "", "validation_strategy": "", "action": "implement", "branch": "", "depends_on": []}, {"id": "t2", "description": "", "preconditions": "", "postconditions": "", "validation_strategy": "", "action": "implement", "branch": "", "depends_on": ["t1"]}]}"#);
+        builder = builder.respond(r#"{"tdd": {"title": "T", "summary": "S", "background_context": "", "goals": ["G"], "non_goals": [], "proposed_design": ["D"], "risks_and_tradeoffs": [], "alternatives_considered": []}, "tasks": [{"id": "t1", "description": "", "preconditions": "", "postconditions": "", "parent_branch": "", "action": "implement", "branch": "", "depends_on": []}, {"id": "t2", "description": "", "preconditions": "", "postconditions": "", "parent_branch": "", "action": "implement", "branch": "", "depends_on": ["t1"]}]}"#);
 
         // Iteration 4: Formal review accepts
         for _ in 0..6 {

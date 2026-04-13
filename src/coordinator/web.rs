@@ -688,16 +688,33 @@ pub fn spawn_web_server(
     drop(tcp_listener);
 
     tokio::spawn(async move {
-        // Generate a self-signed certificate for local HTTPS/HTTP2 support
-        let subject_alt_names = vec![
-            "localhost".to_string(),
-            "127.0.0.1".to_string(),
-            "0.0.0.0".to_string(),
-        ];
-        let cert = rcgen::generate_simple_self_signed(subject_alt_names)
-            .expect("Failed to generate self-signed cert");
-        let cert_der = cert.cert.der().to_vec();
-        let key_der = cert.signing_key.serialize_der();
+        let workdir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        let cert_path = workdir.join(".nancy").join("web_cert.der");
+        let key_path = workdir.join(".nancy").join("web_key.der");
+
+        let (cert_der, key_der) = if cert_path.exists() && key_path.exists() {
+            let c = tokio::fs::read(&cert_path).await.unwrap();
+            let k = tokio::fs::read(&key_path).await.unwrap();
+            (c, k)
+        } else {
+            let mut subject_alt_names = vec![
+                "localhost".to_string(),
+                "127.0.0.1".to_string(),
+                "0.0.0.0".to_string(),
+            ];
+            if let Ok(output) = std::process::Command::new("hostname").output() {
+                if let Ok(h) = String::from_utf8(output.stdout) {
+                    subject_alt_names.push(h.trim().to_string());
+                }
+            }
+            let cert = rcgen::generate_simple_self_signed(subject_alt_names)
+                .expect("Failed to generate self-signed cert");
+            let c = cert.cert.der().to_vec();
+            let k = cert.signing_key.serialize_der();
+            let _ = tokio::fs::write(&cert_path, &c).await;
+            let _ = tokio::fs::write(&key_path, &k).await;
+            (c, k)
+        };
 
         let config = axum_server::tls_rustls::RustlsConfig::from_der(vec![cert_der], key_der)
             .await
