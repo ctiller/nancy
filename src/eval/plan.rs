@@ -43,6 +43,7 @@ pub async fn eval_plan(path: &str, output_path: &std::path::Path) -> Result<()> 
         traces: runner.extract_traces().await,
         implemented_commit_hash: None,
         implemented_patch: None,
+        implemented_files: None,
     };
 
     let result_yaml = serde_yaml::to_string(&result)?;

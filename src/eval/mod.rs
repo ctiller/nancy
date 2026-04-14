@@ -92,6 +92,7 @@ pub struct EvalResult {
     pub traces: Vec<crate::schema::registry::EventPayload>,
     pub implemented_commit_hash: Option<String>,
     pub implemented_patch: Option<String>,
+    pub implemented_files: Option<std::collections::HashMap<String, String>>,
 }
 
 pub async fn extract_traces(

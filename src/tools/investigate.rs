@@ -130,12 +130,64 @@ impl AskHuman {
     }
 }
 
+use std::cell::RefCell;
+
+tokio::task_local! {
+    static INVESTIGATION_HISTORY: RefCell<Vec<String>>;
+}
+
 pub async fn investigate_impl(
     perms: Arc<crate::tools::filesystem::Permissions>,
     question: String,
     task_name: String,
     agent_path: String,
 ) -> anyhow::Result<String> {
+    let is_scoped = INVESTIGATION_HISTORY.try_with(|_| ()).is_ok();
+    if !is_scoped {
+        INVESTIGATION_HISTORY.scope(RefCell::new(vec![]), async move {
+            investigate_inner(perms, question, task_name, agent_path).await
+        }).await
+    } else {
+        investigate_inner(perms, question, task_name, agent_path).await
+    }
+}
+
+async fn investigate_inner(
+    perms: Arc<crate::tools::filesystem::Permissions>,
+    question: String,
+    task_name: String,
+    agent_path: String,
+) -> anyhow::Result<String> {
+    let history_json = INVESTIGATION_HISTORY.try_with(|h| {
+        let hist = h.borrow();
+        serde_json::to_string(&*hist).unwrap_or_default()
+    }).unwrap_or_default();
+
+    if history_json != "[]" && !history_json.is_empty() {
+        let prompt = format!(
+            "Determine if the following new question is semantically a repetition of any of the previously investigated questions explicitly.\n\
+            Previous Questions: {}\n\
+            New Question: {}\n\n\
+            Return a JSON object with `is_repetition` (boolean).",
+            history_json, question
+        );
+
+        #[derive(serde::Deserialize, schemars::JsonSchema)]
+        struct RepetitionCheck {
+            is_repetition: bool,
+        }
+
+        if let Ok(mut checker) = crate::llm::lite_llm("repetition_checker").build() {
+            if let Ok(res) = checker.ask::<RepetitionCheck>(&prompt).await {
+                if res.is_repetition {
+                    return Ok("Execution denied: question is a repetition of a previous investigation bounds on the active subagent lineage.".to_string());
+                }
+            }
+        }
+    }
+
+    let _ = INVESTIGATION_HISTORY.try_with(|h| h.borrow_mut().push(question.clone()));
+
     let system_prompt = r#"You are an expert forensic programmer and autonomous system investigator.
 Your objective is to comprehensively map, diagnose, and answer the given question by actively exploring the system using your available toolkit.
 
@@ -144,7 +196,8 @@ Follow these critical principles:
 2. **Be Autonomous**: A single search will rarely yield the full context. If your first search misses, hypothesize new locations and chase down references recursively.
 3. **Connect the Dots**: Cross-reference definitions, configurations, and active architectures to build a complete mental picture.
 4. **Be Exhaustive**: When asked to locate or identify something, do not stop at the first match. Comb through the architecture to guarantee complete isolation.
-5. **Report Clearly**: Synthesize your discoveries into a hyper-direct, rigorous, and technical answer yielding exact file paths, snippets, and mechanical processes."#;
+5. **Report Clearly**: Synthesize your discoveries into a hyper-direct, rigorous, and technical answer yielding exact file paths, snippets, and mechanical processes.
+6. **Acknowledge Sandbox Boundaries**: If your filesystem tools return 'Explicit permission missing against mapped boundary target', DO NOT attempt to bypass or brute-force the sandbox with relative path traversals. You MUST immediately stop and respond with a clear statement that the required artifact is unavailable due to isolated directory bounds."#;
 
     let inner_agent = format!("{}>investigator", agent_path);
     let tools = super::AgentToolsBuilder::new()

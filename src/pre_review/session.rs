@@ -7,6 +7,12 @@ use crate::llm::fast_llm;
 use crate::personas::{PersonaCategory, get_all_personas};
 use crate::pre_review::runner::reviewer_system_prompt;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QuorumStrictness {
+    Strict,
+    Lite,
+}
+
 pub struct ReviewSession {
     pub reviewers: HashMap<String, LlmClient>,
     pub previous_invalid_panel: HashSet<String>,
@@ -63,6 +69,7 @@ impl ReviewSession {
         &mut self,
         requested_experts: &[String],
         role: crate::personas::PersonaRole,
+        strictness: QuorumStrictness,
     ) -> Vec<String> {
         let role_bounded = self.enforce_role_bounds(requested_experts, role);
         let all_personas = get_all_personas();
@@ -82,7 +89,10 @@ impl ReviewSession {
             }
         }
 
-        let is_valid = current_tech >= 2 && current_paradigm >= 2 && current_orch >= 2;
+        let is_valid = match strictness {
+            QuorumStrictness::Strict => current_tech >= 2 && current_paradigm >= 2 && current_orch >= 2,
+            QuorumStrictness::Lite => !panel.is_empty(),
+        };
 
         if is_valid {
             self.previous_invalid_panel.clear();
@@ -98,32 +108,42 @@ impl ReviewSession {
             return panel.into_iter().collect();
         }
 
-        tracing::warn!(
-            "Coordinator stagnated on an invalid quorum. Backend forcefully establishing K=2 requirements."
-        );
+        if strictness == QuorumStrictness::Strict {
+            tracing::warn!(
+                "Coordinator stagnated on an invalid quorum. Backend forcefully establishing K=2 requirements."
+            );
 
-        let mut add_missing = |cat: PersonaCategory, current: &mut usize| {
-            while *current < 2 {
-                if let Some(p) = all_personas.iter().find(|p| {
-                    p.category == cat
-                        && !panel.contains(p.name)
-                        && p.roles
-                            .get(&role)
-                            .copied()
-                            .unwrap_or(crate::personas::RequirementState::Optional)
-                            != crate::personas::RequirementState::Never
-                }) {
-                    panel.insert(p.name.to_string());
-                    *current += 1;
-                } else {
-                    break;
+            let mut add_missing = |cat: PersonaCategory, current: &mut usize| {
+                while *current < 2 {
+                    if let Some(p) = all_personas.iter().find(|p| {
+                        p.category == cat
+                            && !panel.contains(p.name)
+                            && p.roles
+                                .get(&role)
+                                .copied()
+                                .unwrap_or(crate::personas::RequirementState::Optional)
+                                != crate::personas::RequirementState::Never
+                    }) {
+                        panel.insert(p.name.to_string());
+                        *current += 1;
+                    } else {
+                        break;
+                    }
                 }
-            }
-        };
+            };
 
-        add_missing(PersonaCategory::Technical, &mut current_tech);
-        add_missing(PersonaCategory::Paradigm, &mut current_paradigm);
-        add_missing(PersonaCategory::Orchestration, &mut current_orch);
+            add_missing(PersonaCategory::Technical, &mut current_tech);
+            add_missing(PersonaCategory::Paradigm, &mut current_paradigm);
+            add_missing(PersonaCategory::Orchestration, &mut current_orch);
+        } else if panel.is_empty() {
+            tracing::warn!("Coordinator stagnated on empty quorum. Backend forcefully injecting a Team Player.");
+            if let Some(p) = all_personas.iter().find(|p| p.name == "The Team Player") {
+                panel.insert(p.name.to_string());
+            } else if let Some(p) = all_personas.iter().find(|p| p.category == PersonaCategory::Technical) {
+                // Guaranteed Fallback
+                panel.insert(p.name.to_string());
+            }
+        }
 
         self.previous_invalid_panel.clear();
         panel.into_iter().collect()
@@ -136,6 +156,7 @@ impl ReviewSession {
         experts: &[String],
         prompt: &str,
         status_label: &str,
+        focus_criteria: &str,
     ) -> Result<Vec<(String, Result<T>)>> {
         let all_personas = get_all_personas();
         let deadline_state = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
@@ -146,7 +167,7 @@ impl ReviewSession {
                     continue;
                 };
 
-                let sys_prompt = reviewer_system_prompt(persona, &self.workspace);
+                let sys_prompt = reviewer_system_prompt(persona, &self.workspace, focus_criteria);
                 let client_name =
                     format!("reviewer_{}", persona.name.replace(" ", "_").to_lowercase());
 
@@ -312,7 +333,7 @@ mod tests {
         );
 
         let final_panel =
-            session.enforce_quorum(&initial_experts, crate::personas::PersonaRole::PlanReview);
+            session.enforce_quorum(&initial_experts, crate::personas::PersonaRole::PlanReview, QuorumStrictness::Strict);
         assert!(final_panel.len() >= 6);
     }
 
@@ -322,14 +343,27 @@ mod tests {
 
         let initial_experts = vec!["The Pedant".to_string()]; // 1 Paradigm
         let final_panel =
-            session.enforce_quorum(&initial_experts, crate::personas::PersonaRole::PlanReview);
+            session.enforce_quorum(&initial_experts, crate::personas::PersonaRole::PlanReview, QuorumStrictness::Strict);
         assert_eq!(final_panel.len(), 2); // Grace Period iteration (Pedant + Default Mandatory Team Player)
 
         let final_panel =
-            session.enforce_quorum(&initial_experts, crate::personas::PersonaRole::PlanReview);
+            session.enforce_quorum(&initial_experts, crate::personas::PersonaRole::PlanReview, QuorumStrictness::Strict);
 
         assert_eq!(final_panel.len(), 6);
         assert!(final_panel.contains(&"The Pedant".to_string())); // Pedant must be retained
+    }
+
+    #[test]
+    fn test_quorum_lite_empty_fallback() {
+        let mut session = ReviewSession::new(std::path::PathBuf::from("/tmp/nancy"));
+        let initial_experts: Vec<String> = vec![];
+
+        let final_panel =
+            session.enforce_quorum(&initial_experts, crate::personas::PersonaRole::PlanReview, QuorumStrictness::Lite);
+
+        // Ensure that at least one persona was forcefully injected
+        assert!(!final_panel.is_empty());
+        assert_eq!(final_panel.len(), 1);
     }
 
     use sealed_test::prelude::*;
@@ -349,14 +383,15 @@ mod tests {
         let mut session = ReviewSession::new(std::path::PathBuf::from("/tmp/nancy"));
         let experts = vec!["The Pedant".to_string()];
 
-        let _ = session.enforce_quorum(&experts, crate::personas::PersonaRole::PlanReview);
+        let _ = session.enforce_quorum(&experts, crate::personas::PersonaRole::PlanReview, QuorumStrictness::Strict);
         let active_panel =
-            session.enforce_quorum(&experts, crate::personas::PersonaRole::PlanReview);
+            session.enforce_quorum(&experts, crate::personas::PersonaRole::PlanReview, QuorumStrictness::Strict);
         let res = session
             .ask_reviewers::<crate::pre_review::schema::ReviewOutput>(
                 &active_panel,
                 "Prompt test",
                 "test",
+                "focus test",
             )
             .await;
 
@@ -392,6 +427,7 @@ mod tests {
                 &experts,
                 "Prompt test",
                 "test",
+                "focus test",
             )
             .await;
 
@@ -420,6 +456,7 @@ mod tests {
                 &experts,
                 "Prompt test",
                 "test",
+                "focus test",
             )
             .await;
 

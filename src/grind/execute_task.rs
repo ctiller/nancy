@@ -180,7 +180,7 @@ async fn handle_plan_task(
             task_description: &task_payload.description,
         }.render()?;
 
-        let res = session.ask_reviewers::<String>(&ideation_experts, &prompt, "ideation round 1").await?;
+        let res = session.ask_reviewers::<String>(&ideation_experts, &prompt, "ideation round 1", "Ideate and draft purely creative options.").await?;
         
         for (expert_id, ideation_result) in res {
             if let Ok(ideation) = ideation_result {
@@ -267,8 +267,8 @@ async fn handle_plan_task(
             tracing::error!("FATAL COMMIT BATCH ERROR: {}", e);
         }
 
-        let formal_panel = session.enforce_quorum(&team_selection.experts, crate::personas::PersonaRole::PlanReview);
-        let review_outputs = session.ask_reviewers::<crate::pre_review::schema::ReviewOutput>(&formal_panel, &review_prompt, &format!("review round {}", iteration)).await?;
+        let formal_panel = session.enforce_quorum(&team_selection.experts, crate::personas::PersonaRole::PlanReview, crate::pre_review::session::QuorumStrictness::Strict);
+        let review_outputs = session.ask_reviewers::<crate::pre_review::schema::ReviewOutput>(&formal_panel, &review_prompt, &format!("review round {}", iteration), "You MUST provide granular feedback explicitly assessing the TddDocument payload and evaluating each and every defined task. For each task, assert whether the scope is `Atomic`, `Multistep`, or `RequiresSplit` in your `task_feedback` array.").await?;
         
         let valid_outputs: Vec<_> = review_outputs.into_iter().filter_map(|(id, x)| x.ok().map(|o| (id, o))).collect();
         
@@ -598,25 +598,37 @@ pub async fn handle_implement_task(
             }
 
             let review_context = format!("Git Diff:\n{}", diff_text);
+            let focus_criteria = "Review the diff for runtime correctness and boundary logic. The scope revolves entirely around physical syntax and file modifications.";
             let task_prompt = crate::pre_review::runner::reviewer_task_prompt(
                 1,
                 10 - iteration,
                 &task_payload.description,
                 &review_context,
                 "{}",
+                focus_criteria,
             );
 
             crate::introspection::log(&format!("Dispatching review round {} exactly...", iteration));
 
+            let mut sizer_client = crate::llm::fast_llm("diff_sizer").system_prompt("Determine the complexity of this git diff. If it contains only trivial text modifications (e.g. basic string swaps, comment changes), return 'Lite'. If it contains logic branches, algorithmic additions, or multi-file architectural transitions, return 'Strict'. Return only the word 'Lite' or 'Strict'.").build()?;
+            let sizer_res = sizer_client.ask::<String>(&review_context).await.unwrap_or_else(|_| "Strict".to_string());
+            let strictness_enum = if sizer_res.trim().eq_ignore_ascii_case("Lite") {
+                crate::pre_review::session::QuorumStrictness::Lite
+            } else {
+                crate::pre_review::session::QuorumStrictness::Strict
+            };
+
             let formal_panel = session.enforce_quorum(
                 &team_selection.experts,
                 crate::personas::PersonaRole::CodeReview,
+                strictness_enum,
             );
             let outputs = session
                 .ask_reviewers::<crate::pre_review::schema::ReviewOutput>(
                     &formal_panel,
                     &task_prompt,
                     &format!("code review round {}", iteration),
+                    focus_criteria,
                 )
                 .await?;
 

@@ -80,21 +80,30 @@ fn is_retryable_status(status: u16) -> bool {
 pub async fn proxy_handler(
     State(ipc_state): State<crate::coordinator::ipc::IpcState>,
     Json(payload): Json<LlmRequest>,
-) -> impl IntoResponse {
-    let gateway = ipc_state.gateway.clone();
-    
-    // 1. Submit Bid Natively
-    let agent_path = payload.agent_path.clone();
-    let task_name = payload.task_name.clone();
-    let rx = crate::coordinator::market::ArbitrationMarket::submit_bid(&ipc_state.token_market, payload.clone());
-    let lease = match rx.await {
-        Ok(l) => l,
-        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "Auction Failed").into_response(),
+) -> axum::response::Response {
+    let agent_ctx = crate::introspection::IntrospectionContext {
+        current_frame: ipc_state.tree_root.agent_root.clone(),
+        updater: ipc_state.tree_root.updater.clone(),
     };
 
-    let model = lease.granted_model.clone();
-    let model_str = serde_json::to_value(&model).unwrap().as_str().unwrap().to_string();
-    let health_mutex = gateway.get_model(&model_str).await;
+    crate::introspection::INTROSPECTION_CTX.scope(agent_ctx, async move {
+        crate::introspection::frame(format!("proxy_req_{}", payload.task_name).as_str(), async move {
+            let gateway = ipc_state.gateway.clone();
+            
+            // 1. Submit Bid Natively
+            crate::introspection::log(&format!("Submitting market bid for {}", payload.task_name));
+            let agent_path = payload.agent_path.clone();
+            let task_name = payload.task_name.clone();
+            let rx = crate::coordinator::market::ArbitrationMarket::submit_bid(&ipc_state.token_market, payload.clone());
+            let lease = match rx.await {
+                Ok(l) => l,
+                Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "Auction Failed").into_response(),
+            };
+
+            let model = lease.granted_model.clone();
+            crate::introspection::log(&format!("Auction granted lease for model: {:?}", model));
+            let model_str = serde_json::to_value(&model).unwrap().as_str().unwrap().to_string();
+            let health_mutex = gateway.get_model(&model_str).await;
 
     // Execution loop natively
     let mut res = loop {
@@ -142,6 +151,7 @@ pub async fn proxy_handler(
                     let now = current_time_ms();
                     health.next_tx_ms = now + duration.as_millis() as u64;
                     tracing::warn!("Model {} hit {}. Backing off proxy for {:?}", model_str, status, duration);
+                    crate::introspection::log(&format!("Proxy upstream HTTP {} hit. Backoff initiated loop.", status));
                     continue;
                 }
                 
@@ -171,6 +181,7 @@ pub async fn proxy_handler(
     };
 
     // Construct natively streaming response
+    crate::introspection::log(&format!("Establishing SSE stream internally recursively..."));
     let (tx, rx) = tokio::sync::mpsc::channel::<Result<Event, std::convert::Infallible>>(128);
     let token_market = ipc_state.token_market.clone();
 
@@ -266,9 +277,10 @@ pub async fn proxy_handler(
                 cost_nanocents.0 as f64 / 1_000_000_000.0
             );
         }
-        
     });
 
     let sse_stream = tokio_stream::wrappers::ReceiverStream::new(rx);
     Sse::new(sse_stream).into_response()
+        }).await
+    }).await
 }

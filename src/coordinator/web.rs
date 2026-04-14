@@ -82,6 +82,11 @@ async fn proxy_grinder_state(
     axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
 ) -> impl IntoResponse {
     let root = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let socket_path_coordinator = root
+        .join(".nancy")
+        .join("sockets")
+        .join(&did)
+        .join("coordinator.sock");
     let socket_path_grinder = root
         .join(".nancy")
         .join("sockets")
@@ -92,7 +97,9 @@ async fn proxy_grinder_state(
         .join("sockets")
         .join(&did)
         .join("dreamer.sock");
-    let socket_path = if socket_path_grinder.exists() {
+    let socket_path = if socket_path_coordinator.exists() {
+        socket_path_coordinator
+    } else if socket_path_grinder.exists() {
         socket_path_grinder
     } else {
         socket_path_dreamer
@@ -174,9 +181,18 @@ async fn get_api_grinders(
     .await;
 
     if let crate::schema::identity_config::Identity::Coordinator {
-        workers, dreamer, ..
+        did: _coord_did, workers, dreamer, ..
     } = &identity
     {
+        statuses.push(schema::GrinderStatus {
+            did: "coordinator".to_string(),
+            agent_type: "coordinator".to_string(),
+            is_online: true,
+            next_restart_at_unix: None,
+            failures: None,
+            log_ref: None,
+        });
+
         let mut agents = vec![];
         for w in workers {
             agents.push((w, "grinder"));
@@ -820,6 +836,7 @@ mod tests {
                 crate::schema::coordinator_config::CoordinatorConfig::default(),
             ),
             gateway: std::sync::Arc::new(crate::coordinator::llm_proxy::GatewayState::new()),
+            tree_root: std::sync::Arc::new(crate::introspection::IntrospectionTreeRoot::new()),
         };
         let ext = axum::extract::Extension(ipc);
 
@@ -870,6 +887,7 @@ mod tests {
                 crate::schema::coordinator_config::CoordinatorConfig::default(),
             ),
             gateway: std::sync::Arc::new(crate::coordinator::llm_proxy::GatewayState::new()),
+            tree_root: std::sync::Arc::new(crate::introspection::IntrospectionTreeRoot::new()),
         };
         let ext = axum::extract::Extension(ipc);
         let json = axum::Json(crate::schema::task::TaskRequestPayload {

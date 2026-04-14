@@ -1,6 +1,6 @@
 use crate::personas::Persona;
 
-pub fn reviewer_system_prompt(persona: &Persona, workspace: &std::path::Path) -> String {
+pub fn reviewer_system_prompt(persona: &Persona, workspace: &std::path::Path, focus_criteria: &str) -> String {
     format!(
         "You are an expert Reviewer on a panel. Your persona is: {persona_name}.\n\n\
         {persona_body}\n\n\
@@ -15,11 +15,11 @@ pub fn reviewer_system_prompt(persona: &Persona, workspace: &std::path::Path) ->
         4. **Agency:** You have full agency to investigate the codebase, run tests, and provide rigorous feedback. Do not rubber-stamp approvals.\n\
         \n\
         When conducting reviews or ideation, frame your analysis against the following expectations:\n\
-        {tdd_guidelines}",
+        {focus_criteria}",
         persona_name = persona.name,
         persona_body = persona.persona,
         workspace = workspace.display(),
-        tdd_guidelines = crate::grind::prompts::TDD_GUIDELINES,
+        focus_criteria = focus_criteria,
     )
 }
 
@@ -29,6 +29,7 @@ pub fn reviewer_task_prompt(
     task_description: &str,
     review_context: &str,
     dissent_log_json: &str,
+    focus_criteria: &str,
 ) -> String {
     let rounds_remaining = max_rounds.saturating_sub(round);
     let round_warning = if rounds_remaining == 0 {
@@ -48,13 +49,13 @@ pub fn reviewer_task_prompt(
         \n\
         Review the work and issue appropriate feedback.\
         If you disagree with it, state that it should be cleared. \n\
-        You MUST provide granular feedback explicitly assessing the TddDocument payload and evaluating each and every defined task. \n\
-        For each task, assert whether the scope is `Atomic`, `Multistep`, or `RequiresSplit` in your `task_feedback` array. \n\
+        {focus_criteria}\n\
         You must output your final verdict securely targeting the `ReviewOutput` json schema dynamically.",
         round_warning_if_applicable = round_warning,
         task_description = task_description,
         review_context = review_context,
         dissent_log_json = dissent_log_json,
+        focus_criteria = focus_criteria,
     )
 }
 
@@ -109,7 +110,7 @@ mod tests {
             .iter()
             .find(|p| p.name == "The Pedant")
             .unwrap();
-        let prompt = reviewer_system_prompt(pedant, std::path::Path::new("/tmp/test"));
+        let prompt = reviewer_system_prompt(pedant, std::path::Path::new("/tmp/test"), "test focus");
 
         assert!(
             prompt.contains("The Pedant"),
@@ -131,16 +132,16 @@ mod tests {
     #[test]
     fn test_reviewer_task_prompt_verifies_warning_thresholds() {
         // Standard round
-        let normal = reviewer_task_prompt(1, 15, "task", "ctx", "{}");
+        let normal = reviewer_task_prompt(1, 15, "task", "ctx", "{}", "focus");
         assert!(normal.contains("A maximum of 14 rounds of discussion remain."));
         assert!(!normal.contains("This is the final round of discussion."));
 
         // Penultimate round
-        let penult = reviewer_task_prompt(14, 15, "task", "ctx", "{}");
+        let penult = reviewer_task_prompt(14, 15, "task", "ctx", "{}", "focus");
         assert!(penult.contains("A maximum of 1 rounds of discussion remain."));
 
         // Ultimate round
-        let ult = reviewer_task_prompt(15, 15, "task", "ctx", "{}");
+        let ult = reviewer_task_prompt(15, 15, "task", "ctx", "{}", "focus");
         assert!(ult.contains("This is the final round of discussion."));
     }
 }

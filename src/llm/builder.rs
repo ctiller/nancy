@@ -169,7 +169,12 @@ impl LlmBuilder {
                     };
 
                     let prompt_text = format!(
-                        "SYSTEM PROMPT: Analyze the trace to determine if the agent is stuck in a repetitive loop doing the exact same thing without making progress. If it is looping, provide a short description of the specific loop pattern detected. Return your answer as a JSON object matching the requested schema.\n\nTRACE:\n{}",
+                        "SYSTEM PROMPT: Analyze the trace to determine if the agent is stuck in a repetitive loop doing the exact same thing without making progress.\n\
+                        Thrashing explicitly includes:\n\
+                        1. Repeatedly executing generic shell commands (e.g. `ls`, `cat`) instead of native tools.\n\
+                        2. Firing identical tool calls or rapidly mutating tool args blindly after repeatedly encountering sandbox permission boundary errors (`Explicit permission missing...`).\n\
+                        If it is looping or thrashing, provide a short description of the specific loop pattern detected. You must aggressively return `is_looping: true` if the last 4 tool calls demonstrate zero forward logical momentum.\n\
+                        Return your answer as a JSON object matching the requested schema.\n\nTRACE:\n{}",
                         trimmed_history
                     );
 

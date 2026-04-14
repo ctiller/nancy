@@ -20,6 +20,7 @@ pub struct IpcState {
     pub shared_identity: Arc<RwLock<Identity>>,
     pub token_market: crate::coordinator::market::SharedArbitrationMarket,
     pub gateway: Arc<crate::coordinator::llm_proxy::GatewayState>,
+    pub tree_root: Arc<crate::introspection::IntrospectionTreeRoot>,
 }
 
 #[derive(serde::Deserialize)]
@@ -189,6 +190,34 @@ pub fn spawn_ipc_server(
             get(task_priority_handler),
         )
         .route("/proxy/api", post(crate::coordinator::llm_proxy::proxy_handler))
+        .route("/live-state", get(
+            |axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+             State(ipc_state): State<IpcState>| async move {
+                let requested_version = params.get("last_update").and_then(|v| v.parse::<u64>().ok());
+                let mut rx = ipc_state.tree_root.receiver.clone();
+
+                if let Some(req_ver) = requested_version {
+                    loop {
+                        let current_version = *rx.borrow_and_update();
+                        if current_version != req_ver {
+                            break;
+                        }
+                        tokio::select! {
+                            _ = rx.changed() => {}
+                            _ = crate::commands::coordinator::SHUTDOWN_NOTIFY.notified() => { break; }
+                        }
+                    }
+                }
+
+                let new_version = *rx.borrow();
+                let snapshot = ipc_state.tree_root.snapshot();
+
+                axum::Json(serde_json::json!({
+                    "update_number": new_version,
+                    "tree": snapshot
+                }))
+            }
+        ))
         .layer(tower_http::trace::TraceLayer::new_for_http())
         .with_state(ipc_state);
 
@@ -241,6 +270,7 @@ mod tests {
                     crate::schema::coordinator_config::CoordinatorConfig::default(),
                 ),
                 gateway: Arc::new(crate::coordinator::llm_proxy::GatewayState::new()),
+                tree_root: Arc::new(crate::introspection::IntrospectionTreeRoot::new()),
             };
 
             let app = Router::new()

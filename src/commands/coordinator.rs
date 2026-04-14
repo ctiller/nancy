@@ -88,12 +88,14 @@ impl Coordinator {
                 Err(_) => crate::schema::coordinator_config::CoordinatorConfig::default(),
             };
 
+        let tree_root = Arc::new(crate::introspection::IntrospectionTreeRoot::new());
         let ipc_state = IpcState {
             tx_ready: shared_tx_ready.clone(),
             tx_updates: Arc::new(tx_updates),
             shared_identity: shared_identity.clone(),
             token_market: crate::coordinator::market::ArbitrationMarket::new(coord_config),
             gateway: Arc::new(crate::coordinator::llm_proxy::GatewayState::new()),
+            tree_root: tree_root.clone(),
         };
 
         let listener = tokio::net::UnixListener::from_std(
@@ -132,6 +134,11 @@ impl Coordinator {
             let active_identity = { shared_identity.read().await.clone() };
             // Ensure git resource descriptors drop each loop native avoiding OS handle exhaustion entirely seamlessly natively!
             let active_repo = crate::git::AsyncRepository::discover(&self.workdir).await?;
+            let git_ctx = crate::introspection::IntrospectionContext {
+                current_frame: tree_root.git_root.clone(),
+                updater: tree_root.updater.clone(),
+            };
+            active_repo.attach_introspection(git_ctx).await;
 
             let appview = AppView::hydrate(
                 &active_repo,

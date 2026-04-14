@@ -5,8 +5,8 @@ pub async fn eval_implement(path: &str, output_path: &std::path::Path) -> Result
     let def = crate::eval::parse_eval_definition(std::path::Path::new(path), "implement").await?;
 
     let mut runner = crate::eval::EvalRunner::setup(&def).await?;
-    let path_str = runner.temp_dir.to_str().unwrap();
-    let async_repo = crate::git::AsyncRepository::open(path_str).await?;
+    let path_str = runner.temp_dir.to_str().unwrap().to_string();
+    let async_repo = crate::git::AsyncRepository::open(&path_str).await?;
 
     // Create a deterministic initial random branch conceptually mapped
     let head_oid = async_repo.revparse_single("HEAD").await?.0;
@@ -47,12 +47,44 @@ pub async fn eval_implement(path: &str, output_path: &std::path::Path) -> Result
         None
     };
 
+    let output = std::process::Command::new("git")
+        .arg("--git-dir")
+        .arg(format!("{}/.git", path_str))
+        .arg("ls-tree")
+        .arg("-r")
+        .arg("--name-only")
+        .arg(&final_oid)
+        .output()
+        .expect("git ls-tree structurally failed bounds");
+
+    let mut implemented_files_map = std::collections::HashMap::new();
+    if output.status.success() {
+        let files_str = String::from_utf8_lossy(&output.stdout);
+        for file in files_str.lines() {
+            let file = file.trim();
+            if file.is_empty() { continue; }
+            let file_output = std::process::Command::new("git")
+                .arg("--git-dir")
+                .arg(format!("{}/.git", path_str))
+                .arg("show")
+                .arg(format!("{}:{}", final_oid, file))
+                .output();
+            if let Ok(fo) = file_output {
+                if fo.status.success() {
+                    implemented_files_map.insert(file.to_string(), String::from_utf8_lossy(&fo.stdout).to_string());
+                }
+            }
+        }
+    }
+    let implemented_files = if implemented_files_map.is_empty() { None } else { Some(implemented_files_map) };
+
     let result = crate::eval::EvalResult {
         final_plan: None,
         recommended_tasks: if tasks.is_empty() { None } else { Some(tasks) },
         traces: runner.extract_traces().await,
         implemented_commit_hash: Some(final_oid),
         implemented_patch,
+        implemented_files,
     };
 
     let result_yaml = serde_yaml::to_string(&result)?;
