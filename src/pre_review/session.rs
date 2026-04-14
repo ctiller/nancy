@@ -92,8 +92,8 @@ impl ReviewSession {
         let is_stagnant =
             !self.previous_invalid_panel.is_empty() && &panel == &self.previous_invalid_panel;
 
-        if !is_stagnant {
-            // Grace round granted
+        if !is_stagnant && !panel.is_empty() {
+            // Grace round granted for partial quorums, but strictly reject complete zero-member evacuations
             self.previous_invalid_panel = panel.clone();
             return panel.into_iter().collect();
         }

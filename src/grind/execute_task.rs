@@ -160,9 +160,18 @@ async fn handle_plan_task(
             .build()?;
 
         crate::introspection::log("Asking moderator for team selection...");
-        let team_selection = coord_client
+        let mut team_selection = coord_client
         .ask::<TeamSelectionPayload>(&format!("Task description: {}", task_payload.description))
         .await?;
+        
+        let mut retries = 0;
+        while team_selection.experts.is_empty() && retries < 3 {
+            crate::introspection::log("Team selection returned empty experts. Re-querying...");
+            team_selection = coord_client
+                .ask::<TeamSelectionPayload>("You must select at least one expert. Returning an empty array is invalid. Select experts:")
+                .await?;
+            retries += 1;
+        }
         
     let mut session = crate::pre_review::session::ReviewSession::new(target_path.to_path_buf());
 
@@ -580,9 +589,18 @@ pub async fn handle_implement_task(
                 pub experts: Vec<String>,
             }
 
-            let team_selection = coordinator_client
+            let mut team_selection = coordinator_client
                 .ask::<TeamSelectionPayload>("Select team based on diff bounds...")
                 .await?;
+
+            let mut retries = 0;
+            while team_selection.experts.is_empty() && retries < 3 {
+                crate::introspection::log("Team selection returned empty experts. Re-querying...");
+                team_selection = coordinator_client
+                    .ask::<TeamSelectionPayload>("You must select at least one expert. Returning an empty array is invalid. Select team based on diff bounds...")
+                    .await?;
+                retries += 1;
+            }
 
             let review_context = format!("Git Diff:\n{}", diff_text);
             let task_prompt = crate::pre_review::runner::reviewer_task_prompt(
@@ -1411,7 +1429,7 @@ mod tests {
     #[sealed_test(env = [("GEMINI_API_KEY", "mock")])]
     async fn test_handle_implement_task_non_fast_forward() -> anyhow::Result<()> {
         let universal_json = r#"{
-            "experts": [],
+            "experts": ["MockReviewer"],
             "vote": "approve",
             "agree_notes": "looks good",
             "disagree_notes": "",
