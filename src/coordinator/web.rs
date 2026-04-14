@@ -751,18 +751,32 @@ mod tests {
     }
 
     #[tokio::test]
+    #[sealed_test]
     async fn test_fs_asset_handler() {
+        let td = tempfile::tempdir().unwrap();
+        let bound_dir = td.path().join("workspace");
+        std::fs::create_dir(&bound_dir).unwrap();
+
+        // Create an explicit out-of-bounds valid file
+        let oob_file = td.path().join("secret.txt");
+        std::fs::write(&oob_file, "secret").unwrap();
+
+        std::env::set_current_dir(&bound_dir).unwrap();
+        std::fs::write("Cargo.toml", "data").unwrap();
+
         // Test valid file within workspace boundaries
         let path = axum::extract::Path("Cargo.toml".to_string());
         let resp = fs_asset_handler(path).await.into_response();
         assert_eq!(resp.status(), StatusCode::OK);
 
         // Test out of bounds constraint
-        let path_oob = axum::extract::Path("../../../../etc/passwd".to_string());
+        let path_oob = axum::extract::Path("../secret.txt".to_string());
         let resp_oob = fs_asset_handler(path_oob).await.into_response();
         assert_eq!(resp_oob.status(), StatusCode::FORBIDDEN);
 
         // Test gitignore constraint (.git directory is implicitly ignored)
+        std::fs::create_dir(".git").unwrap();
+        std::fs::write(".git/config", "bare = false").unwrap();
         let path_git = axum::extract::Path(".git/config".to_string());
         let resp_git = fs_asset_handler(path_git).await.into_response();
         assert_eq!(resp_git.status(), StatusCode::FORBIDDEN);

@@ -1270,4 +1270,215 @@ mod tests {
     fn test_validate_dag_rejects_duplicates() {
         assert!(super::validate_dag(&[mock_task("t1", vec![]), mock_task("t1", vec![])]).is_err());
     }
+
+    #[tokio::test]
+    #[sealed_test(env = [("GEMINI_API_KEY", "mock")])]
+    async fn test_handle_implement_task_success() -> anyhow::Result<()> {
+        crate::llm::mock::builder::MockChatBuilder::new()
+            .respond(r#"{"passed": true, "failed_reason": "", "remedy_task_description": ""}"#)
+            .respond("Implemented this successfully!")
+            .respond(r#"{"passed": true, "failed_reason": "", "remedy_task_description": ""}"#)
+            .respond(r#"{"experts": ["MockReviewer"]}"#)
+            .respond(r#"{"vote": "approve", "agree_notes": "looks good", "disagree_notes": ""}"#)
+            .respond(r#"{"vote": "approve", "agree_notes": "looks good", "disagree_notes": ""}"#)
+            .commit();
+
+        let temp_dir = tempfile::TempDir::new()?;
+        let repo = git2::Repository::init(temp_dir.path())?;
+        let async_repo = crate::git::AsyncRepository::discover(repo.workdir().unwrap()).await.unwrap();
+
+        let mut index = repo.index()?;
+        let tree_id = index.write_tree()?;
+        let sig = git2::Signature::now("A", "B")?;
+        let tree = repo.find_tree(tree_id)?;
+        let main_c = repo.commit(Some("refs/heads/main"), &sig, &sig, "init main", &tree, &[])?;
+        repo.set_head_detached(main_c)?;
+
+        let worktree_path = temp_dir.path().join("worktree_test_success");
+        tokio::process::Command::new("git").args(["worktree", "add", "-b", "nancy/tasks/work_success", worktree_path.to_str().unwrap(), "main"])
+            .current_dir(temp_dir.path()).status().await?;
+
+        let id_obj = crate::schema::identity_config::Identity::Grinder(crate::schema::identity_config::DidOwner::generate());
+        let payload = crate::schema::task::TaskPayload {
+            description: "Test".into(),
+            preconditions: vec!["Must be ready".into()],
+            postconditions: vec!["Must have output".into()],
+            parent_branch: "main".into(),
+            action: crate::schema::task::TaskAction::Implement,
+            branch: "refs/heads/nancy/tasks/work_success".into(),
+            plan: None,
+        };
+
+        let writer = crate::events::writer::Writer::new(&async_repo, id_obj.clone())?;
+        let (status, reason) = super::handle_implement_task(
+            &worktree_path, &async_repo, "t_success", &payload, &writer
+        ).await?;
+
+        assert_eq!(status, crate::schema::task::AssignmentStatus::Completed);
+        assert!(reason.contains("Successfully implemented and merged"));
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[sealed_test(env = [("GEMINI_API_KEY", "mock")])]
+    async fn test_handle_implement_task_failed_preconditions() -> anyhow::Result<()> {
+        crate::llm::mock::builder::MockChatBuilder::new()
+            .respond(r#"{"passed": false, "failed_reason": "No main.c", "remedy_task_description": "Create main.c"}"#)
+            .commit();
+
+        let temp_dir = tempfile::TempDir::new()?;
+        let repo = git2::Repository::init(temp_dir.path())?;
+        let async_repo = crate::git::AsyncRepository::discover(repo.workdir().unwrap()).await.unwrap();
+
+        let mut index = repo.index()?;
+        let tree_id = index.write_tree()?;
+        let sig = git2::Signature::now("A", "B")?;
+        let tree = repo.find_tree(tree_id)?;
+        repo.commit(Some("refs/heads/main"), &sig, &sig, "init main", &tree, &[])?;
+
+        let id_obj = crate::schema::identity_config::Identity::Grinder(crate::schema::identity_config::DidOwner::generate());
+        let payload = crate::schema::task::TaskPayload {
+            description: "Test".into(),
+            preconditions: vec!["Must be ready".into()],
+            postconditions: vec![],
+            parent_branch: "main".into(),
+            action: crate::schema::task::TaskAction::Implement,
+            branch: "refs/heads/nancy/tasks/work".into(),
+            plan: None,
+        };
+
+        let writer = crate::events::writer::Writer::new(&async_repo, id_obj.clone())?;
+        let (status, reason) = super::handle_implement_task(
+            temp_dir.path(), &async_repo, "t_fail_precond", &payload, &writer
+        ).await?;
+
+        assert_eq!(status, crate::schema::task::AssignmentStatus::Blocked);
+        assert!(reason.contains("precondition failures"));
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[sealed_test(env = [("GEMINI_API_KEY", "mock")])]
+    async fn test_handle_implement_task_failed_postconditions() -> anyhow::Result<()> {
+        crate::llm::mock::builder::MockChatBuilder::new()
+            .respond(r#"{"passed": true, "failed_reason": "", "remedy_task_description": ""}"#)
+            .respond("Implemented this successfully!")
+            .respond(r#"{"passed": false, "failed_reason": "Missing output line", "remedy_task_description": "Add it"}"#)
+            .respond("Okay, implemented it again to fix the postcondition.")
+            .respond(r#"{"passed": true, "failed_reason": "", "remedy_task_description": ""}"#)
+            .respond(r#"{"experts": ["MockReviewer"]}"#)
+            .respond(r#"{"vote": "approve", "agree_notes": "", "disagree_notes": ""}"#)
+            .respond(r#"{"vote": "approve", "agree_notes": "", "disagree_notes": ""}"#)
+            .commit();
+
+        let temp_dir = tempfile::TempDir::new()?;
+        let repo = git2::Repository::init(temp_dir.path())?;
+        let async_repo = crate::git::AsyncRepository::discover(repo.workdir().unwrap()).await.unwrap();
+
+        let mut index = repo.index()?;
+        let tree_id = index.write_tree()?;
+        let sig = git2::Signature::now("A", "B")?;
+        let tree = repo.find_tree(tree_id)?;
+        let main_c = repo.commit(Some("refs/heads/main"), &sig, &sig, "init main", &tree, &[])?;
+        repo.set_head_detached(main_c)?;
+
+        let worktree_path = temp_dir.path().join("worktree_test_postfail");
+        tokio::process::Command::new("git").args(["worktree", "add", "-b", "nancy/tasks/work", worktree_path.to_str().unwrap(), "main"])
+            .current_dir(temp_dir.path()).status().await?;
+
+        let id_obj = crate::schema::identity_config::Identity::Grinder(crate::schema::identity_config::DidOwner::generate());
+        let payload = crate::schema::task::TaskPayload {
+            description: "Test".into(),
+            preconditions: vec!["Must be ready".into()],
+            postconditions: vec!["Must have line".into()],
+            parent_branch: "main".into(),
+            action: crate::schema::task::TaskAction::Implement,
+            branch: "refs/heads/nancy/tasks/work".into(),
+            plan: None,
+        };
+
+        let writer = crate::events::writer::Writer::new(&async_repo, id_obj.clone())?;
+        let (status, reason) = super::handle_implement_task(
+            &worktree_path, &async_repo, "t_post_fail", &payload, &writer
+        ).await?;
+
+        assert_eq!(status, crate::schema::task::AssignmentStatus::Completed);
+        assert!(reason.contains("Successfully implemented and merged"));
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[sealed_test(env = [("GEMINI_API_KEY", "mock")])]
+    async fn test_handle_implement_task_non_fast_forward() -> anyhow::Result<()> {
+        let universal_json = r#"{
+            "experts": [],
+            "vote": "approve",
+            "agree_notes": "looks good",
+            "disagree_notes": "",
+            "passed": true,
+            "failed_reason": "",
+            "remedy_task_description": "",
+            "general_notes": "",
+            "consensus": "approve",
+            "recommended_tasks": []
+        }"#;
+        
+        let mut builder = crate::llm::mock::builder::MockChatBuilder::new();
+        for _ in 0..150 {
+            builder = builder.respond(universal_json);
+        }
+        builder.commit();
+
+        let temp_dir = tempfile::TempDir::new()?;
+        let repo = git2::Repository::init(temp_dir.path())?;
+        let async_repo = crate::git::AsyncRepository::discover(repo.workdir().unwrap()).await.unwrap();
+
+        let mut index = repo.index()?;
+        let tree_id = index.write_tree()?;
+        let sig = git2::Signature::now("A", "B")?;
+        let tree = repo.find_tree(tree_id)?;
+        let main_commit = repo.commit(Some("refs/heads/main"), &sig, &sig, "init main", &tree, &[])?;
+        repo.set_head_detached(main_commit)?;
+
+        let worktree_path = temp_dir.path().join("worktree_test_non_ff");
+        tokio::process::Command::new("git").args(["worktree", "add", "-b", "nancy/tasks/work", worktree_path.to_str().unwrap(), "main"])
+            .current_dir(temp_dir.path()).status().await?;
+
+        std::fs::write(temp_dir.path().join("diverge_main.txt"), "Main file")?;
+        let mut index2 = repo.index()?;
+        index2.add_path(std::path::Path::new("diverge_main.txt"))?;
+        let tree_id2 = index2.write_tree()?;
+        let tree2 = repo.find_tree(tree_id2)?;
+        let p_commit = repo.find_commit(main_commit)?;
+        repo.commit(Some("refs/heads/main"), &sig, &sig, "diverge main", &tree2, &[&p_commit])?;
+
+        let wt_repo = git2::Repository::open(&worktree_path)?;
+        std::fs::write(worktree_path.join("diverge_work.txt"), "Work file")?;
+        let mut wt_index = wt_repo.index()?;
+        wt_index.add_path(std::path::Path::new("diverge_work.txt"))?;
+        let wt_tree_id = wt_index.write_tree()?;
+        let wt_tree = wt_repo.find_tree(wt_tree_id)?;
+        let wt_p_commit = wt_repo.find_commit(main_commit)?;
+        wt_repo.commit(Some("HEAD"), &sig, &sig, "diverge work", &wt_tree, &[&wt_p_commit])?;
+
+        let id_obj = crate::schema::identity_config::Identity::Grinder(crate::schema::identity_config::DidOwner::generate());
+        let payload = crate::schema::task::TaskPayload {
+            description: "Test Non FF".into(),
+            preconditions: vec![],
+            postconditions: vec![],
+            parent_branch: "main".into(),
+            action: crate::schema::task::TaskAction::Implement,
+            branch: "refs/heads/nancy/tasks/work".into(),
+            plan: None,
+        };
+
+        let writer = crate::events::writer::Writer::new(&async_repo, id_obj.clone())?;
+        let (status, reason) = super::handle_implement_task(
+            &worktree_path, &async_repo, "t_non_ff", &payload, &writer
+        ).await?;
+
+        assert_eq!(status, crate::schema::task::AssignmentStatus::Failed);
+        assert!(reason.contains("Exceeded implementation max loops"));
+        Ok(())
+    }
 }

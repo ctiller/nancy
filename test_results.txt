@@ -1,0 +1,154 @@
+warning: nancy v0.1.0 (/home/craig/nancy/worktrees/implement) ignoring invalid dependency `web` which is missing a lib target
+   Compiling nancy v0.1.0 (/home/craig/nancy/worktrees/implement)
+warning: unused import: `std::time::Duration`
+ --> src/llm/client.rs:8:5
+  |
+8 | use std::time::Duration;
+  |     ^^^^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `repo`
+   --> src/grind/execute_task.rs:404:5
+    |
+404 |     repo: &crate:...
+    |     ^^^^ help: if this is intentional, prefix it with an underscore: `_repo`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: `nancy` (lib) generated 2 warnings (run `cargo fix --lib -p nancy` to apply 2 suggestions)
+warning: unused variable: `worker_did`
+   --> tests/unified_dag_e2e.rs:193:9
+    |
+193 | ...et worker_did = ...
+    |       ^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_worker_did`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: `nancy` (test "unified_dag_e2e") generated 1 warning (run `cargo fix --test "unified_dag_e2e" -p nancy` to apply 1 suggestion)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.39s
+     Running tests/unified_dag_e2e.rs (target/debug/deps/unified_dag_e2e-da0bd3e1d832c049)
+
+running 8 tests
+test test_implement_task_failed_preconditions ... ok
+test test_implement_task_failed_preconditions ... ok
+test test_implement_task_success ... FAILED
+test test_implement_task_non_fast_forward ... FAILED
+test test_implement_task_success ... FAILED
+test test_implement_task_failed_postconditions ... FAILED
+test test_implement_task_failed_postconditions ... FAILED
+test test_implement_task_non_fast_forward ... FAILED
+
+failures:
+
+---- test_implement_task_success stdout ----
+
+thread 'test_implement_task_success' (3972202) panicked at /home/craig/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rusty-forkfork-0.4.0/src/fork_test.rs:138:9:
+child exited unsuccessfully with exit status: 70
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+running 2 tests
+Preparing worktree (new branch 'nancy/tasks/work_success')
+HEAD is now at 9019e39 init main
+
+thread 'test_implement_task_success' (3972214) panicked at src/llm/client.rs:489:33:
+Mock queue exhausted during test
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+thread 'test_implement_task_success' (3972214) panicked at tests/unified_dag_e2e.rs:532:5:
+assertion `left == right` failed
+  left: Failed
+ right: Completed
+
+---- test_implement_task_non_fast_forward stdout ----
+
+thread 'test_implement_task_non_fast_forward' (3972201) panicked at /home/craig/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rusty-forkfork-0.4.0/src/fork_test.rs:138:9:
+child exited unsuccessfully with exit status: 70
+
+running 2 tests
+Preparing worktree (new branch 'nancy/tasks/work')
+HEAD is now at 9019e39 init main
+
+thread 'test_implement_task_non_fast_forward' (3972215) panicked at tests/unified_dag_e2e.rs:685:5:
+assertion failed: reason.contains("Exceeded implementation max loops")
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- test_implement_task_success stdout ----
+
+thread 'test_implement_task_success' (3972203) panicked at /home/craig/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rusty-forkfork-0.4.0/src/fork_test.rs:138:9:
+child exited unsuccessfully with exit status: 70
+
+running 2 tests
+Preparing worktree (new branch 'nancy/tasks/work_success')
+HEAD is now at 9019e39 init main
+
+thread 'test_implement_task_success' (3972218) panicked at src/llm/client.rs:489:33:
+Mock queue exhausted during test
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+thread 'test_implement_task_success' (3972218) panicked at tests/unified_dag_e2e.rs:532:5:
+assertion `left == right` failed
+  left: Failed
+ right: Completed
+
+---- test_implement_task_failed_postconditions stdout ----
+
+thread 'test_implement_task_failed_postconditions' (3972197) panicked at /home/craig/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rusty-forkfork-0.4.0/src/fork_test.rs:138:9:
+child exited unsuccessfully with exit status: 70
+
+running 2 tests
+Preparing worktree (new branch 'nancy/tasks/work')
+HEAD is now at 9019e39 init main
+
+thread 'test_implement_task_failed_postconditions' (3972213) panicked at src/llm/client.rs:489:33:
+Mock queue exhausted during test
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+thread 'test_implement_task_failed_postconditions' (3972213) panicked at tests/unified_dag_e2e.rs:619:5:
+assertion `left == right` failed
+  left: Failed
+ right: Completed
+
+---- test_implement_task_failed_postconditions stdout ----
+
+thread 'test_implement_task_failed_postconditions' (3972196) panicked at /home/craig/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rusty-forkfork-0.4.0/src/fork_test.rs:138:9:
+child exited unsuccessfully with exit status: 70
+
+running 2 tests
+Preparing worktree (new branch 'nancy/tasks/work')
+HEAD is now at 9019e39 init main
+
+thread 'test_implement_task_failed_postconditions' (3972219) panicked at src/llm/client.rs:489:33:
+Mock queue exhausted during test
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+thread 'test_implement_task_failed_postconditions' (3972219) panicked at tests/unified_dag_e2e.rs:619:5:
+assertion `left == right` failed
+  left: Failed
+ right: Completed
+
+---- test_implement_task_non_fast_forward stdout ----
+
+thread 'test_implement_task_non_fast_forward' (3972200) panicked at /home/craig/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rusty-forkfork-0.4.0/src/fork_test.rs:138:9:
+child exited unsuccessfully with exit status: 70
+
+running 2 tests
+Preparing worktree (new branch 'nancy/tasks/work')
+HEAD is now at 9019e39 init main
+
+thread 'test_implement_task_non_fast_forward' (3972216) panicked at tests/unified_dag_e2e.rs:685:5:
+assertion failed: reason.contains("Exceeded implementation max loops")
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    test_implement_task_failed_postconditions
+    test_implement_task_failed_postconditions
+    test_implement_task_non_fast_forward
+    test_implement_task_non_fast_forward
+    test_implement_task_success
+    test_implement_task_success
+
+test result: FAILED. 2 passed; 6 failed; 0 ignored; 0 measured; 12 filtered out; finished in 0.03s
+
+error: test failed, to rerun pass `--test unified_dag_e2e`

@@ -70,3 +70,4 @@ This directory contains the documented architectural and design decisions for Na
 * [0065: Async Git Actor Layer](0065-async-git-actor.md) - Establishes Actor-based `git2` thread pools to serialize access safely eliminating Tokio race blockings gracefully comprehensively.
 * [0066: Introspection Tree Root Frames](0066-introspection-tree-root-frames.md) - Integrating multi-root architecture `IntrospectionTreeRoot` to support separate agent and git roots cleanly.
 * [0067: Task Payload Vector Conditions](0067-task-payload-vector-conditions.md) - Refactoring `TaskPayload` preconditions and postconditions to `Vec<String>` instead of implicit unstructured condition string validation.
+* [0068: Execute Task Test Module Migration](0068-execute-task-test-module-migration.md) - Migrates orchestrator workflow integration tests to dynamically embedded modules ensuring deterministic bounds natively isolating tests successfully.
