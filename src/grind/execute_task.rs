@@ -141,6 +141,7 @@ async fn handle_plan_task(
     task_ref: &str,
     task_payload: &TaskPayload,
     writer: &Writer<'_>,
+    repo: &crate::git::AsyncRepository,
 ) -> Result<(crate::schema::task::AssignmentStatus, String)> {
     crate::introspection::frame("handle_plan_task", async {
         crate::introspection::log("Initializing planning phase...");
@@ -198,6 +199,7 @@ async fn handle_plan_task(
         .system_prompt(&crate::grind::prompts::ModeratorSynthesizerSystemPromptTemplate {
             task_description: &task_payload.description,
             tdd_guidelines: crate::grind::prompts::TDD_GUIDELINES,
+            task_guidelines: crate::grind::prompts::TASK_GUIDELINES,
         }.render()?)
         .with_loop_detection()
         .with_task_priority(appview_task_priority(task_ref.to_string()))
@@ -366,7 +368,7 @@ async fn handle_plan_task(
         let mut task_id_mappings = std::collections::HashMap::new();
         
         for t in output.tasks {
-            let task_payload = TaskPayload {
+            let next_task_payload = TaskPayload {
                 description: t.description,
                 preconditions: t.preconditions,
                 postconditions: t.postconditions,
@@ -376,9 +378,18 @@ async fn handle_plan_task(
                 plan: Some(persistent_plan_path.display().to_string()),
             };
             
-            if let Ok(task_ev_id) = writer.log_event(EventPayload::Task(task_payload)) {
+            if let Ok(task_ev_id) = writer.log_event(EventPayload::Task(next_task_payload)) {
                 task_id_mappings.insert(t.id.clone(), task_ev_id.clone());
                 
+                let appview = crate::coordinator::appview::AppView::hydrate(repo, writer.identity(), None).await;
+                for (blocked_task, block_sources) in &appview.blocked_by {
+                    if block_sources.contains(task_ref) {
+                        let _ = writer.log_event(EventPayload::BlockedBy(crate::schema::task::BlockedByPayload {
+                            source: task_ev_id.clone(),
+                            target: blocked_task.clone(),
+                        }));
+                    }
+                }
                 for dep in t.depends_on {
                     if let Some(dep_ev_id) = task_id_mappings.get(&dep) {
                         let _ = writer.log_event(EventPayload::BlockedBy(crate::schema::task::BlockedByPayload {
@@ -462,27 +473,34 @@ pub async fn handle_implement_task(
                     syn_client.ask::<String>(&synthesis_prompt).await.unwrap_or_else(|_| "Fix multiple precondition failures.".to_string())
                 };
 
-                crate::introspection::log(&format!("Preconditions failed. Emitting remedy task: {}", remedy_desc));
+                let appview = crate::coordinator::appview::AppView::hydrate(_repo, writer.identity(), None).await;
 
-                let remedy = TaskPayload {
-                    description: remedy_desc,
-                    preconditions: vec![],
-                    postconditions: task_payload.preconditions.clone(),
-                    parent_branch: task_payload.branch.clone(),
-                    action: TaskAction::Implement,
-                    branch: format!("{}_remedy", task_payload.branch),
-                    plan: task_payload.plan.clone(),
+                let mut targets = vec![task_ref.to_string()];
+                for (target_t, sources) in &appview.blocked_by {
+                    if sources.contains(task_ref) {
+                        targets.push(target_t.clone());
+                    }
+                }
+                
+                let remedy = crate::schema::task::TaskRequestPayload {
+                    description: format!("Remediation required for failed preconditions on aborted task: {}.\nPrecondition failures: {}", task_payload.description, remedy_desc),
+                    requestor: "system_precondition_checker".to_string(),
+                    postconditions: task_payload.postconditions.clone(),
                 };
-                let remedy_id = writer.log_event(crate::schema::registry::EventPayload::Task(remedy))?;
-                writer.log_event(crate::schema::registry::EventPayload::BlockedBy(
-                    crate::schema::task::BlockedByPayload {
-                        source: remedy_id,
-                        target: task_ref.to_string(),
-                    },
-                ))?;
+                let remedy_id = writer.log_event(crate::schema::registry::EventPayload::TaskRequest(remedy))?;
+                
+                for target_id in &targets {
+                    writer.log_event(crate::schema::registry::EventPayload::BlockedBy(
+                        crate::schema::task::BlockedByPayload {
+                            source: remedy_id.clone(),
+                            target: target_id.clone(),
+                        },
+                    ))?;
+                }
+                
                 return Ok((
-                    crate::schema::task::AssignmentStatus::Blocked,
-                    format!("Blocked by {} precondition failures.", failed_preconds.len()),
+                    crate::schema::task::AssignmentStatus::Completed,
+                    format!("Aborted unachievable task. Replaced structurally by remediation request {}.", remedy_id),
                 ));
             }
         }
@@ -829,7 +847,7 @@ pub async fn execute<'a>(
 
     // The writer is provided organically by the orchestrator polling loop
     let (status, report_str) = match task_payload.action {
-        TaskAction::Plan => handle_plan_task(&target_path, task_ref, task_payload, &writer).await?,
+        TaskAction::Plan => handle_plan_task(&target_path, task_ref, task_payload, &writer, repo).await?,
         TaskAction::Implement => {
             handle_implement_task(&target_path, repo, task_ref, task_payload, &writer).await?
         }
@@ -897,7 +915,7 @@ mod tests {
             action: TaskAction::Implement,
             branch: "missing_branch_throws_errors".into(),
             plan: None,
-        };
+    };
 
         let writer = Writer::new(&async_repo, identity.clone())?;
         let res = execute(
@@ -955,7 +973,7 @@ mod tests {
             action: TaskAction::Plan,
             branch: "working_branch".into(),
             plan: None,
-        };
+    };
 
         let worktrees_dir = repo
             .workdir()
@@ -1044,7 +1062,7 @@ mod tests {
             action: TaskAction::Implement,
             branch: "working_branch".into(),
             plan: None,
-        };
+    };
 
         let writer = Writer::new(&_tr.async_repo, identity.clone())?;
 
@@ -1125,7 +1143,7 @@ mod tests {
             action: TaskAction::Plan,
             branch: "working_branch".into(),
             plan: None,
-        };
+    };
 
         let writer = Writer::new(&_tr.async_repo, identity.clone())?;
 
@@ -1218,7 +1236,7 @@ mod tests {
             action: TaskAction::Plan,
             branch: "working_branch".into(),
             plan: None,
-        };
+    };
 
         let writer = Writer::new(&_tr.async_repo, identity.clone())?;
 
@@ -1337,7 +1355,7 @@ mod tests {
             action: crate::schema::task::TaskAction::Implement,
             branch: "refs/heads/nancy/tasks/work_success".into(),
             plan: None,
-        };
+    };
 
         let writer = crate::events::writer::Writer::new(&async_repo, id_obj.clone())?;
         let (status, reason) = super::handle_implement_task(
@@ -1375,15 +1393,15 @@ mod tests {
             action: crate::schema::task::TaskAction::Implement,
             branch: "refs/heads/nancy/tasks/work".into(),
             plan: None,
-        };
+    };
 
         let writer = crate::events::writer::Writer::new(&async_repo, id_obj.clone())?;
         let (status, reason) = super::handle_implement_task(
             temp_dir.path(), &async_repo, "t_fail_precond", &payload, &writer
         ).await?;
 
-        assert_eq!(status, crate::schema::task::AssignmentStatus::Blocked);
-        assert!(reason.contains("precondition failures"));
+        assert_eq!(status, crate::schema::task::AssignmentStatus::Completed);
+        assert!(reason.contains("Aborted unachievable task"));
         Ok(())
     }
 
@@ -1425,7 +1443,7 @@ mod tests {
             action: crate::schema::task::TaskAction::Implement,
             branch: "refs/heads/nancy/tasks/work".into(),
             plan: None,
-        };
+    };
 
         let writer = crate::events::writer::Writer::new(&async_repo, id_obj.clone())?;
         let (status, reason) = super::handle_implement_task(
@@ -1500,7 +1518,7 @@ mod tests {
             action: crate::schema::task::TaskAction::Implement,
             branch: "refs/heads/nancy/tasks/work".into(),
             plan: None,
-        };
+    };
 
         let writer = crate::events::writer::Writer::new(&async_repo, id_obj.clone())?;
         let (status, reason) = super::handle_implement_task(

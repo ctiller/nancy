@@ -897,7 +897,8 @@ mod tests {
         let json = axum::Json(crate::schema::task::TaskRequestPayload {
             description: "t".to_string(),
             requestor: "u".to_string(),
-        });
+postconditions: vec![],
+    });
 
         let td = tempfile::tempdir().unwrap();
         std::env::set_current_dir(td.path()).unwrap();

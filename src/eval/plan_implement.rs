@@ -1,33 +1,29 @@
 use anyhow::Result;
-use tokio::fs;
 
-pub async fn eval_implement(path: &str, output_path: &std::path::Path) -> Result<()> {
-    let def = crate::eval::parse_eval_definition(std::path::Path::new(path), "implement").await?;
+pub async fn eval_plan_implement(path: &str, output_path: &std::path::Path) -> Result<()> {
+    let def = crate::eval::parse_eval_definition(std::path::Path::new(path), "plan+implement").await?;
 
     let mut runner = crate::eval::EvalRunner::setup(&def).await?;
     let path_str = runner.temp_dir.to_str().unwrap().to_string();
     let async_repo = crate::git::AsyncRepository::open(&path_str).await?;
 
-    // Create a deterministic initial random branch conceptually mapped
     let head_oid = async_repo.revparse_single("HEAD").await?.0;
-    async_repo.branch("eval_implement_target", &head_oid, true).await?;
+    let initial_head_ref = async_repo.find_reference("HEAD").await.map(|h| h.name).unwrap_or_else(|_| "refs/heads/master".to_string());
 
-    let task_payload = crate::schema::task::TaskPayload {
-        description: def.task_description.clone().unwrap_or_else(|| "Implement feature generically".to_string()),
-        preconditions: vec![],
-        postconditions: vec![],
-        parent_branch: "eval_implement_target".to_string(),
-        action: crate::schema::task::TaskAction::Implement,
-        branch: "eval_implement_feature".to_string(),
-        plan: None,
-    };
-
-    runner.push_implement_task(task_payload).await?;
+    runner.push_task(def.task_description.clone()).await?;
 
     tokio::select! {
-        res = runner.wait_for_completion(|view| !view.task_completions.is_empty()) => {
-            res?;
-        }
+        res = runner.wait_for_completion(|view| {
+            let implement_tasks = view.tasks.iter().filter(|(_, ev)| {
+                matches!(ev, crate::schema::registry::EventPayload::Task(t) if t.action == crate::schema::task::TaskAction::Implement)
+            }).collect::<Vec<_>>();
+
+            if implement_tasks.is_empty() {
+                return false;
+            }
+
+            implement_tasks.iter().all(|(id, _)| view.task_completions.contains(&**id))
+        }) => { res?; }
         _ = tokio::signal::ctrl_c() => {
             eprintln!("Ctrl-C detected! Aborting evaluation loop and capturing trace outputs...");
         }
@@ -35,17 +31,31 @@ pub async fn eval_implement(path: &str, output_path: &std::path::Path) -> Result
 
     let appview = runner.get_appview().await?;
     let mut tasks = Vec::new();
+    let mut final_plan_doc = None;
 
     for task_ev in appview.tasks.values() {
         if let crate::schema::registry::EventPayload::Task(payload) = task_ev {
             if matches!(payload.action, crate::schema::task::TaskAction::Implement) {
                 tasks.push(payload.clone());
             }
+
+            if final_plan_doc.is_none() {
+                if let Some(plan_path_str) = &payload.plan {
+                    if let Ok(content) = tokio::fs::read_to_string(plan_path_str).await {
+                        if let Ok(doc) = serde_json::from_str::<crate::schema::task::TddDocument>(&content) {
+                            final_plan_doc = Some(doc);
+                        }
+                    }
+                }
+            }
         }
     }
 
-    let final_oid = async_repo.revparse_single("eval_implement_target").await?.0;
-    
+    let final_oid = match async_repo.revparse_single(&initial_head_ref).await {
+        Ok(res) => res.0,
+        Err(_) => async_repo.revparse_single("HEAD").await?.0,
+    };
+
     let implemented_patch = if head_oid != final_oid {
         Some(async_repo.diff_tree_to_tree(&head_oid, &final_oid).await?)
     } else {
@@ -83,9 +93,11 @@ pub async fn eval_implement(path: &str, output_path: &std::path::Path) -> Result
     }
     let implemented_files = if implemented_files_map.is_empty() { None } else { Some(implemented_files_map) };
 
+    let recommended_tasks = if tasks.is_empty() { None } else { Some(tasks) };
+
     let result = crate::eval::EvalResult {
-        final_plan: None,
-        recommended_tasks: if tasks.is_empty() { None } else { Some(tasks) },
+        final_plan: final_plan_doc,
+        recommended_tasks,
         traces: runner.extract_traces().await,
         implemented_commit_hash: Some(final_oid),
         implemented_patch,
@@ -93,9 +105,9 @@ pub async fn eval_implement(path: &str, output_path: &std::path::Path) -> Result
     };
 
     let result_yaml = serde_yaml::to_string(&result)?;
-    fs::write(output_path, result_yaml).await?;
+    tokio::fs::write(output_path, result_yaml).await?;
     println!(
-        "Eval implemented finalized and mapped into eval_out.yaml at: {}",
+        "Eval plan+implement finalized and mapped into eval_out.yaml at: {}",
         output_path.display()
     );
 
@@ -108,13 +120,13 @@ mod tests {
     use tempfile::TempDir;
 
     #[test]
-    fn test_eval_implement_rejects_non_implement() {
+    fn test_eval_plan_implement_rejects_unsupported() {
         let td = TempDir::new().unwrap();
         let plan_file = td.path().join("def.yaml");
         let yaml = "action: plan\ntask_description: foo\ncommits: []";
         std::fs::write(&plan_file, yaml).unwrap();
 
-        let res = tokio::runtime::Runtime::new().unwrap().block_on(eval_implement(
+        let res = tokio::runtime::Runtime::new().unwrap().block_on(eval_plan_implement(
             plan_file.to_str().unwrap(),
             &td.path().join("out.yaml"),
         ));
@@ -122,7 +134,7 @@ mod tests {
         assert!(
             res.unwrap_err()
                 .to_string()
-                .contains("Only 'implement' supported")
+                .contains("Only 'plan+implement' supported")
         );
     }
 }

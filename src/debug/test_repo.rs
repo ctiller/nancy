@@ -68,7 +68,8 @@ mod tests {
                 crate::schema::task::TaskRequestPayload {
                     requestor: "Alice".into(),
                     description: "Coverage verification".into(),
-                },
+postconditions: vec![],
+            },
             ))
             .unwrap();
         writer.commit_batch().await.unwrap();
@@ -84,7 +85,8 @@ mod tests {
                 crate::schema::task::TaskRequestPayload {
                     requestor: "Bob".into(),
                     description: "Excluded coverage".into(),
-                },
+postconditions: vec![],
+            },
             ))
             .unwrap();
         writer_feat.commit_batch().await.unwrap();

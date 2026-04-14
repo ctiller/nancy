@@ -19,6 +19,8 @@ pub struct TddDocument {
 pub struct TaskRequestPayload {
     pub requestor: String,
     pub description: String,
+    #[serde(default)]
+    pub postconditions: Vec<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, schemars::JsonSchema)]

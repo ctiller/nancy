@@ -5,9 +5,14 @@ pub async fn eval_plan(path: &str, output_path: &std::path::Path) -> Result<()> 
 
     let mut runner = crate::eval::EvalRunner::setup(&def).await?;
     runner.push_task(def.task_description.clone()).await?;
-    runner
-        .wait_for_completion(|view| !view.task_completions.is_empty())
-        .await?;
+    tokio::select! {
+        res = runner.wait_for_completion(|view| !view.task_completions.is_empty()) => {
+            res?;
+        }
+        _ = tokio::signal::ctrl_c() => {
+            eprintln!("Ctrl-C detected! Aborting evaluation loop and capturing trace outputs...");
+        }
+    }
 
     let appview = runner.get_appview().await?;
     let mut tasks = Vec::new();

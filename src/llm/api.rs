@@ -117,6 +117,7 @@ impl From<String> for SystemInstruction {
 #[serde(rename_all = "camelCase")]
 pub struct Content {
     pub role: String,
+    #[serde(default)]
     pub parts: Vec<Part>,
 }
 

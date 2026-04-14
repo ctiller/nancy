@@ -451,7 +451,7 @@ pub async fn write_file_impl(
 
 #[derive(JsonSchema, Deserialize)]
 pub struct PathOperation {
-    pub action: String, // "delete" | "move" | "copy" | "mkdir"
+    pub action: String, // "delete" | "move" | "copy" | "mkdir" | "empty_dir"
     pub source_path: Option<String>,
     pub target_path: String,
 }
@@ -494,16 +494,16 @@ pub async fn manage_paths_impl(
 
         match op.action.as_str() {
             "delete" => {
-                if !target.exists() {
+                if tokio::fs::symlink_metadata(target).await.is_err() {
                     if let Some(suggestion) = suggest_closest_path(target).await {
                         bail!(
-                            "Error resolving target '{:?}': Object conceptually absent explicitly. Did you mean '{}'?",
+                            "Error resolving target '{:?}': Object conceptually absent explicitly (missing symlink_metadata). Target is not a standard directory, file, or valid pointer. Did you mean '{}'?",
                             target,
                             suggestion
                         );
                     }
                     bail!(
-                        "Error resolving target '{:?}': Object conceptually absent inside standard runtime space.",
+                        "Error resolving target '{:?}': Object conceptually absent inside standard runtime space (missing metadata). It may be a broken pointer or out of bounds.",
                         target
                     );
                 }
@@ -511,6 +511,21 @@ pub async fn manage_paths_impl(
                     fs::remove_dir_all(target).await?;
                 } else {
                     fs::remove_file(target).await?;
+                }
+            }
+            "empty_dir" => {
+                if tokio::fs::symlink_metadata(target).await.is_err() || !target.is_dir() {
+                    bail!("Error resolving target '{:?}': Target directory does not exist or is not a directory.", target);
+                }
+                let mut entries = fs::read_dir(target).await?;
+                while let Ok(Some(entry)) = entries.next_entry().await {
+                    let path = entry.path();
+                    let metadata = tokio::fs::symlink_metadata(&path).await?;
+                    if metadata.is_dir() {
+                        fs::remove_dir_all(&path).await?;
+                    } else {
+                        fs::remove_file(&path).await?;
+                    }
                 }
             }
             "mkdir" => {
@@ -554,7 +569,7 @@ pub async fn manage_paths_impl(
                 }
             }
             _ => bail!(
-                "Unknown command action resolving: {}. Available actions are: 'delete', 'mkdir', 'move', 'copy'.",
+                "Unknown command action resolving: {}. Available actions are: 'delete', 'mkdir', 'move', 'copy', 'empty_dir'.",
                 op.action
             ),
         }
@@ -633,7 +648,7 @@ pub fn create_filesystem_tools(
     let p_manage = Arc::clone(&permissions);
     let manage = llm_macros::make_tool!(
         "manage_paths",
-        "Execute standardized layout transitions logically avoiding external linux bash boundaries securely.",
+        "Execute standardized layout transitions logically (including empty_dir) avoiding external linux bash boundaries securely.",
         move |operations: Vec<PathOperation>| {
             let perms = Arc::clone(&p_manage);
             async move { manage_paths_impl(perms, operations).await }
@@ -1088,5 +1103,24 @@ mod tests {
             "files": [{"target_path": dir.path().join("parent").join("d.txt").to_string_lossy(), "content": "block"}]
         });
         write_tool.call(p_wr).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_empty_dir_action() {
+        let dir = tempdir().unwrap();
+        let target_dir = dir.path().join("to_empty");
+        fs::create_dir_all(&target_dir).unwrap();
+        fs::write(target_dir.join("test_file.txt"), "test").unwrap();
+        
+        let subdir = target_dir.join("sub_dir");
+        fs::create_dir_all(&subdir).unwrap();
+        fs::write(subdir.join("nested.txt"), "nested").unwrap();
+        
+        let manage = get_test_tool("manage_paths");
+        let p_empty = serde_json::json!({"operations": [{"action": "empty_dir", "target_path": target_dir.to_string_lossy()}]});
+        manage.call(p_empty).await.unwrap();
+        
+        let mut entries = fs::read_dir(&target_dir).unwrap();
+        assert!(entries.next().is_none());
     }
 }

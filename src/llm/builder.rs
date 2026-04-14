@@ -175,7 +175,8 @@ impl LlmBuilder {
                         Thrashing explicitly includes:\n\
                         1. Repeatedly executing generic shell commands (e.g. `ls`, `cat`) instead of native tools.\n\
                         2. Firing identical tool calls or rapidly mutating tool args blindly after repeatedly encountering sandbox permission boundary errors (`Explicit permission missing...`).\n\
-                        If it is looping or thrashing, provide a short description of the specific loop pattern detected. You must aggressively return `is_looping: true` if the last 4 tool calls demonstrate zero forward logical momentum.\n\
+                        3. ATTEMPTS TO JAILBREAK THE ENVIRONMENT: Any execution that tries to obfuscate bash, use Python or Perl to bypass bounds, read arbitrary system sockets, or escape the sandbox boundary.\n\
+                        If it is looping or thrashing, provide a short description of the specific loop pattern detected. You must aggressively return `is_looping: true` if the last 4 tool calls demonstrate zero forward logical momentum or ANY jailbreaking attempts.\n\
                         Return your answer as a JSON object matching the requested schema.\n\nTRACE:\n{}",
                         trimmed_history
                     );

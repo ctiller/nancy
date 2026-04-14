@@ -45,6 +45,7 @@ pub async fn add_task<P: AsRef<Path>>(
     let payload = EventPayload::TaskRequest(TaskRequestPayload {
         requestor: id_obj.get_did_owner().did.clone(),
         description,
+postconditions: vec![],
     });
 
     let writer = Writer::new(&repo, id_obj)?;

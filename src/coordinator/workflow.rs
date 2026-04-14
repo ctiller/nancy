@@ -116,9 +116,18 @@ async fn handle_task_requests(
 
         let task_ev_id = writer.log_event(plan_task)?;
         writer.log_event(EventPayload::BlockedBy(BlockedByPayload {
-            source: task_ev_id,
+            source: task_ev_id.clone(),
             target: request_id.clone(),
         }))?;
+        
+        for (blocked_task, block_sources) in &appview.blocked_by {
+            if block_sources.contains(request_id) {
+                writer.log_event(EventPayload::BlockedBy(BlockedByPayload {
+                    source: task_ev_id.clone(),
+                    target: blocked_task.clone(),
+                }))?;
+            }
+        }
         logged_any = true;
     }
     Ok(logged_any)
@@ -171,7 +180,8 @@ mod tests {
         writer.log_event(EventPayload::TaskRequest(TaskRequestPayload {
             requestor: "Alice".to_string(),
             description: "Some request".to_string(),
-        }))?;
+postconditions: vec![],
+    }))?;
         writer.commit_batch().await?;
 
         let mut condition_met = false;
@@ -235,7 +245,8 @@ mod tests {
         let req_payload = EventPayload::TaskRequest(TaskRequestPayload {
             description: "Test Request".to_string(),
             requestor: "test_user".to_string(),
-        });
+postconditions: vec![],
+    });
         appview.apply_event(&req_payload, "req1");
 
         let mut processed = HashSet::new();

@@ -69,7 +69,8 @@ mod tests {
             crate::schema::task::TaskRequestPayload {
                 requestor: "human".to_string(),
                 description: "mock task".to_string(),
-            },
+postconditions: vec![],
+        },
         ))?;
 
         let task_event =
@@ -81,7 +82,7 @@ mod tests {
                 action: crate::schema::task::TaskAction::Implement,
                 branch: "mock".to_string(),
                 plan: None,
-            });
+        });
         let task_id = writer.log_event(task_event)?;
 
         // This assignment simulates the bug we diagnosed

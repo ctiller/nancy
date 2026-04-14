@@ -148,7 +148,8 @@ fn command_view() -> Html {
                 let payload = schema::TaskRequestPayload {
                     requestor: "Admin Web UI".to_string(),
                     description: task_desc,
-                };
+postconditions: vec![],
+            };
                 if let Ok(resp) = gloo_net::http::Request::post("/api/tasks")
                     .json(&payload)
                     .unwrap()

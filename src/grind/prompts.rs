@@ -13,6 +13,13 @@ pub const TDD_GUIDELINES: &str = r#"# Key Characteristics of an Effective JSON-d
 
 You must embed these strictly into the `tdd` JSON object exactly as formatted in the schema."#;
 
+pub const TASK_GUIDELINES: &str = r#"# Key Characteristics of an Effective Task Mapping:
+- Task Completeness: Every task description MUST be complete and unambiguous. The implementor agent executing the task will NOT see the original global task description or the global TDD. They rely entirely and exclusively on the specific structural description you define.
+- Pre/Post-Condition Mapping: If a non-root task has a pre-condition, there MUST be a post-condition on one of its parent tasks that directly ensures it. Both pre and post conditions must physically be present in the JSON.
+- Cross-Checking (Task vs Preconditions): A task may NOT make assumptions outside its explicitly declared pre-conditions.
+- Cross-Checking (Task vs Postconditions): Post-conditions must objectively come about purely as a result of performing the task. Do not declare a postcondition if the task doesn't structurally prove it.
+- Top-Down Scope: Each individual task must represent a proper subset of the overall plan associated."#;
+
 pub fn implementer_system_prompt(workspace: &std::path::Path) -> String {
     format!(
         r#"You are the Nancy Implementer. Your job is to execute the given Task Description strictly inside this isolated Git worktree absolute mount path: {}
@@ -126,10 +133,13 @@ Keep in mind what happens next:
 2. They will provide feedback, either approving the plan or requesting changes. If changes are required, this feedback loop restarts.
 3. Once approved, the tasks defined in your DAG will be assigned to specialized implementer agents. Each implementer works in isolated checkout boundaries to accomplish their specific task.
 
-{{ tdd_guidelines }}"#,
+{{ tdd_guidelines }}
+
+{{ task_guidelines }}"#,
     ext = "txt"
 )]
 pub struct ModeratorSynthesizerSystemPromptTemplate<'a> {
     pub task_description: &'a str,
     pub tdd_guidelines: &'a str,
+    pub task_guidelines: &'a str,
 }

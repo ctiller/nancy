@@ -489,7 +489,8 @@ mod tests {
             &EventPayload::TaskRequest(TaskRequestPayload {
                 requestor: "Alice".to_string(),
                 description: "Feature foo".to_string(),
-            }),
+postconditions: vec![],
+        }),
             "req-id",
         );
 
@@ -501,7 +502,7 @@ mod tests {
             action: TaskAction::Plan,
             branch: "refs/heads/nancy/plans/test".into(),
             plan: None,
-        });
+    });
         appview.apply_event(&task_event, "task-id");
 
         assert_eq!(appview.requests.len(), 1);
@@ -522,7 +523,7 @@ mod tests {
             action: TaskAction::Plan,
             branch: "refs/heads/nancy/tasks/review-id".into(),
             plan: None,
-        });
+    });
 
         // This task depends on ReviewPlan
         let child_task = EventPayload::Task(TaskPayload {
@@ -533,7 +534,7 @@ mod tests {
             action: TaskAction::Implement,
             branch: "refs/heads/nancy/tasks/impl-id".into(),
             plan: None,
-        });
+    });
 
         appview.apply_event(&review_plan, "review-id");
         appview.apply_event(&child_task, "impl-id");
@@ -569,7 +570,7 @@ mod tests {
                 action: crate::schema::task::TaskAction::Implement,
                 branch: "refs/heads/nancy/tasks/t1".into(),
                 plan: None,
-            }),
+        }),
             "t1",
         );
         view.apply_event(
@@ -581,7 +582,7 @@ mod tests {
                 action: crate::schema::task::TaskAction::Implement,
                 branch: "refs/heads/nancy/tasks/t2".into(),
                 plan: None,
-            }),
+        }),
             "t2",
         );
         view.apply_event(
@@ -593,7 +594,7 @@ mod tests {
                 action: crate::schema::task::TaskAction::Implement,
                 branch: "refs/heads/nancy/tasks/t3".into(),
                 plan: None,
-            }),
+        }),
             "t3",
         );
 

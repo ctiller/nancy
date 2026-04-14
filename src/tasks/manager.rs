@@ -111,7 +111,7 @@ mod tests {
             action: crate::schema::task::TaskAction::Implement,
             branch: "refs/heads/nancy/tasks/test".to_string(),
             plan: None,
-        }))?;
+    }))?;
 
         writer.commit_batch().await?;
 

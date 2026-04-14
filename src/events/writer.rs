@@ -33,6 +33,10 @@ impl<'a> Writer<'a> {
         self.trace_tx.clone()
     }
 
+    pub fn identity(&self) -> &Identity {
+        &self.identity
+    }
+
     pub fn log_event(&self, payload: EventPayload) -> Result<String> {
         let priv_bytes = hex::decode(&self.identity.get_did_owner().private_key_hex)?;
         let keypair = did_key::generate::<Ed25519KeyPair>(Some(&priv_bytes));

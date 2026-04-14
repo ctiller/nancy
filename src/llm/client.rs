@@ -264,6 +264,11 @@ impl LlmClient {
         &mut self,
         question: &str,
     ) -> anyhow::Result<T> {
+        let sandbox_manifest = "SANDBOX CONSTRAINTS: You operate in an isolated docker boundary. Direct CLI manipulations (ls, cat, grep, rm, find) are explicitly mapped via Rust interceptors and blocked! DO NOT invoke GNU tools. ALWAYS map actions through JSON capabilities like list_dir, manage_paths, or view_files.";
+        if !self.system_prompt.iter().any(|s| s == sandbox_manifest) {
+            self.system_prompt.insert(0, sandbox_manifest.to_string());
+        }
+
         let runtime = self.created_at.elapsed().as_secs();
         let dt: time::OffsetDateTime = std::time::SystemTime::now().into();
         let time_str = dt
@@ -402,6 +407,7 @@ impl LlmClient {
         gemini: &mut Gemini,
         choices: Vec<crate::schema::ipc::ModelChoice>,
     ) -> anyhow::Result<T> {
+        let mut consecutive_denied_executions = 0;
         loop {
             let mut thought_str = String::new();
             let mut final_function_calls = Vec::new();
@@ -546,8 +552,35 @@ impl LlmClient {
                     finish_reason: Some("STOP".to_string())
                 }]);
                 let tool_responses = self.handle_tool_calls(&mock_chat).await;
+                let mut had_denial = false;
+                let mut had_success = false;
                 for (name, payload) in tool_responses {
+                    let text_dbg = serde_json::to_string(&payload).unwrap_or_default();
+                    if text_dbg.contains("Execution denied") {
+                        had_denial = true;
+                    } else {
+                        had_success = true;
+                    }
                     let _ = self.session.add_function_response(&name, payload);
+                }
+                
+                if had_denial && !had_success {
+                    consecutive_denied_executions += 1;
+                } else {
+                    consecutive_denied_executions = 0;
+                }
+                
+                if consecutive_denied_executions >= 3 {
+                    consecutive_denied_executions = 0;
+                    if let Some(crate::llm::api::Content { parts, .. }) = self.session.history.last_mut() {
+                        if let Some(part) = parts.last_mut() {
+                            if let Some(ref mut func_resp) = part.function_response {
+                                if let serde_json::Value::Object(ref mut map) = func_resp.response {
+                                    map.insert("CRITICAL_SYSTEM_OVERRIDE".to_string(), serde_json::Value::String("You are thrashing against sandbox boundaries! Your last actions all returned 'Execution denied'. YOU MUST STOP using blocked bash commands and switch to native tools immediately.".to_string()));
+                                }
+                            }
+                        }
+                    }
                 }
             } else {
                 let text = res_text;
@@ -929,6 +962,90 @@ mod tests {
 
         let result = client.ask::<String>("dummy question").await.unwrap();
         assert_eq!(result, "Resolved!");
+    }
+
+    #[tokio::test]
+    async fn test_run_loop_thrashing_override() {
+        let json_resp_fail = serde_json::json!({
+            "candidates": [{
+                "content": {
+                    "role": "model",
+                    "parts": [{"functionCall": {"name": "thrashing_tool", "args": {}}}]
+                }
+            }],
+            "usageMetadata": {},
+            "modelVersion": "test"
+        });
+        let fail_resp: GeminiResponse = serde_json::from_value(json_resp_fail).unwrap();
+
+        let json_resp_success = serde_json::json!({
+            "candidates": [{
+                "content": {
+                    "role": "model",
+                    "parts": [{"text": "Done"}]
+                }
+            }],
+            "usageMetadata": {},
+            "modelVersion": "test"
+        });
+        let succ_resp: GeminiResponse = serde_json::from_value(json_resp_success).unwrap();
+
+        #[derive(Debug)]
+        struct ThrashingTool;
+        #[async_trait::async_trait]
+        impl crate::llm::tool::LlmTool for ThrashingTool {
+            fn name(&self) -> &'static str { "thrashing_tool" }
+            fn description(&self) -> String { "Test".to_string() }
+            fn schema(&self) -> schemars::Schema { schemars::schema_for!(String) }
+            async fn call(&self, _args: serde_json::Value) -> anyhow::Result<serde_json::Value> {
+                Ok(serde_json::json!({ "error": "Execution denied." }))
+            }
+        }
+
+        let mut client = LlmClient {
+            kind: crate::llm::builder::Kind::Fast,
+            task_type: schema::TaskType::Chat,
+            api_key: "xxx".to_string(),
+            temperature: None,
+            system_prompt: vec![],
+            subagent: "test".to_string(),
+            tools: vec![Box::new(ThrashingTool)],
+            session: Session::new(10),
+            mock_queue: Some(Arc::new(std::sync::Mutex::new(
+                crate::llm::mock::builder::MockQueue {
+                    responses: vec![
+                        Ok(fail_resp.clone()),
+                        Ok(fail_resp.clone()),
+                        Ok(fail_resp.clone()),
+                        Ok(succ_resp),
+                    ],
+                    hang_on_exhaustion: false,
+                },
+            ))),
+            created_at: std::time::Instant::now(),
+            shared_deadline: None,
+            loop_event_tx: None,
+            is_looping: None,
+            task_priority: std::sync::Arc::new(|| Box::pin(std::future::ready(0.5))),
+            local_market_weight: 0.5,
+        };
+
+        let mut gemini = Gemini::new("xxx", "test_model".to_string(), None);
+        let _ = client.run_loop::<String>(&mut gemini, vec![]).await;
+        
+        let hist = client.session.get_history();
+        let mut found_override = false;
+        for c in hist {
+            for p in &c.parts {
+                if let Some(f) = &p.function_response {
+                    let dump = serde_json::to_string(&f.response).unwrap_or_default();
+                    if dump.contains("CRITICAL_SYSTEM_OVERRIDE") {
+                        found_override = true;
+                    }
+                }
+            }
+        }
+        assert!(found_override);
     }
 
     #[test]

@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 
 pub mod plan;
 pub mod implement;
+pub mod plan_implement;
 
 pub async fn parse_eval_definition(path: &std::path::Path, expected_action: &str) -> anyhow::Result<EvalDefinition> {
     let def: EvalDefinition = serde_yaml::from_slice(
@@ -346,7 +347,8 @@ mod tests {
             crate::schema::task::TaskRequestPayload {
                 requestor: "User".to_string(),
                 description: "Test Request Workflow".to_string(),
-            },
+postconditions: vec![],
+        },
         );
         let req_id = writer.log_event(task_req).unwrap();
 
@@ -358,7 +360,7 @@ mod tests {
             parent_branch: "master".to_string(),
             branch: "TBD".to_string(),
             plan: None,
-        });
+    });
         let task_id = writer.log_event(task).unwrap();
         writer.commit_batch().await.unwrap();
 

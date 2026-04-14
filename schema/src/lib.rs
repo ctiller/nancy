@@ -128,6 +128,8 @@ pub struct TaskEvaluation {
 pub struct TaskRequestPayload {
     pub requestor: String,
     pub description: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remediates_task_id: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]

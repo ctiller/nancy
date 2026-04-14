@@ -61,7 +61,8 @@ async fn test_coordinator_generates_plan_from_task_request() -> Result<()> {
     writer.log_event(EventPayload::TaskRequest(TaskRequestPayload {
         requestor: "Alice".to_string(),
         description: "Test E2E feature".to_string(),
-    }))?;
+postconditions: vec![],
+}))?;
     writer.commit_batch().await?;
 
     let mut coord = Coordinator::new(temp_dir.path()).await?;
@@ -136,7 +137,7 @@ async fn test_coordinator_generates_review_plan_task_upon_plan_completion() -> R
         action: TaskAction::Plan,
         branch: "refs/heads/nancy/plans/mock_01".into(),
         plan: None,
-    });
+});
     writer.log_event_with_id_override(plan_task, "plan_01".into())?;
     writer.log_event(EventPayload::AssignmentComplete(
         nancy::schema::task::AssignmentCompletePayload {
@@ -222,7 +223,7 @@ async fn test_coordinator_inherits_task_parent_from_feature_branch() -> Result<(
         action: TaskAction::Plan,
         branch: "refs/heads/nancy/tasks/parent_feat".into(),
         plan: None,
-    });
+});
     writer.log_event_with_id_override(review_plan, "parent_feat".into())?;
 
     let task_payload = EventPayload::Task(nancy::schema::task::TaskPayload {
@@ -233,7 +234,7 @@ async fn test_coordinator_inherits_task_parent_from_feature_branch() -> Result<(
         action: TaskAction::Implement,
         branch: "refs/heads/nancy/tasks/work_088".into(),
         plan: None,
-    });
+});
     writer.log_event_with_id_override(task_payload, "work_088".into())?;
     // Bind relationship correctly tracing AppView blocks mapping Feature bounds gracefully
     writer.log_event(EventPayload::BlockedBy(BlockedByPayload {
@@ -281,7 +282,7 @@ async fn test_appview_pagerank_drops_blocked_tasks() -> Result<()> {
         action: TaskAction::Implement,
         branch: "fake".into(),
         plan: None,
-    });
+});
     appview.apply_event(&task_ev, "t1");
     appview.apply_event(&task_ev, "t2");
     // t1 blocked by t2!
@@ -357,7 +358,7 @@ async fn test_worktree_extermination_and_ledger_consistency() -> Result<()> {
         action: TaskAction::Implement,
         branch: "refs/heads/nancy/tasks/working_09".into(),
         plan: None,
-    };
+};
 
     // Invoke Worktree allocation! Map to task
     let writer = nancy::events::writer::Writer::new(&async_repo, id_obj.clone())?;

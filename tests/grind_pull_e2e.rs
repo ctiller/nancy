@@ -64,7 +64,7 @@ async fn test_grinder_pull_assignment_over_ipc() -> Result<()> {
         action: TaskAction::Plan,
         branch: "refs/heads/nancy/tasks/test_target_pull_task".to_string(),
         plan: None,
-    };
+};
     writer.log_event_with_id_override(EventPayload::Task(task_payload), test_task_id.clone())?;
     writer.commit_batch().await?;
 
