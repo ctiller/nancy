@@ -36,7 +36,7 @@ impl crate::agent::AgentTaskProcessor for GrinderTaskProcessor {
         Box::pin(async move {
             let assigned = identify_assigned_task(repo, worker_did, coordinator_did).await;
 
-            if let Some((task_id, assignment, payload)) = assigned {
+            if let Some((task_id, payload)) = assigned {
                 *tree_root.agent_root.elements.lock().unwrap() = Vec::new();
                 *tree_root.status.lock().unwrap() =
                     Some("Executing Task...".to_string());
@@ -50,13 +50,20 @@ impl crate::agent::AgentTaskProcessor for GrinderTaskProcessor {
                 let execute_fut = crate::introspection::INTROSPECTION_CTX.scope(ctx, async {
                     crate::introspection::log(&format!(
                         "Starting assignment {}",
-                        assignment.task_ref
+                        task_id
                     ));
+                    let assign_evt = crate::schema::registry::EventPayload::CoordinatorAssignment(
+                        crate::schema::task::CoordinatorAssignmentPayload {
+                            task_ref: task_id.clone(),
+                            assignee_did: worker_did.to_string(),
+                        }
+                    );
+                    let _ = global_writer.log_event(assign_evt);
+
                     crate::grind::execute_task::execute(
                         repo,
                         id_obj,
                         &task_id,
-                        &assignment.task_ref,
                         &payload,
                         global_writer,
                     )
@@ -74,7 +81,7 @@ impl crate::agent::AgentTaskProcessor for GrinderTaskProcessor {
                             break r;
                         }
                         _ = interval.tick() => {
-                            let _ = global_writer.commit_batch();
+                            let _ = global_writer.commit_batch().await;
                         }
                     }
                 };
@@ -84,7 +91,7 @@ impl crate::agent::AgentTaskProcessor for GrinderTaskProcessor {
                         "[Grinder] execute_task dramatically failed! Force-flushing partial trace ledger bounds before exit: {:?}",
                         e
                     );
-                    let _ = global_writer.commit_batch();
+                    let _ = global_writer.commit_batch().await;
                     return Err(e);
                 }
 
@@ -113,44 +120,31 @@ pub async fn get_completed_tasks(repo: &crate::git::AsyncRepository, worker_did:
 pub async fn identify_assigned_task(
     repo: &crate::git::AsyncRepository,
     worker_did: &str,
-    coordinator_did: &str,
+    _coordinator_did: &str,
 ) -> Option<(
     String,
-    crate::schema::task::CoordinatorAssignmentPayload,
     crate::schema::task::TaskPayload,
 )> {
-    let mut appview = crate::coordinator::appview::AppView::new();
-    let mut tasks_assigned = Vec::new();
+    let root = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let client = crate::agent::get_coordinator_client(Some(&root));
 
-    let root_reader = crate::events::reader::Reader::new(repo, coordinator_did.to_string());
-    if let Ok(iter) = root_reader.iter_events().await {
-        for ev_res in iter {
-            if let Ok(env) = ev_res {
-                let ev_id_str = env.id.clone();
-                appview.apply_event(&env.payload, &ev_id_str);
-                if let crate::schema::registry::EventPayload::CoordinatorAssignment(assignment) =
-                    env.payload
-                {
-                    if assignment.assignee_did == worker_did {
-                        tasks_assigned.push((ev_id_str, assignment));
-                    }
-                }
-            }
-        }
-    }
+    let req_payload = crate::schema::ipc::RequestAssignmentPayload {
+        grinder_did: worker_did.to_string(),
+    };
 
-    let completed = get_completed_tasks(repo, worker_did).await;
-    
-    let mut pending_assignments = Vec::new();
-    for (task_id, assignment) in tasks_assigned {
-        if !completed.contains(&task_id) {
-            pending_assignments.push((task_id, assignment));
-        }
-    }
-    
-    if pending_assignments.is_empty() {
+    let res = client
+        .post("http://localhost/request-assignment")
+        .json(&req_payload)
+        .send()
+        .await
+        .ok()?;
+
+    if res.status() == reqwest::StatusCode::NO_CONTENT {
         return None;
     }
+
+    let assignment: crate::schema::ipc::RequestAssignmentResponse = res.json().await.ok()?;
+    let task_id = assignment.task_id;
 
     let nancy_dir = repo.path().join(".nancy");
     let local_index = match crate::events::index::LocalIndex::new(&nancy_dir) {
@@ -166,29 +160,22 @@ pub async fn identify_assigned_task(
         tracing::error!("Failed to refresh LocalIndex cache: {}", e);
     }
 
-    for (task_id, assignment) in pending_assignments {
-        let task_ref = &assignment.task_ref;
-        if let Ok(Some((authored_did, _, _))) = local_index.lookup_event(task_ref) {
-            let reader = crate::events::reader::Reader::new(repo, authored_did);
-            if let Ok(iter) = reader.iter_events().await {
-                for ev_res in iter {
-                    if let Ok(env) = ev_res {
-                        if env.id == *task_ref {
-                            if let crate::schema::registry::EventPayload::Task(payload) = env.payload {
-                                return Some((task_id, assignment, payload));
-                            }
+    if let Ok(Some((authored_did, _, _))) = local_index.lookup_event(&task_id) {
+        let reader = crate::events::reader::Reader::new(repo, authored_did);
+        if let Ok(iter) = reader.iter_events().await {
+            for ev_res in iter {
+                if let Ok(env) = ev_res {
+                    if env.id == task_id {
+                        if let crate::schema::registry::EventPayload::Task(payload) = env.payload {
+                            return Some((task_id, payload));
                         }
                     }
                 }
             }
         }
-        
-        tracing::warn!(
-            "Warning: Assignment task_ref {} not found in ledger via LocalIndex.",
-            assignment.task_ref
-        );
     }
     
+    tracing::warn!("Assignment task_ref {} not found in ledger via LocalIndex.", task_id);
     None
 }
 

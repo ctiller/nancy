@@ -30,7 +30,6 @@ pub fn get_coordinator_client(workdir: Option<&std::path::Path>) -> reqwest::Cli
         let sock = get_coordinator_socket_path(workdir);
         reqwest::Client::builder()
             .unix_socket(sock)
-            .http2_prior_knowledge()
             .build()
             .unwrap_or_else(|_| reqwest::Client::new())
     }).clone()

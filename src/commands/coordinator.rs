@@ -97,6 +97,7 @@ impl Coordinator {
             token_market: crate::coordinator::market::ArbitrationMarket::new(coord_config),
             gateway: Arc::clone(&gateway),
             tree_root: tree_root.clone(),
+            active_assignments: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
         };
 
         let listener = tokio::net::UnixListener::from_std(

@@ -21,6 +21,7 @@ pub struct IpcState {
     pub token_market: crate::coordinator::market::SharedArbitrationMarket,
     pub gateway: Arc<crate::coordinator::llm_proxy::GatewayState>,
     pub tree_root: Arc<crate::introspection::IntrospectionTreeRoot>,
+    pub active_assignments: Arc<tokio::sync::Mutex<std::collections::HashMap<String, String>>>,
 }
 
 #[derive(serde::Deserialize)]
@@ -142,6 +143,40 @@ pub async fn updates_ready_handler(
     let _ = rx.await;
 }
 
+pub async fn request_assignment_handler(
+    State(state): State<IpcState>,
+    axum::Json(payload): axum::Json<crate::schema::ipc::RequestAssignmentPayload>,
+) -> axum::response::Response {
+    tracing::debug!("[Coordinator API] Grinder {} hitting /request-assignment", payload.grinder_did);
+
+    let mut assignments = state.active_assignments.lock().await;
+    assignments.retain(|_, v| v != &payload.grinder_did);
+
+    let root = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let repo = match crate::git::AsyncRepository::discover(&root).await {
+        Ok(r) => r,
+        Err(_) => return axum::response::IntoResponse::into_response(axum::http::StatusCode::NO_CONTENT),
+    };
+
+    let dummy_id = crate::schema::identity_config::Identity::Dreamer(
+        crate::schema::identity_config::DidOwner::generate(),
+    );
+    let appview = crate::coordinator::appview::AppView::hydrate(&repo, &dummy_id, None).await;
+
+    let ready_tasks = appview.get_highest_impact_ready_tasks();
+
+    for task_id in ready_tasks {
+        if !assignments.contains_key(&task_id) {
+            assignments.insert(task_id.clone(), payload.grinder_did.clone());
+            crate::coordinator::git::ensure_task_branch(&repo, &appview, &task_id).await;
+            return axum::response::IntoResponse::into_response(axum::Json(crate::schema::ipc::RequestAssignmentResponse {
+                task_id,
+            }));
+        }
+    }
+
+    axum::response::IntoResponse::into_response(axum::http::StatusCode::NO_CONTENT)
+}
 
 pub async fn task_priority_handler(
     axum::extract::Path(task_id): axum::extract::Path<String>,
@@ -189,6 +224,7 @@ pub fn spawn_ipc_server(
             "/api/market/task-priority/{task_id}",
             get(task_priority_handler),
         )
+        .route("/request-assignment", post(request_assignment_handler))
         .route("/proxy/api", post(crate::coordinator::llm_proxy::proxy_handler))
         .route("/live-state", get(
             |axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
@@ -272,6 +308,7 @@ mod tests {
                 ),
                 gateway: Arc::clone(&gateway),
                 tree_root: Arc::new(crate::introspection::IntrospectionTreeRoot::new()),
+                active_assignments: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
             };
 
             let app = Router::new()

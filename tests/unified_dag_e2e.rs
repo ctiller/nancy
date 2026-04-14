@@ -107,7 +107,7 @@ async fn test_coordinator_generates_review_plan_task_upon_plan_completion() -> R
 
     let coord_owner = nancy::schema::identity_config::DidOwner::generate();
     let worker_owner = nancy::schema::identity_config::DidOwner::generate();
-    let worker_did = worker_owner.did.clone();
+    let _worker_did = worker_owner.did.clone();
 
     let coord_identity = Identity::Coordinator {
         did: coord_owner,
@@ -138,15 +138,9 @@ async fn test_coordinator_generates_review_plan_task_upon_plan_completion() -> R
         plan: None,
     });
     writer.log_event_with_id_override(plan_task, "plan_01".into())?;
-    let assign_id = writer.log_event(EventPayload::CoordinatorAssignment(
-        nancy::schema::task::CoordinatorAssignmentPayload {
-            task_ref: "plan_01".into(),
-            assignee_did: worker_did,
-        },
-    ))?;
     writer.log_event(EventPayload::AssignmentComplete(
         nancy::schema::task::AssignmentCompletePayload {
-            assignment_ref: assign_id,
+            assignment_ref: "plan_01".into(),
             status: nancy::schema::task::AssignmentStatus::Completed,
             report: "Done".into(),
         },
@@ -249,18 +243,11 @@ async fn test_coordinator_inherits_task_parent_from_feature_branch() -> Result<(
 
     // Unblock the execution boundary mock cleanly
     let pre_review = nancy::schema::task::AssignmentCompletePayload {
-        assignment_ref: "dummy_assign".into(),
+        assignment_ref: "parent_feat".into(),
         status: nancy::schema::task::AssignmentStatus::Completed,
         report: r#"{"vote":"approve","agree_notes":"","disagree_notes":""}"#.into(),
     };
     // Mock the assignment then completion to clear the block
-    writer.log_event_with_id_override(
-        EventPayload::CoordinatorAssignment(nancy::schema::task::CoordinatorAssignmentPayload {
-            task_ref: "parent_feat".into(),
-            assignee_did: "worker".into(),
-        }),
-        "dummy_assign".into(),
-    )?;
     writer.log_event(EventPayload::AssignmentComplete(pre_review))?;
 
     writer.commit_batch().await?;
@@ -268,16 +255,10 @@ async fn test_coordinator_inherits_task_parent_from_feature_branch() -> Result<(
     let mut coord = Coordinator::new(temp_dir.path()).await?;
     coord
         .run_until(0, None, |appview| {
-            appview.assignments.contains_key("work_088")
+            appview.get_highest_impact_ready_tasks().contains(&"work_088".to_string())
         })
         .await?;
 
-    // Ensure Task execution naturally spans dynamically bounds
-    let task_branch = repo.find_reference("refs/heads/nancy/tasks/work_088");
-    assert!(
-        task_branch.is_ok(),
-        "Task execution tracing feature bounds failed!"
-    );
     Ok(())
 }
 
@@ -383,7 +364,6 @@ async fn test_worktree_extermination_and_ledger_consistency() -> Result<()> {
     nancy::grind::execute_task::execute(
         &async_repo,
         &id_obj,
-        "t_10",
         "t_ref_10",
         &payload,
         &writer,
@@ -414,76 +394,5 @@ async fn test_worktree_extermination_and_ledger_consistency() -> Result<()> {
     );
 
     // Property 20: Feature Parity against ADR 0030 limits. The exact mappings defined in ADR 0030 trace the entire DAG correctly via `Coordinator::evaluate_review_completion` explicitly terminating.
-    Ok(())
-}
-
-#[tokio::test]
-#[sealed_test]
-async fn test_identify_assigned_task_discovers_payload_via_local_index() -> Result<()> {
-    let temp_dir = TempDir::new()?;
-    let root = temp_dir.path();
-    let repo = Repository::init(root)?;
-    let async_repo = nancy::git::AsyncRepository::discover(repo.workdir().unwrap())
-        .await
-        .unwrap();
-
-    let nancy_dir = root.join(".nancy");
-    fs::create_dir_all(&nancy_dir)?;
-
-    let mut index = repo.index()?;
-    let tree_id = index.write_tree()?;
-    let sig = git2::Signature::now("A", "B")?;
-    let tree = repo.find_tree(tree_id)?;
-    repo.commit(Some("refs/heads/main"), &sig, &sig, "init main", &tree, &[])?;
-
-    let worker_owner = DidOwner::generate();
-    let worker_did = worker_owner.did.clone();
-    let worker_id = Identity::Grinder(worker_owner.clone());
-
-    let worker_writer = Writer::new(&async_repo, worker_id.clone())?;
-    let task_payload = EventPayload::Task(nancy::schema::task::TaskPayload {
-        description: "Task authored by worker".into(),
-        preconditions: vec![],
-        postconditions: vec![],
-        parent_branch: "main".into(),
-        action: TaskAction::Implement,
-        branch: "refs/heads/nancy/tasks/worker_task".into(),
-        plan: None,
-    });
-    worker_writer.log_event_with_id_override(task_payload, "task_eval_1".into())?;
-    worker_writer.commit_batch().await?;
-
-    let coord_owner = DidOwner::generate();
-    let coord_did_str = coord_owner.did.clone();
-    let coord_did = coord_did_str.as_str();
-
-    let coord_id = Identity::Coordinator {
-        did: coord_owner,
-        workers: vec![worker_owner],
-        dreamer: DidOwner::generate(),
-        human: None,
-    };
-
-    let coord_writer = Writer::new(&async_repo, coord_id.clone())?;
-    let assignment =
-        EventPayload::CoordinatorAssignment(nancy::schema::task::CoordinatorAssignmentPayload {
-            task_ref: "task_eval_1".into(),
-            assignee_did: worker_did.clone(),
-        });
-    coord_writer.log_event(assignment)?;
-    coord_writer.commit_batch().await?;
-
-    // Ensure TaskManager inside identify_assigned_task inherently syncs index natively
-    let assigned =
-        nancy::commands::grind::identify_assigned_task(&async_repo, &worker_did, coord_did).await;
-
-    assert!(
-        assigned.is_some(),
-        "Identify assigned task failed to cross-resolve raw payload via LocalIndex!"
-    );
-    let (_, assignment_payload, raw_task_payload) = assigned.unwrap();
-    assert_eq!(assignment_payload.task_ref, "task_eval_1");
-    assert_eq!(raw_task_payload.description, "Task authored by worker");
-
     Ok(())
 }

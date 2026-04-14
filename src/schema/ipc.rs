@@ -16,6 +16,16 @@ pub struct ReadyForPollResponse {
     pub new_state_id: u64,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct RequestAssignmentPayload {
+    pub grinder_did: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct RequestAssignmentResponse {
+    pub task_id: String,
+}
+
 pub use schema::{NanoCent, ModelChoice, UsageMetrics, PendingBidInfo, Quotas, ModelUsageStats, MarketStateResponse};
 pub type GrantedPermissionInfo = schema::GrantedPermissionResponse;
 

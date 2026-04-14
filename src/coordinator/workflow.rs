@@ -2,7 +2,6 @@ use anyhow::Result;
 use std::collections::HashSet;
 
 use crate::coordinator::appview::AppView;
-use crate::coordinator::git::ensure_task_branch;
 
 use crate::events::writer::Writer;
 use crate::schema::identity_config::Identity;
@@ -32,10 +31,6 @@ pub async fn process_app_view_events(
         if workers.is_empty() {
             tracing::warn!("Coordinator has no workers provisioned!");
         } else {
-            logged_any |=
-                handle_work_assignments(repo, appview, &writer, workers, processed_request_ids)
-                    .await
-                    .unwrap_or(false);
             logged_any |= handle_task_requests(repo, appview, &writer, processed_request_ids)
                 .await
                 .unwrap_or(false);
@@ -65,40 +60,6 @@ fn process_task_completion(
     Ok(logged_any)
 }
 
-async fn handle_work_assignments(
-    repo: &crate::git::AsyncRepository,
-    appview: &AppView,
-    writer: &Writer<'_>,
-    workers: &[crate::schema::identity_config::DidOwner],
-    processed_request_ids: &mut HashSet<String>,
-) -> Result<bool> {
-    let mut logged_any = false;
-    let target = match workers.first() {
-        Some(t) => t,
-        None => return Ok(false),
-    };
-
-    for task_id in appview.get_highest_impact_ready_tasks() {
-        if appview.assignments.contains_key(&task_id) || processed_request_ids.contains(&task_id) {
-            continue;
-        }
-        processed_request_ids.insert(task_id.clone());
-
-        if let Some(EventPayload::Task(t)) = appview.tasks.get(&task_id) {
-            if t.action == TaskAction::Implement {
-                ensure_task_branch(repo, appview, &task_id).await;
-            }
-        }
-
-        let assignment = crate::schema::task::CoordinatorAssignmentPayload {
-            task_ref: task_id.clone(),
-            assignee_did: target.did.clone(),
-        };
-        writer.log_event(EventPayload::CoordinatorAssignment(assignment))?;
-        logged_any = true;
-    }
-    Ok(logged_any)
-}
 
 async fn handle_task_requests(
     repo: &crate::git::AsyncRepository,
@@ -299,71 +260,5 @@ mod tests {
         Ok(())
     }
 
-    #[tokio::test]
-    async fn test_handle_work_assignments_direct() -> Result<()> {
-        let mut _tr = crate::debug::test_repo::TestRepo::new().await?;
-        let temp_dir = &_tr.td;
-        let _repo = &_tr.repo;
-        let nancy_dir = temp_dir.path().join(".nancy");
-        fs::create_dir_all(&nancy_dir)?;
-        let worker = crate::schema::identity_config::DidOwner::generate();
-        let worker_did = worker.did.clone();
 
-        let coord_owner = crate::schema::identity_config::DidOwner::generate();
-        let coord_did = coord_owner.did.clone();
-
-        let coord_identity = Identity::Coordinator {
-            did: coord_owner,
-            workers: vec![worker.clone()],
-            dreamer: crate::schema::identity_config::DidOwner::generate(),
-            human: Some(crate::schema::identity_config::DidOwner::generate()),
-        };
-        fs::write(
-            nancy_dir.join("identity.json"),
-            serde_json::to_string(&coord_identity)?,
-        )?;
-        let writer = Writer::new(&_tr.async_repo, coord_identity)?;
-        let mut appview = AppView::new();
-
-        let implement_payload = EventPayload::Task(TaskPayload {
-            action: TaskAction::Implement,
-            description: "".to_string(),
-            preconditions: vec![],
-            postconditions: vec![],
-            parent_branch: "master".to_string(),
-            branch: "TBD".to_string(),
-            plan: None,
-        });
-        appview.apply_event(&implement_payload, "impl1");
-
-        let mut processed = HashSet::new();
-        let handled = handle_work_assignments(
-            &_tr.async_repo,
-            &appview,
-            &writer,
-            &vec![worker.clone()],
-            &mut processed,
-        )
-        .await?;
-        assert!(
-            handled,
-            "Work assignments skipped cleanly without assigning bounds!"
-        );
-        writer.commit_batch().await?;
-
-        let mut assigned = false;
-        let reader = Reader::new(&_tr.async_repo, coord_did);
-        for ev in reader.iter_events().await? {
-            if let EventPayload::CoordinatorAssignment(a) = ev?.payload {
-                if a.assignee_did == worker_did && a.task_ref == "impl1" {
-                    assigned = true;
-                }
-            }
-        }
-        assert!(
-            assigned,
-            "CoordinatorAssignmentPayload structurally missing from the evaluation harness limits!"
-        );
-        Ok(())
-    }
 }

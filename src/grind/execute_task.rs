@@ -710,7 +710,6 @@ pub async fn handle_implement_task(
 pub async fn execute<'a>(
     repo: &'a crate::git::AsyncRepository,
     _id_obj: &Identity,
-    assignment_id: &str,
     task_ref: &str,
     task_payload: &TaskPayload,
     writer: &crate::events::writer::Writer<'a>,
@@ -838,7 +837,7 @@ pub async fn execute<'a>(
 
     writer.log_event(EventPayload::AssignmentComplete(
         AssignmentCompletePayload {
-            assignment_ref: assignment_id.to_string(),
+            assignment_ref: task_ref.to_string(),
             status,
             report: report_str,
         },
@@ -904,7 +903,6 @@ mod tests {
         let res = execute(
             &async_repo,
             &identity,
-            "assign_123",
             "task_ref_7xyz",
             &payload,
             &writer,
@@ -988,7 +986,6 @@ mod tests {
         let res = execute(
             &async_repo,
             &identity,
-            "assign_success",
             "task_ref_success",
             &payload,
             &writer,
@@ -1054,7 +1051,6 @@ mod tests {
         let res = execute(
             &_tr.async_repo,
             &identity,
-            "assign_impl",
             "task_ref_impl",
             &payload,
             &writer,
@@ -1136,7 +1132,6 @@ mod tests {
         let res = execute(
             &_tr.async_repo,
             &identity,
-            "assign_retry",
             "task_ref_retry",
             &payload,
             &writer,
@@ -1230,7 +1225,6 @@ mod tests {
         let res = execute(
             &_tr.async_repo,
             &identity,
-            "assign_complex",
             "task_ref_complex",
             &payload,
             &writer,

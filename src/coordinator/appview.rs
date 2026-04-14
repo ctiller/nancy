@@ -139,27 +139,13 @@ impl AppView {
             }
             EventPayload::AssignmentComplete(c) => {
                 if c.status == crate::schema::task::AssignmentStatus::Completed {
-                    if let Some(target_ref) = self.assignment_targets.get(&c.assignment_ref) {
-                        self.assignments.remove(target_ref);
-                        self.task_completions.insert(target_ref.clone());
-                        self.completed_reports
-                            .insert(target_ref.clone(), c.report.clone());
-                    }
-                } else {
-                    if let Some(target_ref) = self.assignment_targets.get(&c.assignment_ref) {
-                        self.assignments.remove(target_ref);
-                    }
+                    self.task_completions.insert(c.assignment_ref.clone());
+                    self.completed_reports
+                        .insert(c.assignment_ref.clone(), c.report.clone());
                 }
             }
             EventPayload::CoordinatorAssignment(a) => {
-                let crate::schema::task::CoordinatorAssignmentPayload {
-                    task_ref,
-                    assignee_did,
-                } = a;
-                self.assignments
-                    .insert(task_ref.clone(), assignee_did.clone());
-                self.assignment_targets
-                    .insert(event_id.to_string(), task_ref.clone());
+                self.assignments.insert(a.task_ref.clone(), a.assignee_did.clone());
             }
             EventPayload::AgentCrashReport(p) => {
                 self.agent_crashes
@@ -630,42 +616,17 @@ mod tests {
         assert_eq!(ready.len(), 1);
         assert_eq!(ready[0], "t1"); // T1 is the only ready task, and has highest impact!
 
-        // Assign T1
-        view.apply_event(
-            &EventPayload::CoordinatorAssignment(
-                crate::schema::task::CoordinatorAssignmentPayload {
-                    task_ref: "t1".into(),
-                    assignee_did: "worker".into(),
-                },
-            ),
-            "assignment_event_id",
-        );
-
         // Complete T1 assignment
         view.apply_event(
             &EventPayload::AssignmentComplete(crate::schema::task::AssignmentCompletePayload {
-                assignment_ref: "assignment_event_id".into(),
+                assignment_ref: "t1".into(),
                 status: crate::schema::task::AssignmentStatus::Completed,
                 report: "done".into(),
             }),
             "e3",
         );
 
-        // Assign task
-        view.apply_event(
-            &EventPayload::CoordinatorAssignment(
-                crate::schema::task::CoordinatorAssignmentPayload {
-                    task_ref: "req1".into(),
-                    assignee_did: "worker".into(),
-                },
-            ),
-            "plan_event_id",
-        );
-        assert_eq!(view.assignments.get("req1").unwrap(), "worker");
-        assert_eq!(
-            view.assignment_targets.get("plan_event_id").unwrap(),
-            "req1"
-        );
+        // Coordinator Assignments natively deprecated. Tasks become independently accessible instantly!
 
         let ready = view.get_highest_impact_ready_tasks();
         assert_eq!(ready.len(), 2); // T2 and T3 are now ready

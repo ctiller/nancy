@@ -39,6 +39,7 @@ async fn test_e2e_web_grinder_list() {
         ),
         gateway: std::sync::Arc::clone(&gateway),
         tree_root: std::sync::Arc::new(nancy::introspection::IntrospectionTreeRoot::new()),
+        active_assignments: std::sync::Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
     };
     let _handle = spawn_web_server(listener, ipc_state);
 

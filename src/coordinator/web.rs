@@ -838,6 +838,7 @@ mod tests {
             ),
             gateway: std::sync::Arc::clone(&gateway),
             tree_root: std::sync::Arc::new(crate::introspection::IntrospectionTreeRoot::new()),
+            active_assignments: std::sync::Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
         };
         let ext = axum::extract::Extension(ipc);
 
@@ -890,6 +891,7 @@ mod tests {
             ),
             gateway: std::sync::Arc::clone(&gateway),
             tree_root: std::sync::Arc::new(crate::introspection::IntrospectionTreeRoot::new()),
+            active_assignments: std::sync::Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
         };
         let ext = axum::extract::Extension(ipc);
         let json = axum::Json(crate::schema::task::TaskRequestPayload {
