@@ -1,0 +1,9 @@
+action: implement
+task_description: |
+  Modify the python program to say "goodbye!" instead.
+commits:
+  - message: Initial commit
+    files:
+      program.py: |
+        #!/bin/python
+        print("hello world")
