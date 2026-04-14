@@ -1,12 +1,9 @@
 use crate::llm::api::{Gemini, GeminiResponse, Session, SystemInstruction, Tool};
 use anyhow::{Context, bail};
 use askama::Template;
-use backoff::backoff::Backoff;
 use schemars::JsonSchema;
 use serde::de::DeserializeOwned;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::Duration;
-use tokio::time::sleep;
 
 #[derive(Template)]
 #[template(
@@ -55,19 +52,6 @@ pub struct LlmClient {
     pub is_looping: Option<std::sync::Arc<std::sync::Mutex<Option<String>>>>,
     pub task_priority: TaskPriorityFn,
     pub local_market_weight: f64,
-}
-
-fn is_retryable(err: &crate::llm::api::GeminiError) -> bool {
-    match err {
-        crate::llm::api::GeminiError::ResourceExhausted => true,
-        crate::llm::api::GeminiError::ApiStatus { status, .. } => {
-            status.contains("429") || status.contains("500") || status.contains("502") || status.contains("503") || status.contains("504")
-        }
-        crate::llm::api::GeminiError::Reqwest(re) => {
-            re.is_timeout() || re.is_connect()
-        }
-        _ => false,
-    }
 }
 
 fn get_closest_matches(name: &str, valid_names: &[&str]) -> Vec<String> {
@@ -375,71 +359,33 @@ impl LlmClient {
             None
         };
 
-        let coord_sock = crate::agent::get_coordinator_socket_path(None);
+        let priority_val = (self.task_priority)().await;
+        let k = priority_val * self.local_market_weight;
 
-        let mut target_model = model.clone();
-
-        if coord_sock.exists() {
-            if let Ok(client) = reqwest::Client::builder()
-                .unix_socket(coord_sock.clone())
-                .http2_prior_knowledge()
-                .build()
-            {
-                let priority_val = (self.task_priority)().await;
-                let k = priority_val * self.local_market_weight;
-
-                let choices = match self.kind {
-                    crate::llm::builder::Kind::Flexible(weight) => {
-                        let flash_model = crate::llm::builder::LlmBuilder::resolve_model(
-                            &crate::llm::builder::Kind::Fast,
-                            &version,
-                        );
-                        vec![
-                            crate::schema::ipc::ModelChoice {
-                                name: model.clone(), // pro
-                                bid_value: k,
-                            },
-                            crate::schema::ipc::ModelChoice {
-                                name: flash_model,
-                                bid_value: k * weight,
-                            },
-                        ]
-                    }
-                    _ => vec![crate::schema::ipc::ModelChoice {
-                        name: model.clone(),
+        let choices = match self.kind {
+            crate::llm::builder::Kind::Flexible(weight) => {
+                let flash_model = crate::llm::builder::LlmBuilder::resolve_model(
+                    &crate::llm::builder::Kind::Fast,
+                    &version,
+                );
+                vec![
+                    crate::schema::ipc::ModelChoice {
+                        name: model.clone(), // pro
                         bid_value: k,
-                    }],
-                };
-
-                let payload = crate::schema::ipc::RequestModelPayload {
-                    requester_id: self.subagent.clone(),
-                    choices,
-                };
-                crate::introspection::set_frame_status("Waiting for Spot Market lease... ⏳");
-                match client
-                    .post("http://localhost/request-model")
-                    .json(&payload)
-                    .send()
-                    .await
-                {
-                    Ok(resp) => {
-                        if let Ok(res_data) = resp
-                            .json::<crate::schema::ipc::RequestModelResponse>()
-                            .await
-                        {
-                            target_model = res_data.granted_model;
-                        }
-                    }
-                    Err(e) => {
-                        tracing::warn!("Spot Market lease request failed fundamentally: {}", e);
-                    }
-                }
-
-                crate::introspection::set_frame_status("Thinking... 💭 ✨");
+                    },
+                    crate::schema::ipc::ModelChoice {
+                        name: flash_model,
+                        bid_value: k * weight,
+                    },
+                ]
             }
-        }
+            _ => vec![crate::schema::ipc::ModelChoice {
+                name: model.clone(),
+                bid_value: k,
+            }],
+        };
 
-        let mut gemini = Gemini::new(&self.api_key, target_model.to_string(), sys_prompt);
+        let mut gemini = Gemini::new(&self.api_key, model.to_string(), sys_prompt);
         if let Some(temp) = self.temperature {
             gemini.set_generation_config()["temperature"] = serde_json::json!(temp);
         }
@@ -461,105 +407,125 @@ impl LlmClient {
             gemini = gemini.set_tools(vec![Tool::FunctionDeclarations(function_decls)]);
         }
 
-        self.run_loop::<T>(&mut gemini).await
+        self.run_loop::<T>(&mut gemini, choices).await
     }
 
     pub(crate) async fn run_loop<T: DeserializeOwned + 'static>(
         &mut self,
         gemini: &mut Gemini,
+        choices: Vec<crate::schema::ipc::ModelChoice>,
     ) -> anyhow::Result<T> {
         loop {
             let mut thought_str = String::new();
-            // Loop for retries
-            let mut retry_count = 0;
-            let mut backoff = backoff::ExponentialBackoff::default();
-            let resp: GeminiResponse = loop {
-                let stream_handle = std::sync::Arc::new(std::sync::Mutex::new(
-                    None::<crate::introspection::StreamHandle>,
-                ));
-                let ts_locked = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+            let mut final_function_calls = Vec::new();
+            let mut res_text = String::new();
+            let mut input_tokens = 0;
+            let mut output_tokens = 0;
+            
+            let stream_handle = std::sync::Arc::new(std::sync::Mutex::new(
+                None::<crate::introspection::StreamHandle>,
+            ));
+            let ts_locked = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+            let txt_locked = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
 
-                let ask_res = if let Some(queue) = &self.mock_queue {
-                    let (should_hang, mock_resp) = {
-                        let mut lock = queue.lock().unwrap();
-                        if lock.responses.is_empty() {
-                            if lock.hang_on_exhaustion {
-                                (true, None)
-                            } else {
-                                panic!("Mock queue exhausted during test");
-                            }
+            let ask_res = if let Some(queue) = &self.mock_queue {
+                let (should_hang, mock_resp) = {
+                    let mut lock = queue.lock().unwrap();
+                    if lock.responses.is_empty() {
+                        if lock.hang_on_exhaustion {
+                            (true, None)
                         } else {
-                            (false, Some(lock.responses.remove(0)))
+                            panic!("Mock queue exhausted during test");
                         }
-                    };
-                    if should_hang {
-                        std::future::pending::<()>().await;
-                        unreachable!()
-                    }
-                    mock_resp.unwrap()
-                } else {
-                    tracing::info!(
-                        "==== [LLM Client] Sending request to Gemini API. Waiting... ===="
-                    );
-
-                    let sh_clone = stream_handle.clone();
-                    let t_clone = ts_locked.clone();
-
-                    let timeout_res = tokio::time::timeout(
-                        std::time::Duration::from_secs(120),
-                        gemini.ask_stream(
-                            self.session.get_history(),
-                            move |chunk: &str, is_thought: bool| {
-                                if is_thought {
-                                    let mut sh_lock = sh_clone.lock().unwrap();
-                                    if let Some(handle) = sh_lock.as_ref() {
-                                        handle.append(chunk);
-                                    } else {
-                                        *sh_lock = crate::introspection::stream_log(chunk);
-                                    }
-                                    t_clone.lock().unwrap().push_str(chunk);
-                                }
-                            },
-                        ),
-                    )
-                    .await;
-
-                    tracing::info!("==== [LLM Client] Received response successfully! ====");
-                    match timeout_res {
-                        Ok(res) => {
-                            thought_str = ts_locked.lock().unwrap().clone();
-                            res
-                        }
-                        Err(_) => {
-                            return Err(anyhow::anyhow!(
-                                "Gemini API network request timed out (120s deadline exceeded) organically stopping indefinitely suspended tasks."
-                            ));
-                        }
+                    } else {
+                        (false, Some(lock.responses.remove(0)))
                     }
                 };
+                if should_hang {
+                    std::future::pending::<()>().await;
+                    unreachable!()
+                }
+                
+                let resp = mock_resp.unwrap().map_err(|e| anyhow::anyhow!("Gemini API error: {}", e))?;
+                final_function_calls = resp.get_function_calls();
+                res_text = resp.get_text_no_think("\n");
+                Ok::<(), anyhow::Error>(())
+            } else {
+                tracing::info!("==== [LLM Client] Sending proxy request... ====");
 
-                match ask_res {
-                    Ok(r) => break r,
-                    Err(e) => {
-                        if is_retryable(&e) {
-                            if retry_count > 5 {
-                                bail!("Max retries exceeded for Gemini API: {}", e)
+                let request = crate::llm::api::GeminiRequest {
+                    contents: self.session.get_history().to_vec(),
+                    system_instruction: gemini.system_instruction.clone(),
+                    tools: gemini.tools.clone(),
+                    generation_config: if gemini.generation_config.is_object()
+                        && !gemini.generation_config.as_object().unwrap().is_empty()
+                    {
+                        Some(gemini.generation_config.clone())
+                    } else {
+                        None
+                    },
+                };
+                
+                let payload = crate::schema::ipc::LlmRequest {
+                    model_choices: choices.clone(),
+                    worker_did: self.subagent.clone(),
+                    agent_path: self.subagent.clone(),
+                    task_name: std::env::var("NANCY_TASK_ID").unwrap_or_default(),
+                    payload: serde_json::to_value(&request)?,
+                };
+
+                let coord_sock = crate::agent::get_coordinator_socket_path(None);
+                if !coord_sock.exists() {
+                    anyhow::bail!("Coordinator connection natively missing securely.");
+                }
+                let client = crate::agent::get_coordinator_client(None);
+                let res = client.post("http://localhost/proxy/api").json(&payload).send().await?;
+                if !res.status().is_success() {
+                    let text = res.text().await.unwrap_or_default();
+                    anyhow::bail!("Proxy structurally executed failure: {}", text);
+                }
+
+                use tokio_stream::StreamExt;
+                let mut stream = reqwest::Response::bytes_stream(res);
+                let mut buffer = String::new();
+
+                while let Some(chunk) = stream.next().await {
+                    let chunk_bytes = chunk?;
+                    buffer.push_str(String::from_utf8_lossy(&chunk_bytes).as_ref());
+                    while let Some(idx) = buffer.find("\n\n") {
+                        let event = buffer[..idx].to_string();
+                        buffer = buffer[idx+2..].to_string();
+                        if let Some(data) = event.strip_prefix("data: ") {
+                            if data == "[DONE]" { continue; }
+                            if let Ok(parsed) = serde_json::from_str::<crate::schema::ipc::LlmStreamChunk>(data) {
+                                if parsed.is_final {
+                                    final_function_calls = parsed.function_calls;
+                                    input_tokens = parsed.input_tokens;
+                                    output_tokens = parsed.output_tokens;
+                                } else if let Some(txt) = parsed.text {
+                                    if parsed.is_thought {
+                                        let mut sh_lock = stream_handle.lock().unwrap();
+                                        if let Some(handle) = sh_lock.as_ref() {
+                                            handle.append(&txt);
+                                        } else {
+                                            *sh_lock = crate::introspection::stream_log(&txt);
+                                        }
+                                        ts_locked.lock().unwrap().push_str(&txt);
+                                    } else {
+                                        txt_locked.lock().unwrap().push_str(&txt);
+                                    }
+                                }
                             }
-                            let duration = backoff.next_backoff().unwrap_or(std::time::Duration::from_secs(10));
-                            retry_count += 1;
-                            crate::introspection::log(&format!(
-                                "⚠️ API Error: {}. Retrying in {:.1}s (Attempt {}/5)",
-                                e,
-                                duration.as_secs_f32(),
-                                retry_count
-                            ));
-                            sleep(duration).await;
-                        } else {
-                            bail!("Gemini API error: {}", e)
                         }
                     }
                 }
+                
+                thought_str = ts_locked.lock().unwrap().clone();
+                res_text = txt_locked.lock().unwrap().clone();
+                Ok(())
             };
+
+            ask_res?;
 
             if !thought_str.is_empty() {
                 let timestamp = std::time::SystemTime::now()
@@ -576,72 +542,31 @@ impl LlmClient {
                 .await;
             }
 
-            let chat = resp;
-
-            let mut input_tokens = 0;
-            let mut output_tokens = 0;
-            if let Some(usage) = &chat.usage_metadata {
-                if let Some(prompt) = usage.get("promptTokenCount").and_then(|t| t.as_u64()) {
-                    input_tokens = prompt;
-                }
-                if let Some(candidates) = usage.get("candidatesTokenCount").and_then(|t| t.as_u64())
-                {
-                    output_tokens = candidates;
-                }
-            }
-
-            let coord_sock = crate::agent::get_coordinator_socket_path(None);
-            if coord_sock.exists() {
-                if let Ok(client) = reqwest::Client::builder()
-                    .unix_socket(coord_sock.clone())
-                    .http2_prior_knowledge()
-                    .build()
-                {
-                    let payload = crate::schema::ipc::LlmUsagePayload {
-                        model: serde_json::from_value(serde_json::Value::String(
-                            gemini.model.clone(),
-                        ))
-                        .unwrap_or(schema::LlmModel::TestMockModel),
-                        input_tokens,
-                        output_tokens,
-                        agent_path: self.subagent.clone(),
-                        task_name: String::new(),
-                    };
-                    if let Ok(res) = client
-                        .post("http://localhost/llm-usage")
-                        .json(&payload)
-                        .send()
-                        .await
-                    {
-                        if let Ok(usage_res) =
-                            res.json::<crate::schema::ipc::LlmUsageResponse>().await
-                        {
-                            if let Ok(task_ref) = std::env::var("NANCY_TASK_ID") {
-                                self.emit_trace_event(
-                                    crate::schema::registry::EventPayload::TaskSpend(
-                                        crate::schema::task::TaskSpendPayload {
-                                            task_ref,
-                                            cost_usd: usage_res.cost_usd,
-                                        },
-                                    ),
-                                )
-                                .await;
-                            }
-                        }
-                    }
-                }
-            }
-
-            if chat.has_function_call() {
-                let tool_responses = self.handle_tool_calls(&chat).await;
+            if !final_function_calls.is_empty() {
+                // Mock Gemini chat instance strictly cleanly natively safely to resolve backwards compatibility organically.
+                let mut mock_chat = crate::llm::api::GeminiResponse::default();
+                mock_chat.candidates = Some(vec![crate::llm::api::Candidate {
+                    content: crate::llm::api::Content {
+                        role: "model".to_string(),
+                        parts: final_function_calls.into_iter().map(|f| crate::llm::api::Part {
+                            text: None,
+                            thought: None,
+                            function_call: Some(f),
+                        }).collect()
+                    },
+                    finish_reason: Some("STOP".to_string())
+                }]);
+                let tool_responses = self.handle_tool_calls(&mock_chat).await;
                 for (name, payload) in tool_responses {
                     let _ = self.session.add_function_response(&name, payload);
                 }
             } else {
-                let text = chat.get_text_no_think("\n");
+                let text = res_text;
 
-                if let Some(tx) = &self.loop_event_tx {
-                    let _ = tx.send(LoopEvent::Response(text.clone()));
+                if input_tokens > 0 || output_tokens > 0 {
+                    if let Some(tx) = &self.loop_event_tx {
+                        let _ = tx.send(LoopEvent::Response(text.clone()));
+                    }
                 }
 
                 let timestamp = std::time::SystemTime::now()
@@ -681,7 +606,7 @@ mod tests {
         // Change working directory to tempdir for the test so discover(".") finds it
         std::env::set_current_dir(&td_path).unwrap();
 
-        let repo = git2::Repository::init(&td_path).unwrap();
+        let _repo = git2::Repository::init(&td_path).unwrap();
         crate::commands::init::init(td_path.clone(), 1)
             .await
             .unwrap();
@@ -797,12 +722,7 @@ mod tests {
         assert!(err_parse.is_err());
     }
 
-    #[test]
-    fn test_is_retryable() {
-        let err = crate::llm::api::GeminiError::ResourceExhausted;
-        let is_ret = is_retryable(&err);
-        assert_eq!(is_ret, true);
-    }
+
 
     #[derive(Debug)]
     struct MockTool;
@@ -932,45 +852,7 @@ mod tests {
         assert_eq!(result, "Hello logic");
     }
 
-    #[tokio::test(start_paused = true)]
-    async fn test_run_loop_max_retries() {
-        let make_err = || Err(crate::llm::api::GeminiError::ResourceExhausted);
 
-        let mut responses = Vec::new();
-        for _ in 0..7 {
-            responses.push(make_err());
-        }
-
-        let mut client = LlmClient {
-            kind: crate::llm::builder::Kind::Fast,
-            api_key: "xxx".to_string(),
-            temperature: None,
-            system_prompt: vec![],
-            subagent: "test".to_string(),
-            tools: vec![],
-            session: Session::new(10),
-            mock_queue: Some(Arc::new(Mutex::new(crate::llm::mock::builder::MockQueue {
-                responses,
-                hang_on_exhaustion: false,
-            }))),
-            created_at: std::time::Instant::now(),
-            shared_deadline: None,
-            loop_event_tx: None,
-            is_looping: None,
-            task_priority: std::sync::Arc::new(|| Box::pin(std::future::ready(0.5))),
-            local_market_weight: 0.5,
-        };
-
-        let mut gemini = Gemini::new("xxx", "test_model".to_string(), None);
-        let result = client.run_loop::<String>(&mut gemini).await;
-        assert!(result.is_err());
-        assert!(
-            result
-                .unwrap_err()
-                .to_string()
-                .contains("Max retries exceeded")
-        );
-    }
 
     #[tokio::test]
     async fn test_run_loop_fatal_gemini_error() {
@@ -997,7 +879,7 @@ mod tests {
         };
 
         let mut gemini = Gemini::new("xxx", "test".to_string(), None);
-        let result = client.run_loop::<String>(&mut gemini).await;
+        let result = client.run_loop::<String>(&mut gemini, vec![]).await;
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("Gemini API error"));
     }

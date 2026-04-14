@@ -13,11 +13,7 @@ pub fn appview_task_priority(task_id: String) -> crate::llm::client::TaskPriorit
         Box::pin(async move {
             let sock = crate::agent::get_coordinator_socket_path(None);
             if sock.exists() {
-                if let Ok(client) = reqwest::Client::builder()
-                    .unix_socket(sock)
-                    .http2_prior_knowledge()
-                    .build()
-                {
+                let client = crate::agent::get_coordinator_client(None);
                     let url = format!("http://localhost/api/market/task-priority/{}", t_id);
                     if let Ok(resp) = client
                         .get(&url)
@@ -31,7 +27,6 @@ pub fn appview_task_priority(task_id: String) -> crate::llm::client::TaskPriorit
                             }
                         }
                     }
-                }
             }
             0.5_f64
         })
@@ -401,7 +396,7 @@ struct PrecondResult {
 
 pub async fn handle_implement_task(
     target_path: &std::path::Path,
-    repo: &crate::git::AsyncRepository,
+    _repo: &crate::git::AsyncRepository,
     task_ref: &str,
     task_payload: &TaskPayload,
     writer: &Writer<'_>,
@@ -844,7 +839,7 @@ mod tests {
     async fn test_execute_failure_bounds() -> anyhow::Result<()> {
         let mut _tr = crate::debug::test_repo::TestRepo::new().await?;
         let _td = &_tr.td;
-        let repo = &_tr.repo;
+        let _repo = &_tr.repo;
 
         let identity = Identity::Grinder(DidOwner {
             did: "mock1".into(),

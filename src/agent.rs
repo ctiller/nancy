@@ -23,6 +23,19 @@ pub fn get_human_did() -> Option<String> {
     std::env::var("NANCY_HUMAN_DID").ok()
 }
 
+static COORDINATOR_CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+
+pub fn get_coordinator_client(workdir: Option<&std::path::Path>) -> reqwest::Client {
+    COORDINATOR_CLIENT.get_or_init(|| {
+        let sock = get_coordinator_socket_path(workdir);
+        reqwest::Client::builder()
+            .unix_socket(sock)
+            .http2_prior_knowledge()
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new())
+    }).clone()
+}
+
 pub static SHUTDOWN: AtomicBool = AtomicBool::new(false);
 pub static SHUTDOWN_NOTIFY: tokio::sync::Notify = tokio::sync::Notify::const_new();
 
@@ -320,50 +333,38 @@ pub async fn run_agent<P: AsRef<Path>, Processor: AgentTaskProcessor>(
 
             let socket_path = get_coordinator_socket_path(Some(&workdir));
             if socket_path.exists() {
-                match reqwest::Client::builder()
-                    .unix_socket(socket_path.clone())
-                    .http2_prior_knowledge()
-                    .build()
-                {
-                    Ok(client) => {
-                        let payload = crate::schema::ipc::ReadyForPollPayload { last_state_id };
-                        let res = client
-                            .post("http://localhost/ready-for-poll")
-                            .json(&payload)
-                            .send()
-                            .await;
+                let client = get_coordinator_client(Some(&workdir));
+                let payload = crate::schema::ipc::ReadyForPollPayload { last_state_id };
+                let res = client
+                    .post("http://localhost/ready-for-poll")
+                    .json(&payload)
+                    .send()
+                    .await;
 
-                        if let Ok(resp) = res {
-                            if let Ok(data) = resp
-                                .json::<crate::schema::ipc::ReadyForPollResponse>()
-                                .await
-                            {
-                                last_state_id = data.new_state_id;
-                                tracing::debug!(
-                                    "[Agent {}] /ready-for-poll updated bound state: {}",
-                                    agent_type,
-                                    last_state_id
-                                );
-                            } else {
-                                tracing::error!(
-                                    "[Agent {}] /ready-for-poll failed to decode response bounds.",
-                                    agent_type
-                                );
-                            }
-                        } else {
-                            tracing::warn!(
-                                "[Agent {}] /ready-for-poll HTTP error. Assuming Coordinator is unavailable.",
-                                agent_type
-                            );
-                            SHUTDOWN.store(true, Ordering::SeqCst);
-                            SHUTDOWN_NOTIFY.notify_waiters();
-                        }
+                if let Ok(resp) = res {
+                    if let Ok(data) = resp
+                        .json::<crate::schema::ipc::ReadyForPollResponse>()
+                        .await
+                    {
+                        last_state_id = data.new_state_id;
+                        tracing::debug!(
+                            "[Agent {}] /ready-for-poll updated bound state: {}",
+                            agent_type,
+                            last_state_id
+                        );
+                    } else {
+                        tracing::error!(
+                            "[Agent {}] /ready-for-poll failed to decode response bounds.",
+                            agent_type
+                        );
                     }
-                    Err(e) => {
-                        tracing::error!("Failed to build UDS client securely: {:?}", e);
-                        SHUTDOWN.store(true, Ordering::SeqCst);
-                        SHUTDOWN_NOTIFY.notify_waiters();
-                    }
+                } else {
+                    tracing::warn!(
+                        "[Agent {}] /ready-for-poll HTTP error. Assuming Coordinator is unavailable.",
+                        agent_type
+                    );
+                    SHUTDOWN.store(true, Ordering::SeqCst);
+                    SHUTDOWN_NOTIFY.notify_waiters();
                 }
             } else {
                 tracing::warn!("UDS socket does not exist. Coordinator may have terminated.");
@@ -398,34 +399,29 @@ pub async fn run_agent<P: AsRef<Path>, Processor: AgentTaskProcessor>(
                     )
                     .await, // NOTE: generic usage applies safely as task payload bounds apply equally!
                 };
-                if let Ok(client) = reqwest::Client::builder()
-                    .unix_socket(socket_path.clone())
-                    .http2_prior_knowledge()
-                    .build()
-                {
-                    tracing::debug!(
-                        "[Agent {}] Sending /updates-ready block payload...",
+                let client = get_coordinator_client(Some(&workdir));
+                tracing::debug!(
+                    "[Agent {}] Sending /updates-ready block payload...",
+                    agent_type
+                );
+                let res = client
+                    .post("http://localhost/updates-ready")
+                    .json(&payload)
+                    .send()
+                    .await;
+                if res.is_err() {
+                    tracing::warn!(
+                        "[Agent {}] /updates-ready failed. Coordinator may be down.",
                         agent_type
                     );
-                    let res = client
-                        .post("http://localhost/updates-ready")
-                        .json(&payload)
-                        .send()
-                        .await;
-                    if res.is_err() {
-                        tracing::warn!(
-                            "[Agent {}] /updates-ready failed. Coordinator may be down.",
-                            agent_type
-                        );
-                        SHUTDOWN.store(true, Ordering::SeqCst);
-                        SHUTDOWN_NOTIFY.notify_waiters();
-                    }
-                    tracing::debug!(
-                        "[Agent {}] Unblocked from /updates-ready ping. Response: {:?}",
-                        agent_type,
-                        res.map(|r| r.status())
-                    );
+                    SHUTDOWN.store(true, Ordering::SeqCst);
+                    SHUTDOWN_NOTIFY.notify_waiters();
                 }
+                tracing::debug!(
+                    "[Agent {}] Unblocked from /updates-ready ping. Response: {:?}",
+                    agent_type,
+                    res.map(|r| r.status())
+                );
             } else {
                 tracing::warn!("UDS socket does not exist. Coordinator may have terminated.");
                 SHUTDOWN.store(true, Ordering::SeqCst);
@@ -436,30 +432,25 @@ pub async fn run_agent<P: AsRef<Path>, Processor: AgentTaskProcessor>(
         // Optionally listen to immediate exit if requested locally!
         let socket_path_local = get_coordinator_socket_path(Some(&workdir));
         if socket_path_local.exists() {
-            if let Ok(client) = reqwest::Client::builder()
-                .unix_socket(socket_path_local.clone())
-                .http2_prior_knowledge()
-                .build()
-            {
-                tokio::spawn(async move {
-                    if let Ok(resp) = client
-                        .get("http://localhost/shutdown-requested")
-                        .send()
-                        .await
-                    {
-                        if resp.status().is_success() {
-                            SHUTDOWN.store(true, Ordering::SeqCst);
-                            SHUTDOWN_NOTIFY.notify_waiters();
-                        }
-                    } else {
-                        tracing::warn!(
-                            "Lost connection to /shutdown-requested long poll. Auto-terminating node securely."
-                        );
+            let client = get_coordinator_client(Some(&workdir));
+            tokio::spawn(async move {
+                if let Ok(resp) = client
+                    .get("http://localhost/shutdown-requested")
+                    .send()
+                    .await
+                {
+                    if resp.status().is_success() {
                         SHUTDOWN.store(true, Ordering::SeqCst);
                         SHUTDOWN_NOTIFY.notify_waiters();
                     }
-                });
-            }
+                } else {
+                    tracing::warn!(
+                        "Lost connection to /shutdown-requested long poll. Auto-terminating node securely."
+                    );
+                    SHUTDOWN.store(true, Ordering::SeqCst);
+                    SHUTDOWN_NOTIFY.notify_waiters();
+                }
+            });
         }
     }
 
