@@ -86,7 +86,7 @@ pub async fn build_container_config(
     let host_config = HostConfig {
         binds: Some(binds),
         auto_remove: Some(true),
-        network_mode: Some("host".to_string()),
+        network_mode: Some("none".to_string()),
         extra_hosts: Some(vec!["host.docker.internal:host-gateway".to_string()]),
         ..Default::default()
     };

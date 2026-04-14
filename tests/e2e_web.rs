@@ -36,6 +36,7 @@ async fn test_e2e_web_grinder_list() {
         token_market: nancy::coordinator::market::ArbitrationMarket::new(
             nancy::schema::coordinator_config::CoordinatorConfig::default(),
         ),
+        gateway: std::sync::Arc::new(nancy::coordinator::llm_proxy::GatewayState::new()),
     };
     let _handle = spawn_web_server(listener, ipc_state);
 

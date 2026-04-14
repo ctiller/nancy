@@ -171,16 +171,16 @@ mod tests {
     use crate::events::writer::Writer;
     use crate::schema::identity_config::DidOwner;
     use crate::schema::task::{
-        AssignmentCompletePayload, BlockedByPayload, TaskAction, TaskPayload, TaskRequestPayload,
+        TaskAction, TaskPayload, TaskRequestPayload,
     };
-    use sealed_test::prelude::*;
+    
     use std::fs;
 
     #[tokio::test]
     async fn test_coordinator_intercepts_requests() -> Result<()> {
         let mut _tr = crate::debug::test_repo::TestRepo::new().await?;
         let temp_dir = &_tr.td;
-        let repo = &_tr.repo;
+        let _repo = &_tr.repo;
 
         let nancy_dir = temp_dir.path().join(".nancy");
         fs::create_dir_all(&nancy_dir)?;
@@ -253,7 +253,7 @@ mod tests {
     async fn test_handle_task_requests_direct() -> Result<()> {
         let mut _tr = crate::debug::test_repo::TestRepo::new().await?;
         let temp_dir = &_tr.td;
-        let repo = &_tr.repo;
+        let _repo = &_tr.repo;
         let nancy_dir = temp_dir.path().join(".nancy");
         fs::create_dir_all(&nancy_dir)?;
         let coord_owner = crate::schema::identity_config::DidOwner::generate();
@@ -303,7 +303,7 @@ mod tests {
     async fn test_handle_work_assignments_direct() -> Result<()> {
         let mut _tr = crate::debug::test_repo::TestRepo::new().await?;
         let temp_dir = &_tr.td;
-        let repo = &_tr.repo;
+        let _repo = &_tr.repo;
         let nancy_dir = temp_dir.path().join(".nancy");
         fs::create_dir_all(&nancy_dir)?;
         let worker = crate::schema::identity_config::DidOwner::generate();

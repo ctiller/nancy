@@ -53,7 +53,7 @@ async fn test_async_repository_concurrent_access() -> anyhow::Result<()> {
     });
 
     let repo_clone2 = repo.clone();
-    let repo_path2 = repo_path.clone();
+    let _repo_path2 = repo_path.clone();
     let initial_oid2 = initial_oid.clone();
 
     let task2 = task::spawn(async move {
@@ -115,7 +115,7 @@ async fn test_async_repository_coverage() -> anyhow::Result<()> {
     let _ = repo.find_object(&blob_oid).await?;
     
     // Branching and checkout
-    let branch = repo.branch("test_branch", &commit_oid.0, false).await?;
+    let _branch = repo.branch("test_branch", &commit_oid.0, false).await?;
     repo.checkout("test_branch").await?;
     
     // Feature branch

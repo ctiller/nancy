@@ -10,8 +10,8 @@ pub const LEASE_TIME_SECS: u64 = 12;
 
 #[derive(Debug)]
 pub struct AuctionBid {
-    pub payload: RequestModelPayload,
-    pub tx: oneshot::Sender<RequestModelResponse>,
+    pub payload: LlmRequest,
+    pub tx: oneshot::Sender<ActiveLeaseInfo>,
     pub submitted_at_unix: u64,
 }
 
@@ -44,7 +44,7 @@ pub struct ActiveQuotas {
 
 pub struct ArbitrationMarket {
     pub pending_bids: Vec<AuctionBid>,
-    pub active_leases: Vec<RequestModelResponse>,
+    pub active_leases: Vec<ActiveLeaseInfo>,
     pub consumption_history: HashMap<schema::LlmModel, VecDeque<UsageRecord>>,
     pub active_quotas: HashMap<schema::LlmModel, ActiveQuotas>,
     pub lease_history: HashMap<schema::LlmModel, VecDeque<u64>>,
@@ -203,8 +203,8 @@ impl ArbitrationMarket {
 
     pub fn submit_bid(
         market: &SharedArbitrationMarket,
-        payload: RequestModelPayload,
-    ) -> oneshot::Receiver<RequestModelResponse> {
+        payload: LlmRequest,
+    ) -> oneshot::Receiver<ActiveLeaseInfo> {
         let (tx, rx) = oneshot::channel();
         let submitted_at_unix = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -228,24 +228,27 @@ impl ArbitrationMarket {
 
     pub async fn record_consumption(
         market: &SharedArbitrationMarket,
-        payload: LlmUsagePayload,
+        model: schema::LlmModel,
+        input_tokens: u64,
+        output_tokens: u64,
+        agent_path: String,
     ) -> f64 {
         let mut lock = market.write().await;
-        let model_cost_schema = Self::cost_for(payload.model, payload.input_tokens);
-        let actual_cost = (payload.input_tokens as f64 * model_cost_schema.input)
-            + (payload.output_tokens as f64 * model_cost_schema.output);
+        let model_cost_schema = Self::cost_for(model, input_tokens);
+        let actual_cost = (input_tokens as f64 * model_cost_schema.input)
+            + (output_tokens as f64 * model_cost_schema.output);
 
         // Exact spend subtraction strictly safely mapped mathematically natively
         lock.budget_pool_usd -= actual_cost;
 
         *lock
             .subagent_costs
-            .entry(payload.agent_path.clone())
+            .entry(agent_path.clone())
             .or_insert(0.0) += actual_cost;
 
         let entry = lock
             .consumption_history
-            .entry(payload.model.clone())
+            .entry(model.clone())
             .or_default();
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -256,8 +259,8 @@ impl ArbitrationMarket {
             timestamp: now,
             metrics: UsageMetrics {
                 requests: 1,
-                input_tokens: payload.input_tokens,
-                output_tokens: payload.output_tokens,
+                input_tokens,
+                output_tokens,
                 cost_usd: actual_cost,
             },
         });
@@ -417,8 +420,8 @@ impl ArbitrationMarket {
             .pending_bids
             .iter()
             .map(|b| PendingBidInfo {
-                requester_id: b.payload.requester_id.clone(),
-                choices: b.payload.choices.clone(),
+                requester_id: b.payload.worker_did.clone(),
+                choices: b.payload.model_choices.clone(),
                 submitted_at_unix: b.submitted_at_unix,
             })
             .collect();
@@ -512,7 +515,7 @@ impl ArbitrationMarket {
                 let mut round_1_tickets = Vec::new();
                 for (idx, req) in inflight_requests.iter().enumerate() {
                     if let Some(bid) = req {
-                        for choice in &bid.payload.choices {
+                        for choice in &bid.payload.model_choices {
                             let (_, expected_tokens, expected_requests) =
                                 Self::expected_lease_metrics_for(&lock, &choice.name);
 
@@ -545,7 +548,7 @@ impl ArbitrationMarket {
 
                 // Round 3 - take most valuable until expected $ budget is < 0
                 for (_value, req_idx, choice) in round_1_tickets {
-                    let Some(_bid_data) = inflight_requests[req_idx].as_ref() else {
+                    let Some(_bid_data): Option<&AuctionBid> = inflight_requests[req_idx].as_ref() else {
                         continue; // Reached if another choice from this same request previously satisfied it!
                     };
 
@@ -580,14 +583,14 @@ impl ArbitrationMarket {
 
                     available_tick_budget -= expected_cost;
 
-                    let bid_data = inflight_requests[req_idx].take().unwrap();
+                    let bid_data: AuctionBid = inflight_requests[req_idx].take().unwrap();
                     let lease_id = uuid::Uuid::new_v4().to_string();
-                    let resp = RequestModelResponse {
+                    let resp = ActiveLeaseInfo {
                         granted_model: choice.name.clone(),
                         lease_id: lease_id.clone(),
                         lease_duration_sec: LEASE_TIME_SECS,
                         granted_at_unix: now,
-                        subagent_id: bid_data.payload.requester_id.clone(),
+                        subagent_id: bid_data.payload.worker_did.clone(),
                     };
 
                     lock.active_leases.push(resp.clone());

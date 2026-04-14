@@ -272,7 +272,7 @@ mod tests {
         let td_path = td.path().to_path_buf();
         std::env::set_current_dir(&td_path).unwrap();
 
-        let repo = git2::Repository::init(&td_path).unwrap();
+        let _repo = git2::Repository::init(&td_path).unwrap();
         crate::commands::init::init(td_path.clone(), 1)
             .await
             .unwrap();

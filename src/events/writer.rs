@@ -321,7 +321,7 @@ mod tests {
         writer1.commit_batch().await?;
 
         // Second instance triggers the tree validation and updates existing log blob
-        let mut writer2 = Writer::new(&_tr.async_repo, identity.clone())?;
+        let writer2 = Writer::new(&_tr.async_repo, identity.clone())?;
 
         // Let's also cover the empty payload return gracefully!
         writer2.commit_batch().await?;

@@ -571,7 +571,7 @@ mod tests {
     fn test_pagerank_highest_impact() {
         let mut view = AppView::new();
 
-        let default_fields = || ("none".to_string(), "none".to_string(), "none".to_string());
+        let _default_fields = || ("none".to_string(), "none".to_string(), "none".to_string());
 
         // 3 tasks. T1 blocks T2 and T3.
         view.apply_event(

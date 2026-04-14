@@ -247,7 +247,7 @@ mod tests {
         use crate::schema::identity_config::*;
 
         let mut _tr = crate::debug::test_repo::TestRepo::new().await.unwrap();
-        let repo = &_tr.repo;
+        let _repo = &_tr.repo;
 
         let coord_owner = crate::schema::identity_config::DidOwner::generate();
         let id_obj = Identity::Coordinator {

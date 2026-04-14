@@ -30,7 +30,7 @@ pub async fn spawn_mock_server() -> (u16, Arc<Mutex<Vec<serde_json::Value>>>) {
 async fn handle_generate_content(
     State(state): State<MockState>,
     Json(body): Json<serde_json::Value>,
-) -> Json<serde_json::Value> {
+) -> String {
     println!(
         "MOCK REQUEST: {}",
         serde_json::to_string(&body).unwrap_or_default()
@@ -38,12 +38,12 @@ async fn handle_generate_content(
     let mut lock = state.responses.lock().await;
     if !lock.is_empty() {
         let resp = lock.remove(0);
-        println!("MOCK HIT: returning {:?}", resp);
-        Json(resp)
+        let json_str = serde_json::to_string(&resp).unwrap();
+        format!("data: {}\n\n", json_str)
     } else {
         println!("MOCK HIT: exhausted! Returning generic response");
         // Return a generic mock response to prevent crashing if exhausted early
-        Json(serde_json::json!({
+        let json_str = serde_json::to_string(&serde_json::json!({
             "candidates": [{
                 "content": {
                     "parts": [{"text": "Mock fallback response"}],
@@ -54,7 +54,8 @@ async fn handle_generate_content(
             }],
             "usageMetadata": {},
             "modelVersion": "MockAxumServer"
-        }))
+        })).unwrap();
+        format!("data: {}\n\n", json_str)
     }
 }
 

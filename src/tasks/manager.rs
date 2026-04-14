@@ -75,7 +75,7 @@ mod tests {
     async fn test_task_manager() -> Result<()> {
         let mut _tr = crate::debug::test_repo::TestRepo::new().await?;
         let temp_dir = &_tr.td;
-        let repo = &_tr.repo;
+        let _repo = &_tr.repo;
         let nancy_dir = temp_dir.path().join(".nancy");
         std::fs::create_dir_all(&nancy_dir)?;
 

@@ -60,7 +60,7 @@ mod tests {
     #[tokio::test]
     async fn test_dreamer_processor_process() {
         let tmp = TempDir::new().unwrap();
-        let repo = git2::Repository::init(tmp.path()).unwrap();
+        let _repo = git2::Repository::init(tmp.path()).unwrap();
         crate::commands::init::init(tmp.path(), 1).await.unwrap();
         let async_repo = crate::git::AsyncRepository::discover(tmp.path())
             .await

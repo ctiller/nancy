@@ -212,12 +212,13 @@ mod tests {
 
         nancy::agent::SHUTDOWN.store(true, std::sync::atomic::Ordering::SeqCst);
         nancy::agent::SHUTDOWN_NOTIFY.notify_waiters();
-        tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+        tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
 
         // Test Cleanup
         let args_cleanup = Args::try_parse_from(["nancy", "cleanup"]).unwrap();
         execute_command(&args_cleanup, grind_dir.clone()).await?;
 
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
         // Ensure no stray files are magically created inside .nancy
         assert!(!grind_dir.join(".nancy").exists());
 

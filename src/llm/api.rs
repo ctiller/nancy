@@ -217,6 +217,7 @@ pub struct Gemini {
     pub tools: Option<Vec<Tool>>,
     pub generation_config: serde_json::Value,
     base_url: String,
+    client: reqwest::Client,
 }
 
 impl Default for GeminiResponse {
@@ -249,6 +250,8 @@ impl Gemini {
         let base_url = std::env::var("GEMINI_API_BASE_URL")
             .unwrap_or_else(|_| "https://generativelanguage.googleapis.com".to_string());
 
+        let client = reqwest::Client::new();
+
         Self {
             api_key: api_key.to_string(),
             model,
@@ -256,6 +259,7 @@ impl Gemini {
             tools: None,
             generation_config: serde_json::json!({}),
             base_url,
+            client,
         }
     }
 
@@ -297,8 +301,7 @@ impl Gemini {
             "{}/v1beta/models/{}:generateContent?key={}",
             self.base_url, self.model, self.api_key
         );
-        let client = reqwest::Client::new();
-        let res = client.post(&url).json(&request).send().await?;
+        let res = self.client.post(&url).json(&request).send().await?;
 
         let status = res.status();
         let text = res.text().await?;
@@ -348,8 +351,7 @@ impl Gemini {
             "{}/v1beta/models/{}:streamGenerateContent?alt=sse&key={}",
             self.base_url, self.model, self.api_key
         );
-        let client = reqwest::Client::new();
-        let mut res = client.post(&url).json(&request).send().await?;
+        let mut res = self.client.post(&url).json(&request).send().await?;
 
         let status = res.status();
         let is_json = res

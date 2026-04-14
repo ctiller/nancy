@@ -23,18 +23,24 @@ pub struct ModelChoice {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct RequestModelPayload {
-    pub requester_id: String,
-    pub choices: Vec<ModelChoice>,
+pub struct LlmRequest {
+    pub model_choices: Vec<ModelChoice>,
+    pub worker_did: String,
+    pub agent_path: String,
+    pub task_name: String, 
+    pub payload: serde_json::Value,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct RequestModelResponse {
-    pub granted_model: schema::LlmModel,
-    pub lease_id: String,
-    pub lease_duration_sec: u64,
-    pub granted_at_unix: u64,
-    pub subagent_id: String,
+pub struct LlmStreamChunk {
+    pub text: Option<String>,
+    pub is_thought: bool,
+    pub is_final: bool,
+    pub function_calls: Vec<crate::llm::api::FunctionCall>,
+    #[serde(default)]
+    pub input_tokens: u64,
+    #[serde(default)]
+    pub output_tokens: u64,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
@@ -45,19 +51,13 @@ pub struct UsageMetrics {
     pub cost_usd: f64,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
-pub struct LlmUsagePayload {
-    pub model: schema::LlmModel,
-    pub input_tokens: u64,
-    pub output_tokens: u64,
-    pub agent_path: String,
-    pub task_name: String,
-}
-
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct LlmUsageResponse {
-    pub status: String,
-    pub cost_usd: f64,
+pub struct ActiveLeaseInfo {
+    pub granted_model: schema::LlmModel,
+    pub lease_id: String,
+    pub lease_duration_sec: u64,
+    pub granted_at_unix: u64,
+    pub subagent_id: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -92,7 +92,7 @@ pub struct ModelUsageStats {
 pub struct MarketStateResponse {
     pub per_model_stats: Vec<(schema::LlmModel, ModelUsageStats)>,
     pub pending_bids: Vec<PendingBidInfo>,
-    pub active_leases: Vec<RequestModelResponse>,
+    pub active_leases: Vec<ActiveLeaseInfo>,
     pub budget_pool_usd: f64,
     pub subagent_costs: Vec<(String, f64)>,
 }

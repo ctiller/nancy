@@ -233,7 +233,7 @@ mod tests {
     #[sealed_test(env = [("GEMINI_API_KEY", "mock"), ("NANCY_NO_TRACE_EVENTS", "1")])]
     async fn test_evaluate_events_cycle() {
         let tmp = TempDir::new().unwrap();
-        let repo = git2::Repository::init(tmp.path()).unwrap();
+        let _repo = git2::Repository::init(tmp.path()).unwrap();
         crate::commands::init::init(tmp.path(), 1).await.unwrap();
         let async_repo = crate::git::AsyncRepository::discover(tmp.path())
             .await
@@ -291,7 +291,7 @@ mod tests {
     #[sealed_test(env = [("GEMINI_API_KEY", "mock"), ("NANCY_NO_TRACE_EVENTS", "1")])]
     async fn test_evaluate_events_dreamer_identity() {
         let tmp = TempDir::new().unwrap();
-        let repo = git2::Repository::init(tmp.path()).unwrap();
+        let _repo = git2::Repository::init(tmp.path()).unwrap();
         crate::commands::init::init(tmp.path(), 1).await.unwrap();
         let async_repo = crate::git::AsyncRepository::discover(tmp.path())
             .await

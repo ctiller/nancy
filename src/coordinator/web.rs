@@ -805,6 +805,7 @@ mod tests {
             token_market: crate::coordinator::market::ArbitrationMarket::new(
                 crate::schema::coordinator_config::CoordinatorConfig::default(),
             ),
+            gateway: std::sync::Arc::new(crate::coordinator::llm_proxy::GatewayState::new()),
         };
         let ext = axum::extract::Extension(ipc);
 
@@ -854,6 +855,7 @@ mod tests {
             token_market: crate::coordinator::market::ArbitrationMarket::new(
                 crate::schema::coordinator_config::CoordinatorConfig::default(),
             ),
+            gateway: std::sync::Arc::new(crate::coordinator::llm_proxy::GatewayState::new()),
         };
         let ext = axum::extract::Extension(ipc);
         let json = axum::Json(crate::schema::task::TaskRequestPayload {

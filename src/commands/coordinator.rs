@@ -93,6 +93,7 @@ impl Coordinator {
             tx_updates: Arc::new(tx_updates),
             shared_identity: shared_identity.clone(),
             token_market: crate::coordinator::market::ArbitrationMarket::new(coord_config),
+            gateway: Arc::new(crate::coordinator::llm_proxy::GatewayState::new()),
         };
 
         let listener = tokio::net::UnixListener::from_std(

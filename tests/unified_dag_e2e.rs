@@ -190,7 +190,7 @@ async fn test_coordinator_inherits_task_parent_from_feature_branch() -> Result<(
 
     let coord_owner = nancy::schema::identity_config::DidOwner::generate();
     let worker_owner = nancy::schema::identity_config::DidOwner::generate();
-    let worker_did = worker_owner.did.clone();
+    let _worker_did = worker_owner.did.clone();
 
     let coord_identity = Identity::Coordinator {
         did: coord_owner,
