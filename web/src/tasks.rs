@@ -295,8 +295,8 @@ pub fn tasks_view() -> Html {
                     {node_type_upper}
                 </text>
 
-                { if n.cost_usd > 0.0 {
-                    let cost_str = format!("${:.4}", n.cost_usd);
+                { if n.cost_nanocents.0 > 0 {
+                    let cost_str = format!("${:.4}", n.cost_nanocents.0 as f64 / 100_000_000_000.0);
                     html! {
                         <text 
                             x={((NODE_WIDTH / 2.0) - 12.0).to_string()} 

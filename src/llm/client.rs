@@ -362,6 +362,7 @@ impl LlmClient {
 
         let priority_val = (self.task_priority)().await;
         let k = priority_val * self.local_market_weight;
+        let k_nanocents = schema::NanoCent((k * 100_000_000_000.0) as u64);
 
         let choices = match self.kind {
             crate::llm::builder::Kind::Flexible(weight) => {
@@ -372,17 +373,17 @@ impl LlmClient {
                 vec![
                     crate::schema::ipc::ModelChoice {
                         name: model.clone(), // pro
-                        bid_value: k,
+                        bid_value: k_nanocents,
                     },
                     crate::schema::ipc::ModelChoice {
                         name: flash_model,
-                        bid_value: k * weight,
+                        bid_value: schema::NanoCent((k * weight * 100_000_000_000.0) as u64),
                     },
                 ]
             }
             _ => vec![crate::schema::ipc::ModelChoice {
                 name: model.clone(),
-                bid_value: k,
+                bid_value: k_nanocents,
             }],
         };
 

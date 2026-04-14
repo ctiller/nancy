@@ -140,5 +140,5 @@ pub struct ReviewPlanPayload {
 #[derive(Debug, Serialize, Deserialize, Clone, JsonSchema)]
 pub struct TaskSpendPayload {
     pub task_ref: String,
-    pub cost_usd: f64,
+    pub cost_nanocents: schema::NanoCent,
 }

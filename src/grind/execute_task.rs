@@ -208,7 +208,7 @@ async fn handle_plan_task(
         loop {
             crate::introspection::log(&format!("Starting synthesis iteration {}", iteration + 1));
             iteration += 1;
-            if iteration > 15 {
+            if iteration > 3 {
                 anyhow::bail!("Exceeded max synthesis loops!");
             }
 
@@ -249,7 +249,7 @@ async fn handle_plan_task(
             task_description: &task_payload.description,
             plan_markdown: &tdd_json, // Keeping the template variable name the same for now
             tasks_json: &tasks_json,
-            rounds_remaining: 15 - iteration,
+            rounds_remaining: 3 - iteration,
         }.render()?;
 
         let plan_id_val = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();

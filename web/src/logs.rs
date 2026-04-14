@@ -58,7 +58,7 @@ pub fn logs_view() -> Html {
                                 <div style="display: flex; justify-content: space-between; align-items: center;">
                                     <h3>{"Model Consumption Metrics"}</h3>
                                     <div style="font-size: 1.1em; color: var(--accent-light); font-weight: bold;">
-                                        { format!("Available Tick Budget: ${:.5}", state.budget_pool_usd) }
+                                        { format!("Budget Pool: ${:.2}", state.budget_pool_nanocents.0 as f64 / 100_000_000_000.0) }
                                     </div>
                                 </div>
                                 <table style="width: 100%; border-collapse: collapse; text-align: left;">
@@ -99,12 +99,12 @@ pub fn logs_view() -> Html {
                                                         stats.expected_lease_cost)
                                                     }
                                                 </td>
-                                                <td style="padding: 10px;">{ format!("{} / {} / ${:.4}", fmt_tok(stats.trailing_1m.input_tokens + stats.trailing_1m.output_tokens), stats.trailing_1m.requests, stats.trailing_1m.cost_usd) }</td>
-                                                <td style="padding: 10px;">{ format!("{} / {} / ${:.4}", fmt_tok(stats.trailing_3m.input_tokens + stats.trailing_3m.output_tokens), stats.trailing_3m.requests, stats.trailing_3m.cost_usd) }</td>
-                                                <td style="padding: 10px;">{ format!("{} / {} / ${:.4}", fmt_tok(stats.trailing_10m.input_tokens + stats.trailing_10m.output_tokens), stats.trailing_10m.requests, stats.trailing_10m.cost_usd) }</td>
-                                                <td style="padding: 10px;">{ format!("{} / {} / ${:.4}", fmt_tok(stats.trailing_30m.input_tokens + stats.trailing_30m.output_tokens), stats.trailing_30m.requests, stats.trailing_30m.cost_usd) }</td>
-                                                <td style="padding: 10px;">{ format!("{} / {} / ${:.4}", fmt_tok(stats.trailing_100m.input_tokens + stats.trailing_100m.output_tokens), stats.trailing_100m.requests, stats.trailing_100m.cost_usd) }</td>
-                                                <td style="padding: 10px; font-weight: bold;">{ format!("{} / {} / ${:.4}", fmt_tok(stats.total.input_tokens + stats.total.output_tokens), stats.total.requests, stats.total.cost_usd) }</td>
+                                                <td style="padding: 10px;">{ format!("{} / {} / ${:.4}", fmt_tok(stats.trailing_1m.input_tokens + stats.trailing_1m.output_tokens), stats.trailing_1m.requests, stats.trailing_1m.cost_nanocents.0 as f64 / 100_000_000_000.0) }</td>
+                                                <td style="padding: 10px;">{ format!("{} / {} / ${:.4}", fmt_tok(stats.trailing_3m.input_tokens + stats.trailing_3m.output_tokens), stats.trailing_3m.requests, stats.trailing_3m.cost_nanocents.0 as f64 / 100_000_000_000.0) }</td>
+                                                <td style="padding: 10px;">{ format!("{} / {} / ${:.4}", fmt_tok(stats.trailing_10m.input_tokens + stats.trailing_10m.output_tokens), stats.trailing_10m.requests, stats.trailing_10m.cost_nanocents.0 as f64 / 100_000_000_000.0) }</td>
+                                                <td style="padding: 10px;">{ format!("{} / {} / ${:.4}", fmt_tok(stats.trailing_30m.input_tokens + stats.trailing_30m.output_tokens), stats.trailing_30m.requests, stats.trailing_30m.cost_nanocents.0 as f64 / 100_000_000_000.0) }</td>
+                                                <td style="padding: 10px;">{ format!("{} / {} / ${:.4}", fmt_tok(stats.trailing_100m.input_tokens + stats.trailing_100m.output_tokens), stats.trailing_100m.requests, stats.trailing_100m.cost_nanocents.0 as f64 / 100_000_000_000.0) }</td>
+                                                <td style="padding: 10px; font-weight: bold;">{ format!("{} / {} / ${:.4}", fmt_tok(stats.total.input_tokens + stats.total.output_tokens), stats.total.requests, stats.total.cost_nanocents.0 as f64 / 100_000_000_000.0) }</td>
                                             </tr>
                                         }})}
                                     </tbody>
@@ -126,7 +126,7 @@ pub fn logs_view() -> Html {
                                                 </div>
                                                 <div style="margin-top: 8px; font-size: 0.9em; font-family: monospace;">
                                                     { for bid.choices.iter().map(|choice| html! {
-                                                        <div>{ format!("{} @ {:.2}", choice.name, choice.bid_value) }</div>
+                                                        <div>{ format!("{} @ ${:.2}", choice.name, choice.bid_value) }</div>
                                                     })}
                                                 </div>
                                             </div>

@@ -248,7 +248,7 @@ pub async fn proxy_handler(
 
         // Perform natively securely organic billing directly!
         if input_tokens > 0 || output_tokens > 0 || cached_tokens > 0 {
-            let cost_usd = crate::coordinator::market::ArbitrationMarket::record_consumption(
+            let cost_nanocents = crate::coordinator::market::ArbitrationMarket::record_consumption(
                 &token_market,
                 model.clone(),
                 input_tokens,
@@ -258,12 +258,12 @@ pub async fn proxy_handler(
             ).await;
 
             tracing::info!(
-                "Recorded usage natively! task={}, input={}, output={}, cached={}, cost=${}",
+                "Recorded usage: task={}, input={}, output={}, cached={}, cost_cents={:.4}",
                 task_name,
                 input_tokens,
                 output_tokens,
                 cached_tokens,
-                cost_usd
+                cost_nanocents.0 as f64 / 1_000_000_000.0
             );
         }
         

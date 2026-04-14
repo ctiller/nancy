@@ -1,5 +1,41 @@
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Default, Hash, schemars::JsonSchema)]
+#[serde(transparent)]
+pub struct NanoCent(pub u64);
+
+impl std::fmt::Display for NanoCent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:.4}", self.0 as f64 / 100_000_000_000.0)
+    }
+}
+
+impl std::ops::Add for NanoCent {
+    type Output = Self;
+    fn add(self, other: Self) -> Self {
+        Self(self.0.saturating_add(other.0))
+    }
+}
+
+impl std::ops::Sub for NanoCent {
+    type Output = Self;
+    fn sub(self, other: Self) -> Self {
+        Self(self.0.saturating_sub(other.0))
+    }
+}
+
+impl std::ops::AddAssign for NanoCent {
+    fn add_assign(&mut self, other: Self) {
+        self.0 = self.0.saturating_add(other.0);
+    }
+}
+
+impl std::ops::SubAssign for NanoCent {
+    fn sub_assign(&mut self, other: Self) {
+        self.0 = self.0.saturating_sub(other.0);
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SerializedElement {
@@ -61,7 +97,7 @@ pub struct TopologyNode {
     pub x: f64,
     pub y: f64,
     #[serde(default)]
-    pub cost_usd: f64,
+    pub cost_nanocents: NanoCent,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -181,7 +217,7 @@ impl std::fmt::Display for LlmModel {
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct ModelChoice {
     pub name: LlmModel,
-    pub bid_value: f64,
+    pub bid_value: NanoCent,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
@@ -205,7 +241,9 @@ pub struct UsageMetrics {
     pub requests: u64,
     pub input_tokens: u64,
     pub output_tokens: u64,
-    pub cost_usd: f64,
+    #[serde(default)]
+    pub cached_tokens: u64,
+    pub cost_nanocents: NanoCent,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Default)]
@@ -224,7 +262,7 @@ pub struct ModelUsageStats {
     pub trailing_10m: UsageMetrics,
     pub trailing_30m: UsageMetrics,
     pub trailing_100m: UsageMetrics,
-    pub expected_lease_cost: f64,
+    pub expected_lease_cost: NanoCent,
     pub expected_lease_tokens: f64,
     pub expected_lease_requests: f64,
 }
@@ -234,6 +272,6 @@ pub struct MarketStateResponse {
     pub per_model_stats: Vec<(LlmModel, ModelUsageStats)>,
     pub pending_bids: Vec<PendingBidInfo>,
     pub active_leases: Vec<RequestModelResponse>,
-    pub budget_pool_usd: f64,
-    pub subagent_costs: Vec<(String, f64)>,
+    pub budget_pool_nanocents: NanoCent,
+    pub subagent_costs: Vec<(String, NanoCent)>,
 }

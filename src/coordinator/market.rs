@@ -23,7 +23,7 @@ pub struct UsageRecord {
 
 #[derive(Debug, serde::Serialize, serde::Deserialize, Clone)]
 pub struct ConsumptionRates {
-    pub expected_cost: f64,
+    pub expected_cost: schema::NanoCent,
     pub expected_tokens: f64,
     pub expected_requests: f64,
 }
@@ -49,17 +49,17 @@ pub struct ArbitrationMarket {
     pub active_quotas: HashMap<schema::LlmModel, ActiveQuotas>,
     pub lease_history: HashMap<schema::LlmModel, VecDeque<u64>>,
     pub historical_rates: HashMap<schema::LlmModel, ConsumptionRates>,
-    pub subagent_costs: HashMap<String, f64>,
-    pub budget_pool_usd: f64,
+    pub subagent_costs: HashMap<String, schema::NanoCent>,
+    pub budget_pool_nanocents: schema::NanoCent,
     pub config: CoordinatorConfig,
 }
 
 pub type SharedArbitrationMarket = Arc<RwLock<ArbitrationMarket>>;
 
 pub struct TokenCost {
-    pub input: f64,
-    pub output: f64,
-    pub cached_input: f64,
+    pub input: u64,
+    pub output: u64,
+    pub cached_input: u64,
 }
 
 impl ArbitrationMarket {
@@ -106,59 +106,59 @@ impl ArbitrationMarket {
     pub fn cost_for(model: schema::LlmModel, tokens: u64) -> TokenCost {
         match model {
             schema::LlmModel::Gemini25FlashLite => TokenCost {
-                input: 0.1 / 1_000_000.0,
-                output: 0.4 / 1_000_000.0,
-                cached_input: 0.01 / 1_000_000.0,
+                input: 10_000,
+                output: 40_000,
+                cached_input: 1_000,
             },
             schema::LlmModel::Gemini25Flash => TokenCost {
-                input: 0.3 / 1_000_000.0,
-                output: 2.50 / 1_000_000.0,
-                cached_input: 0.03 / 1_000_000.0,
+                input: 30_000,
+                output: 250_000,
+                cached_input: 3_000,
             },
             schema::LlmModel::Gemini25Pro => {
                 if tokens > 200_000 {
                     TokenCost {
-                        input: 2.50 / 1_000_000.0,
-                        output: 15.0 / 1_000_000.0,
-                        cached_input: 0.125 / 1_000_000.0,
+                        input: 250_000,
+                        output: 1_500_000,
+                        cached_input: 12_500,
                     }
                 } else {
                     TokenCost {
-                        input: 1.25 / 1_000_000.0,
-                        output: 10.0 / 1_000_000.0,
-                        cached_input: 0.25 / 1_000_000.0,
+                        input: 125_000,
+                        output: 1_000_000,
+                        cached_input: 25_000,
                     }
                 }
             }
             schema::LlmModel::Gemini30FlashPreview => TokenCost {
-                input: 0.5 / 1_000_000.0,
-                output: 3.0 / 1_000_000.0,
-                cached_input: 0.05 / 1_000_000.0,
+                input: 50_000,
+                output: 300_000,
+                cached_input: 5_000,
             },
             schema::LlmModel::Gemini31FlashLitePreview => TokenCost {
-                input: 0.25 / 1_000_000.0,
-                output: 1.5 / 1_000_000.0,
-                cached_input: 0.025 / 1_000_000.0,
+                input: 25_000,
+                output: 150_000,
+                cached_input: 2_500,
             },
             schema::LlmModel::Gemini31ProPreview => {
                 if tokens > 200_000 {
                     TokenCost {
-                        input: 4.0 / 1_000_000.0,
-                        output: 18.0 / 1_000_000.0,
-                        cached_input: 0.2 / 1_000_000.0,
+                        input: 400_000,
+                        output: 1_800_000,
+                        cached_input: 20_000,
                     }
                 } else {
                     TokenCost {
-                        input: 2.0 / 1_000_000.0,
-                        output: 12.0 / 1_000_000.0,
-                        cached_input: 0.4 / 1_000_000.0,
+                        input: 200_000,
+                        output: 1_200_000,
+                        cached_input: 40_000,
                     }
                 }
             }
             schema::LlmModel::TestMockModel => TokenCost {
-                input: 0.0,
-                output: 0.0,
-                cached_input: 0.0,
+                input: 0,
+                output: 0,
+                cached_input: 0,
             },
         }
     }
@@ -189,7 +189,7 @@ impl ArbitrationMarket {
             }
         }
 
-        let initial_budget = config.daily_budget_usd / 24.0;
+        let initial_budget = ((config.daily_budget_usd * 100_000_000_000.0) / 24.0) as u64;
 
         let market = Arc::new(RwLock::new(Self {
             pending_bids: Vec::new(),
@@ -199,7 +199,7 @@ impl ArbitrationMarket {
             historical_rates,
             active_quotas,
             subagent_costs: HashMap::new(),
-            budget_pool_usd: initial_budget,
+            budget_pool_nanocents: schema::NanoCent(initial_budget),
             config,
         }));
 
@@ -243,20 +243,22 @@ impl ArbitrationMarket {
         output_tokens: u64,
         cached_tokens: u64,
         agent_path: String,
-    ) -> f64 {
+    ) -> schema::NanoCent {
         let mut lock = market.write().await;
         let model_cost_schema = Self::cost_for(model, input_tokens);
-        let actual_cost = ((input_tokens.saturating_sub(cached_tokens)) as f64 * model_cost_schema.input)
-            + (cached_tokens as f64 * model_cost_schema.cached_input)
-            + (output_tokens as f64 * model_cost_schema.output);
+        let actual_cost = ((input_tokens.saturating_sub(cached_tokens)) * model_cost_schema.input)
+            + (cached_tokens * model_cost_schema.cached_input)
+            + (output_tokens * model_cost_schema.output);
+
+        let cost_nanocents = schema::NanoCent(actual_cost);
 
         // Exact spend subtraction strictly safely mapped mathematically natively
-        lock.budget_pool_usd -= actual_cost;
+        lock.budget_pool_nanocents -= cost_nanocents;
 
         *lock
             .subagent_costs
             .entry(agent_path.clone())
-            .or_insert(0.0) += actual_cost;
+            .or_insert(schema::NanoCent(0)) += cost_nanocents;
 
         let entry = lock
             .consumption_history
@@ -274,7 +276,7 @@ impl ArbitrationMarket {
                 input_tokens,
                 output_tokens,
                 cached_tokens,
-                cost_usd: actual_cost,
+                cost_nanocents,
             },
         });
 
@@ -287,7 +289,7 @@ impl ArbitrationMarket {
                 break;
             }
         }
-        actual_cost
+        cost_nanocents
     }
 
     fn merge_metrics(target: &mut UsageMetrics, rec: &UsageMetrics) {
@@ -295,27 +297,27 @@ impl ArbitrationMarket {
         target.input_tokens += rec.input_tokens;
         target.output_tokens += rec.output_tokens;
         target.cached_tokens += rec.cached_tokens;
-        target.cost_usd += rec.cost_usd;
+        target.cost_nanocents += rec.cost_nanocents;
     }
 
     pub fn expected_lease_metrics_for(
         market: &ArbitrationMarket,
         model: &schema::LlmModel,
-    ) -> (f64, f64, f64) {
+    ) -> (schema::NanoCent, f64, f64) {
         let leases_count = market
             .lease_history
             .get(model)
             .map(|l| l.len())
             .unwrap_or(0);
         let default_cost = if model.to_string().contains("pro") {
-            0.02
+            schema::NanoCent(2_000_000_000)
         } else {
-            0.001
+            schema::NanoCent(100_000_000)
         };
 
         if leases_count > 0 {
             if let Some(records) = market.consumption_history.get(model) {
-                let total_cost: f64 = records.iter().map(|r| r.metrics.cost_usd).sum();
+                let total_cost: u64 = records.iter().map(|r| r.metrics.cost_nanocents.0).sum();
                 let total_tokens: f64 = records
                     .iter()
                     .map(|r| r.metrics.input_tokens as f64 + r.metrics.output_tokens as f64)
@@ -323,7 +325,7 @@ impl ArbitrationMarket {
                 let total_requests: f64 = records.iter().map(|r| r.metrics.requests as f64).sum();
                 let leases_f64 = leases_count as f64;
                 (
-                    total_cost / leases_f64,
+                    schema::NanoCent((total_cost as f64 / leases_f64) as u64),
                     total_tokens / leases_f64,
                     f64::max(1.0, total_requests / leases_f64),
                 )
@@ -454,7 +456,7 @@ impl ArbitrationMarket {
             per_model_stats: per_model_stats_vec,
             pending_bids,
             active_leases: lock.active_leases.clone(),
-            budget_pool_usd: lock.budget_pool_usd,
+            budget_pool_nanocents: lock.budget_pool_nanocents,
             subagent_costs: subagent_costs_vec,
         }
     }
@@ -490,14 +492,14 @@ impl ArbitrationMarket {
                 }
             }
 
-            // 2. Replenish USD Budget Pool
-            let daily = lock.config.daily_budget_usd;
-            let hourly_cap = daily / 24.0;
-            let rounds_per_day = 86400.0 / TICK_TIME_SECS as f64;
-            let bump_per_loop = daily / rounds_per_day;
-            lock.budget_pool_usd = f64::min(lock.budget_pool_usd + bump_per_loop, hourly_cap);
+            // 2. Replenish Budget Pool natively
+            let daily_nanocents = (lock.config.daily_budget_usd * 100_000_000_000.0) as u64;
+            let hourly_cap = schema::NanoCent(daily_nanocents / 24);
+            let rounds_per_day = 86400 / TICK_TIME_SECS;
+            let bump_per_loop = schema::NanoCent(daily_nanocents / rounds_per_day);
+            lock.budget_pool_nanocents = std::cmp::min(lock.budget_pool_nanocents + bump_per_loop, hourly_cap);
 
-            let mut available_tick_budget = lock.budget_pool_usd;
+            let mut available_tick_budget = lock.budget_pool_nanocents;
 
             // 3. Clear expired leases organically
             lock.active_leases
@@ -630,7 +632,7 @@ impl ArbitrationMarket {
                     let leases_count = lock.lease_history.get(model).map(|l| l.len()).unwrap_or(0);
                     if leases_count > 0 {
                         if let Some(records) = lock.consumption_history.get(model) {
-                            let total_cost: f64 = records.iter().map(|r| r.metrics.cost_usd).sum();
+                            let total_cost: u64 = records.iter().map(|r| r.metrics.cost_nanocents.0).sum();
                             let total_tokens: f64 = records
                                 .iter()
                                 .map(|r| {
@@ -643,7 +645,7 @@ impl ArbitrationMarket {
                             current_rates.insert(
                                 *model,
                                 ConsumptionRates {
-                                    expected_cost: total_cost / leases_f64,
+                                    expected_cost: schema::NanoCent((total_cost as f64 / leases_f64) as u64),
                                     expected_tokens: total_tokens / leases_f64,
                                     expected_requests: f64::max(1.0, total_requests / leases_f64),
                                 },
@@ -700,7 +702,7 @@ mod tests {
                 historical_rates: HashMap::new(),
                 active_quotas,
                 subagent_costs: HashMap::new(),
-                budget_pool_usd: 0.0,
+                budget_pool_nanocents: schema::NanoCent(0),
                 config,
             }));
 
@@ -717,14 +719,15 @@ mod tests {
                 }
 
                 let daily = lock.config.daily_budget_usd;
-                let hourly_cap = daily / 24.0;
-                let bump = daily / 4320.0;
-                lock.budget_pool_usd = f64::min(lock.budget_pool_usd + bump, hourly_cap);
+                let daily_nanocents = (daily * 100_000_000_000.0) as u64;
+                let hourly_cap = schema::NanoCent(daily_nanocents / 24);
+                let bump = schema::NanoCent(daily_nanocents / 4320);
+                lock.budget_pool_nanocents = std::cmp::min(lock.budget_pool_nanocents + bump, hourly_cap);
 
                 let res = lock.active_quotas.get(&schema::LlmModel::TestMockModel).unwrap().rpm.unwrap();
                 let expected_limit = ArbitrationMarket::rate_limits_for(schema::LlmModel::TestMockModel).rpm.unwrap();
                 assert!(res <= expected_limit); // Proves the use-or-lose requirement holds cleanly algebraically.
-                assert!(lock.budget_pool_usd <= hourly_cap); // Check strict max hourly pools
+                assert!(lock.budget_pool_nanocents <= hourly_cap); // Check strict max hourly pools
             });
         }
     }

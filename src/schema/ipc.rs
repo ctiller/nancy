@@ -16,11 +16,8 @@ pub struct ReadyForPollResponse {
     pub new_state_id: u64,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
-pub struct ModelChoice {
-    pub name: schema::LlmModel,
-    pub bid_value: f64,
-}
+pub use schema::{NanoCent, ModelChoice, UsageMetrics, PendingBidInfo, Quotas, ModelUsageStats, MarketStateResponse};
+pub type ActiveLeaseInfo = schema::RequestModelResponse;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct LlmRequest {
@@ -43,59 +40,4 @@ pub struct LlmStreamChunk {
     pub output_tokens: u64,
     #[serde(default)]
     pub cached_tokens: u64,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone, Default)]
-pub struct UsageMetrics {
-    pub requests: u64,
-    pub input_tokens: u64,
-    pub output_tokens: u64,
-    pub cached_tokens: u64,
-    pub cost_usd: f64,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct ActiveLeaseInfo {
-    pub granted_model: schema::LlmModel,
-    pub lease_id: String,
-    pub lease_duration_sec: u64,
-    pub granted_at_unix: u64,
-    pub subagent_id: String,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct PendingBidInfo {
-    pub requester_id: String,
-    pub choices: Vec<ModelChoice>,
-    pub submitted_at_unix: u64,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone, Default)]
-pub struct Quotas {
-    pub rpm: Option<f64>,
-    pub tpm: Option<f64>,
-    pub rpd: Option<f64>,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct ModelUsageStats {
-    pub total: UsageMetrics,
-    pub active_quotas: Quotas,
-    pub trailing_1m: UsageMetrics,
-    pub trailing_3m: UsageMetrics,
-    pub trailing_10m: UsageMetrics,
-    pub trailing_30m: UsageMetrics,
-    pub trailing_100m: UsageMetrics,
-    pub expected_lease_cost: f64,
-    pub expected_lease_tokens: f64,
-    pub expected_lease_requests: f64,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct MarketStateResponse {
-    pub per_model_stats: Vec<(schema::LlmModel, ModelUsageStats)>,
-    pub pending_bids: Vec<PendingBidInfo>,
-    pub active_leases: Vec<ActiveLeaseInfo>,
-    pub budget_pool_usd: f64,
-    pub subagent_costs: Vec<(String, f64)>,
 }
