@@ -14,18 +14,27 @@ impl Session {
         }
     }
 
+    fn enforce_history_limit(&mut self) {
+        while self.history.len() > self.max_history {
+            self.history.remove(0);
+            while !self.history.is_empty() && self.history[0].role != "user" {
+                self.history.remove(0);
+            }
+        }
+    }
+
     pub fn ask(&mut self, text: String) {
         self.history.push(Content {
             role: "user".to_string(),
             parts: vec![Part {
                 text: Some(text),
                 function_call: None,
+                function_response: None,
+                thought_signature: None,
                 thought: None,
             }],
         });
-        if self.history.len() > self.max_history {
-            self.history.remove(0);
-        }
+        self.enforce_history_limit();
     }
 
     pub fn get_history(&self) -> &[Content] {
@@ -37,16 +46,50 @@ impl Session {
             role: "function".to_string(),
             parts: vec![Part {
                 text: None,
-                function_call: Some(FunctionCall {
+                function_call: None,
+                function_response: Some(FunctionResponse {
                     name: name.to_string(),
-                    args: response,
+                    response,
                 }),
+                thought_signature: None,
                 thought: None,
             }],
         });
-        if self.history.len() > self.max_history {
-            self.history.remove(0);
+        self.enforce_history_limit();
+    }
+
+    pub fn add_model_parts(&mut self, parts: Vec<Part>) {
+        self.history.push(Content {
+            role: "model".to_string(),
+            parts,
+        });
+        self.enforce_history_limit();
+    }
+
+    pub fn add_model_response(&mut self, text: String, thought_text: Option<String>) {
+        let mut parts = Vec::new();
+        if let Some(thought) = thought_text {
+            parts.push(Part {
+                text: Some(thought),
+                function_call: None,
+                function_response: None,
+                thought_signature: None,
+                thought: Some(true),
+            });
         }
+        parts.push(Part {
+            text: Some(text),
+            function_call: None,
+            function_response: None,
+            thought_signature: None,
+            thought: None,
+        });
+
+        self.history.push(Content {
+            role: "model".to_string(),
+            parts,
+        });
+        self.enforce_history_limit();
     }
 }
 
@@ -62,6 +105,8 @@ impl From<String> for SystemInstruction {
             parts: vec![Part {
                 text: Some(s),
                 function_call: None,
+                function_response: None,
+                thought_signature: None,
                 thought: None,
             }],
         }
@@ -83,7 +128,19 @@ pub struct Part {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub function_call: Option<FunctionCall>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub function_response: Option<FunctionResponse>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(alias = "thoughtSignature")]
+    pub thought_signature: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub thought: Option<bool>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct FunctionResponse {
+    pub name: String,
+    pub response: serde_json::Value,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -175,16 +232,16 @@ impl From<serde_json::Error> for GeminiError {
 
 impl GeminiResponse {
     pub fn has_function_call(&self) -> bool {
-        self.get_function_calls().len() > 0
+        self.get_function_call_parts().len() > 0
     }
 
-    pub fn get_function_calls(&self) -> Vec<FunctionCall> {
+    pub fn get_function_call_parts(&self) -> Vec<Part> {
         let mut res = Vec::new();
         if let Some(cands) = &self.candidates {
             for cand in cands {
                 for part in &cand.content.parts {
-                    if let Some(fc) = &part.function_call {
-                        res.push(fc.clone());
+                    if part.function_call.is_some() {
+                        res.push(part.clone());
                     }
                 }
             }
@@ -230,6 +287,8 @@ impl Default for GeminiResponse {
                     parts: vec![Part {
                         text: Some("{}".to_string()),
                         function_call: None,
+                        function_response: None,
+                        thought_signature: None,
                         thought: None,
                     }],
                 },
@@ -436,5 +495,114 @@ impl Gemini {
         }
 
         Ok(aggregated_response)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_session_history_turn_order() {
+        let mut session = Session::new(10);
+        
+        // Turn 1: User asks
+        session.ask("What is the weather like?".to_string());
+        
+        // Turn 2: Model thinks and outputs a function call
+        let fc = Part {
+            function_call: Some(FunctionCall {
+                name: "get_weather".to_string(),
+                args: serde_json::json!({ "location": "Seattle" }),
+            }),
+            ..Default::default()
+        };
+        session.add_model_parts(vec![fc]);
+        
+        // Turn 3: Function gives response
+        session.add_function_response("get_weather", serde_json::json!({ "temp": "50F" }));
+        
+        // Turn 4: Model answers with thought and text
+        session.add_model_response(
+            "It is 50F in Seattle.".to_string(),
+            Some("Thinking... Ah, I have the data".to_string())
+        );
+        
+        let hist = session.get_history();
+        assert_eq!(hist.len(), 4);
+        
+        // Assert User
+        assert_eq!(hist[0].role, "user");
+        assert_eq!(hist[0].parts.len(), 1);
+        assert_eq!(hist[0].parts[0].text.as_deref().unwrap(), "What is the weather like?");
+        
+        // Assert Model (Function Call)
+        assert_eq!(hist[1].role, "model");
+        assert_eq!(hist[1].parts.len(), 1);
+        assert!(hist[1].parts[0].function_call.is_some());
+        assert_eq!(hist[1].parts[0].function_call.as_ref().unwrap().name, "get_weather");
+        
+        // Assert Function
+        assert_eq!(hist[2].role, "function");
+        assert_eq!(hist[2].parts.len(), 1);
+        assert!(hist[2].parts[0].function_response.is_some());
+        assert_eq!(hist[2].parts[0].function_response.as_ref().unwrap().name, "get_weather");
+        assert_eq!(
+            hist[2].parts[0].function_response.as_ref().unwrap().response,
+            serde_json::json!({ "temp": "50F" })
+        );
+        
+        // Assert Model (Text with Thought)
+        assert_eq!(hist[3].role, "model");
+        assert_eq!(hist[3].parts.len(), 2);
+        
+        // Part 1: Thought
+        assert_eq!(hist[3].parts[0].text.as_deref().unwrap(), "Thinking... Ah, I have the data");
+        assert_eq!(hist[3].parts[0].thought, Some(true));
+        
+        // Part 2: Text
+        assert_eq!(hist[3].parts[1].text.as_deref().unwrap(), "It is 50F in Seattle.");
+        assert_eq!(hist[3].parts[1].thought, None);
+    }
+
+    #[test]
+    fn test_enforce_history_limit_retains_user_alignment() {
+        let mut session = Session::new(3);
+        
+        session.ask("First question".to_string());
+        session.add_model_response("First answer".to_string(), None);
+        session.ask("Second question".to_string());
+        
+        // Currently exact history length is 3. Adding one more should trim it to max_history (3) 
+        // AND ensure the first element remains a user turn!
+        session.add_model_response("Second answer".to_string(), None);
+        
+        let hist = session.get_history();
+        assert!(hist.len() <= 3, "Length should not exceed max_history");
+        assert_eq!(hist[0].role, "user", "History must ALWAYS start with a user turn");
+        assert_eq!(hist[0].parts[0].text.as_deref().unwrap(), "Second question");
+        assert_eq!(hist[1].role, "model");
+        assert_eq!(hist[1].parts[0].text.as_deref().unwrap(), "Second answer");
+    }
+
+    #[test]
+    fn test_thought_signature_serialization() {
+        let p = Part {
+            function_call: Some(FunctionCall {
+                name: "list_dir".to_string(),
+                args: serde_json::json!({ "target_directory": "." }),
+            }),
+            thought_signature: Some("opaque_graph_signature_123".to_string()),
+            ..Default::default()
+        };
+        
+        let serialized = serde_json::to_string(&p).unwrap();
+        // verify explicitly that rename_all transforms it cleanly!
+        assert!(serialized.contains("thoughtSignature"));
+        assert!(serialized.contains("opaque_graph_signature_123"));
+        
+        let deserialized: Part = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(deserialized.function_call.unwrap().name, "list_dir");
+        assert_eq!(deserialized.thought_signature.unwrap(), "opaque_graph_signature_123");
     }
 }

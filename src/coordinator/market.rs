@@ -59,6 +59,7 @@ pub type SharedArbitrationMarket = Arc<RwLock<ArbitrationMarket>>;
 pub struct TokenCost {
     pub input: f64,
     pub output: f64,
+    pub cached_input: f64,
 }
 
 impl ArbitrationMarket {
@@ -107,48 +108,57 @@ impl ArbitrationMarket {
             schema::LlmModel::Gemini25FlashLite => TokenCost {
                 input: 0.1 / 1_000_000.0,
                 output: 0.4 / 1_000_000.0,
+                cached_input: 0.01 / 1_000_000.0,
             },
             schema::LlmModel::Gemini25Flash => TokenCost {
                 input: 0.3 / 1_000_000.0,
                 output: 2.50 / 1_000_000.0,
+                cached_input: 0.03 / 1_000_000.0,
             },
             schema::LlmModel::Gemini25Pro => {
                 if tokens > 200_000 {
                     TokenCost {
                         input: 2.50 / 1_000_000.0,
                         output: 15.0 / 1_000_000.0,
+                        cached_input: 0.125 / 1_000_000.0,
                     }
                 } else {
                     TokenCost {
                         input: 1.25 / 1_000_000.0,
                         output: 10.0 / 1_000_000.0,
+                        cached_input: 0.25 / 1_000_000.0,
                     }
                 }
             }
             schema::LlmModel::Gemini30FlashPreview => TokenCost {
                 input: 0.5 / 1_000_000.0,
                 output: 3.0 / 1_000_000.0,
+                cached_input: 0.05 / 1_000_000.0,
             },
             schema::LlmModel::Gemini31FlashLitePreview => TokenCost {
                 input: 0.25 / 1_000_000.0,
                 output: 1.5 / 1_000_000.0,
+                cached_input: 0.025 / 1_000_000.0,
             },
             schema::LlmModel::Gemini31ProPreview => {
                 if tokens > 200_000 {
                     TokenCost {
                         input: 4.0 / 1_000_000.0,
                         output: 18.0 / 1_000_000.0,
+                        cached_input: 0.2 / 1_000_000.0,
                     }
                 } else {
                     TokenCost {
                         input: 2.0 / 1_000_000.0,
                         output: 12.0 / 1_000_000.0,
+                        cached_input: 0.4 / 1_000_000.0,
                     }
                 }
             }
             schema::LlmModel::TestMockModel => TokenCost {
                 input: 0.0,
                 output: 0.0,
+                cached_input: 0.0,
             },
         }
     }
@@ -231,11 +241,13 @@ impl ArbitrationMarket {
         model: schema::LlmModel,
         input_tokens: u64,
         output_tokens: u64,
+        cached_tokens: u64,
         agent_path: String,
     ) -> f64 {
         let mut lock = market.write().await;
         let model_cost_schema = Self::cost_for(model, input_tokens);
-        let actual_cost = (input_tokens as f64 * model_cost_schema.input)
+        let actual_cost = ((input_tokens.saturating_sub(cached_tokens)) as f64 * model_cost_schema.input)
+            + (cached_tokens as f64 * model_cost_schema.cached_input)
             + (output_tokens as f64 * model_cost_schema.output);
 
         // Exact spend subtraction strictly safely mapped mathematically natively
@@ -261,6 +273,7 @@ impl ArbitrationMarket {
                 requests: 1,
                 input_tokens,
                 output_tokens,
+                cached_tokens,
                 cost_usd: actual_cost,
             },
         });
@@ -281,6 +294,7 @@ impl ArbitrationMarket {
         target.requests += rec.requests;
         target.input_tokens += rec.input_tokens;
         target.output_tokens += rec.output_tokens;
+        target.cached_tokens += rec.cached_tokens;
         target.cost_usd += rec.cost_usd;
     }
 

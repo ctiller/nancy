@@ -1,14 +1,15 @@
 ---
 name: LLM Evaluation Harness Architecture
-description: Rules for provisioning isolated mock testing instances for orchestration architectures cleanly.
+description: Rules for provisioning isolated test environments for End-to-End orchestrator evaluations.
 ---
 
 # LLM Evaluation Harness Architecture
 
-Writing end-to-end (E2E) integration testing evaluations mandates pristine test isolation structurally protecting native global user operations mappings accurately on the physical host environments reliably natively avoiding bleeding overlaps securely.
+When writing end-to-end (E2E) integration testing and evaluations for the orchestration framework, you must enforce strict architectural boundaries to avoid corrupting global physical environments or local user workspaces.
 
-## Guidelines for Modifying Testing Loops
+## Guidelines for Evaluation Harnesses
 
-1. **Transient Workspaces**: Any integration testing framework bridging active SQLite state ledgers must operate strictly inside `tempfile::TempDir` instances naturally. Never use static directories locally, else tests will overwrite user working dependencies safely.
-2. **Mock Native LLMs Explicitly**: True remote `gemini-client-api` LLM API requests mapped securely are isolated intrinsically. Use `NANCY_MOCK_LLM_RESPONSE` securely inside `sealed_test` parameters. `src/eval/mod.rs` structurally monitors this dynamically mocking endpoints securely mapping pre-defined static text values without hitting HTTP boundaries seamlessly.
-3. **Explicit Agent Socket Paths**: Multi-node E2E evaluations must independently mock dynamic identities avoiding static UDS namespace boundaries mapping collisions actively across the node instances.
+1. **Transient Workspaces**: All `EvalRunner` instances must operate strictly inside isolated `tempfile::TempDir` scopes. This encapsulates `.nancy` database state and Git operations without overlapping with static configuration dependencies.
+2. **Deterministic LLM Mocking**: To prevent actual HTTP requests and ensure synchronous determinism, natively mock API values. Provide pre-defined JSON schemas to `NANCY_MOCK_LLM_RESPONSE` securely bound within `sealed_test` blocks.
+3. **Explicit Identity Creation**: Every test runner must generate fresh, explicit `Identity` parameters (e.g., dedicated DIDs for test Coordinators and Grinders) to avoid UDS socket collisions during asynchronous testing.
+4. **Coordination Isolation**: Use `EvalRunner::wait_for_completion` to synchronously wait for specific evaluation conditions (like specific `EventPayload` presence) avoiding race conditions or daemon leaks before shutting down gracefully.

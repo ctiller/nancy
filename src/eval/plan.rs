@@ -1,21 +1,7 @@
-use crate::eval::EvalDefinition;
-use anyhow::{Context, Result, bail};
-use tokio::fs;
-
-pub async fn parse_eval_definition(path: &std::path::Path) -> Result<EvalDefinition> {
-    let def: EvalDefinition = serde_yaml::from_slice(
-        &fs::read(path)
-            .await
-            .context("Failed to read eval yaml mapping")?,
-    )?;
-    if def.action != "plan" {
-        bail!("Only 'plan' supported");
-    }
-    Ok(def)
-}
+use anyhow::Result;
 
 pub async fn eval_plan(path: &str, output_path: &std::path::Path) -> Result<()> {
-    let def = parse_eval_definition(std::path::Path::new(path)).await?;
+    let def = crate::eval::parse_eval_definition(std::path::Path::new(path), "plan").await?;
 
     let mut runner = crate::eval::EvalRunner::setup(&def).await?;
     runner.push_task(def.task_description.clone()).await?;
@@ -55,6 +41,8 @@ pub async fn eval_plan(path: &str, output_path: &std::path::Path) -> Result<()> 
         final_plan,
         recommended_tasks,
         traces: runner.extract_traces().await,
+        implemented_commit_hash: None,
+        implemented_patch: None,
     };
 
     let result_yaml = serde_yaml::to_string(&result)?;

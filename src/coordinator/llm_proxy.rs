@@ -147,7 +147,7 @@ pub async fn proxy_handler(
                 
                 if !status.is_success() {
                     let text = response.text().await.unwrap_or_default();
-                    tracing::error!("LLM Proxy terminal failure: {} - {}", status, text);
+                    tracing::error!("LLM Proxy terminal failure: {} - {}\nPayload: {}", status, text, serde_json::to_string(&payload.payload).unwrap_or_default());
                     return (StatusCode::BAD_REQUEST, "Terminal LLM Error").into_response();
                 }
 
@@ -178,6 +178,7 @@ pub async fn proxy_handler(
         // Intercept SSE chunks natively!
         let mut input_tokens = 0;
         let mut output_tokens = 0;
+        let mut cached_tokens = 0;
         let mut final_function_calls = Vec::new();
 
         while let Ok(Some(chunk_bytes)) = res.chunk().await {
@@ -196,10 +197,13 @@ pub async fn proxy_handler(
                             if let Some(candidates) = usage.get("candidatesTokenCount").and_then(|t| t.as_u64()) {
                                 output_tokens = candidates;
                             }
+                            if let Some(cached) = usage.get("cachedContentTokenCount").and_then(|t| t.as_u64()) {
+                                cached_tokens = cached;
+                            }
                         }
 
                         // Bubble up function calls completely natively natively
-                        final_function_calls.extend(parsed.get_function_calls());
+                        final_function_calls.extend(parsed.get_function_call_parts());
 
                         // Send cleanly mapped StreamChunks for raw text organically smoothly securely
                         if let Some(cands) = &parsed.candidates {
@@ -214,6 +218,7 @@ pub async fn proxy_handler(
                                             function_calls: Vec::new(),
                                             input_tokens: 0,
                                             output_tokens: 0,
+                                            cached_tokens: 0,
                                         };
                                         let evt = Event::default().json_data(&mapped_chunk).unwrap();
                                         if tx.send(Ok(evt)).await.is_err() {
@@ -236,25 +241,28 @@ pub async fn proxy_handler(
             function_calls: final_function_calls,
             input_tokens,
             output_tokens,
+            cached_tokens,
         };
         let evt = Event::default().json_data(&final_chunk).unwrap();
         let _ = tx.send(Ok(evt)).await;
 
         // Perform natively securely organic billing directly!
-        if input_tokens > 0 || output_tokens > 0 {
+        if input_tokens > 0 || output_tokens > 0 || cached_tokens > 0 {
             let cost_usd = crate::coordinator::market::ArbitrationMarket::record_consumption(
                 &token_market,
                 model.clone(),
                 input_tokens,
                 output_tokens,
+                cached_tokens,
                 agent_path.clone()
             ).await;
 
             tracing::info!(
-                "Recorded usage natively! task={}, input={}, output={}, cost=${}",
+                "Recorded usage natively! task={}, input={}, output={}, cached={}, cost=${}",
                 task_name,
                 input_tokens,
                 output_tokens,
+                cached_tokens,
                 cost_usd
             );
         }

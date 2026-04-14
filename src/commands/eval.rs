@@ -18,6 +18,22 @@ pub async fn run(action: Option<String>, file: Option<String>) -> Result<()> {
                 anyhow::bail!("Missing path to yaml eval definition!");
             }
         }
+        Some("implement") => {
+            if let Some(path) = file {
+                let f_path = std::path::Path::new(&path);
+                let current_dir = std::env::current_dir()?;
+                let mut out_path = f_path
+                    .parent()
+                    .unwrap_or(std::path::Path::new(""))
+                    .join("eval_out.yaml");
+                if !out_path.is_absolute() {
+                    out_path = current_dir.join(out_path);
+                }
+                crate::eval::implement::eval_implement(&path, &out_path).await?;
+            } else {
+                anyhow::bail!("Missing path to yaml eval definition!");
+            }
+        }
         _ => anyhow::bail!("Unsupported eval action."),
     }
     Ok(())

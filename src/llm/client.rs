@@ -119,9 +119,10 @@ impl LlmClient {
     ) -> Vec<(String, serde_json::Value)> {
         let mut responses = Vec::new();
 
-        for fc in resp.get_function_calls() {
-            let tool_name = fc.name.to_string();
-            let args = fc.args.clone();
+        for fc in resp.get_function_call_parts() {
+            let func_call = fc.function_call.as_ref().unwrap();
+            let tool_name = func_call.name.to_string();
+            let args = func_call.args.clone();
 
             crate::introspection::set_frame_status(&format!("Executing tool: {} ⚙️", tool_name));
 
@@ -447,7 +448,7 @@ impl LlmClient {
                 }
                 
                 let resp = mock_resp.unwrap().map_err(|e| anyhow::anyhow!("Gemini API error: {}", e))?;
-                final_function_calls = resp.get_function_calls();
+                final_function_calls = resp.get_function_call_parts();
                 res_text = resp.get_text_no_think("\n");
                 Ok::<(), anyhow::Error>(())
             } else {
@@ -536,23 +537,20 @@ impl LlmClient {
                     crate::schema::llm::LlmThoughtPayload {
                         subagent: self.subagent.clone(),
                         timestamp,
-                        thought_content: thought_str,
+                        thought_content: thought_str.clone(),
                     },
                 ))
                 .await;
             }
 
             if !final_function_calls.is_empty() {
+                self.session.add_model_parts(final_function_calls.clone());
                 // Mock Gemini chat instance strictly cleanly natively safely to resolve backwards compatibility organically.
                 let mut mock_chat = crate::llm::api::GeminiResponse::default();
                 mock_chat.candidates = Some(vec![crate::llm::api::Candidate {
                     content: crate::llm::api::Content {
                         role: "model".to_string(),
-                        parts: final_function_calls.into_iter().map(|f| crate::llm::api::Part {
-                            text: None,
-                            thought: None,
-                            function_call: Some(f),
-                        }).collect()
+                        parts: final_function_calls.clone()
                     },
                     finish_reason: Some("STOP".to_string())
                 }]);
@@ -562,6 +560,8 @@ impl LlmClient {
                 }
             } else {
                 let text = res_text;
+                let thought = if thought_str.is_empty() { None } else { Some(thought_str) };
+                self.session.add_model_response(text.clone(), thought);
 
                 if input_tokens > 0 || output_tokens > 0 {
                     if let Some(tx) = &self.loop_event_tx {

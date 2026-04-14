@@ -36,11 +36,13 @@ pub struct LlmStreamChunk {
     pub text: Option<String>,
     pub is_thought: bool,
     pub is_final: bool,
-    pub function_calls: Vec<crate::llm::api::FunctionCall>,
+    pub function_calls: Vec<crate::llm::api::Part>,
     #[serde(default)]
     pub input_tokens: u64,
     #[serde(default)]
     pub output_tokens: u64,
+    #[serde(default)]
+    pub cached_tokens: u64,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
@@ -48,6 +50,7 @@ pub struct UsageMetrics {
     pub requests: u64,
     pub input_tokens: u64,
     pub output_tokens: u64,
+    pub cached_tokens: u64,
     pub cost_usd: f64,
 }
 

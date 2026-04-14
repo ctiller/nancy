@@ -2,6 +2,19 @@ use anyhow::Context;
 use serde::{Deserialize, Serialize};
 
 pub mod plan;
+pub mod implement;
+
+pub async fn parse_eval_definition(path: &std::path::Path, expected_action: &str) -> anyhow::Result<EvalDefinition> {
+    let def: EvalDefinition = serde_yaml::from_slice(
+        &tokio::fs::read(path)
+            .await
+            .context("Failed to read eval yaml mapping")?,
+    )?;
+    if def.action != expected_action {
+        anyhow::bail!("Only '{}' supported, got {}", expected_action, def.action);
+    }
+    Ok(def)
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct EvalDefinition {
@@ -77,6 +90,8 @@ pub struct EvalResult {
     pub final_plan: Option<crate::schema::task::TddDocument>,
     pub recommended_tasks: Option<Vec<crate::schema::task::TaskPayload>>,
     pub traces: Vec<crate::schema::registry::EventPayload>,
+    pub implemented_commit_hash: Option<String>,
+    pub implemented_patch: Option<String>,
 }
 
 pub async fn extract_traces(
@@ -160,6 +175,14 @@ impl EvalRunner {
     pub async fn push_task(&self, description: Option<String>) -> anyhow::Result<()> {
         let desc = description.unwrap_or_else(|| "Evaluated generic task organically".to_string());
         crate::commands::add_task::add_task(self.temp_dir.as_path(), Some(desc), None).await?;
+        Ok(())
+    }
+
+    pub async fn push_implement_task(&self, task: crate::schema::task::TaskPayload) -> anyhow::Result<()> {
+        let async_repo = crate::git::AsyncRepository::open(self.temp_dir.to_str().unwrap()).await?;
+        let writer = crate::events::writer::Writer::new(&async_repo, self.id_obj.clone())?;
+        writer.log_event(crate::schema::registry::EventPayload::Task(task))?;
+        writer.commit_batch().await?;
         Ok(())
     }
 
