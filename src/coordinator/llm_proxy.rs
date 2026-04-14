@@ -257,7 +257,7 @@ pub async fn proxy_handler(
                 agent_path.clone()
             ).await;
 
-            tracing::info!(
+            tracing::debug!(
                 "Recorded usage: task={}, input={}, output={}, cached={}, cost_cents={:.4}",
                 task_name,
                 input_tokens,
