@@ -17,6 +17,7 @@ impl GatewayState {
             reqwest_client: reqwest::Client::builder()
                 .pool_max_idle_per_host(100)
                 .pool_idle_timeout(std::time::Duration::from_secs(90))
+                .timeout(std::time::Duration::from_secs(300))
                 .build()
                 .unwrap_or_default(),
         }
@@ -47,57 +48,77 @@ pub async fn proxy_handler(
         crate::introspection::frame(format!("proxy_req_{}", payload.task_name).as_str(), async move {
             let gateway = ipc_state.gateway.clone();
             
-            // 1. Submit Bid Natively
-            crate::introspection::log(&format!("Submitting market bid for {}", payload.task_name));
+            let mut attempts = 0;
+            let mut final_res = None;
+            let mut active_model = None;
+            let mut active_cost = None;
             let agent_path = payload.agent_path.clone();
             let task_name = payload.task_name.clone();
-            let rx = crate::coordinator::market::ArbitrationMarket::submit_bid(&ipc_state.token_market, payload.clone());
-            let lease = match rx.await {
-                Ok(l) => l,
-                Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "Auction Failed").into_response(),
-            };
 
-            let model = lease.granted_model.clone();
-            crate::introspection::log(&format!("Auction granted lease for model: {:?}", model));
-            let model_str = serde_json::to_value(&model).unwrap().as_str().unwrap().to_string();
+            loop {
+                attempts += 1;
+                // 1. Submit Bid Natively
+                crate::introspection::log(&format!("Submitting market bid for {}", payload.task_name));
+                let rx = crate::coordinator::market::ArbitrationMarket::submit_bid(&ipc_state.token_market, payload.clone());
+                let permission = match rx.await {
+                    Ok(p) => p,
+                    Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "Auction Failed").into_response(),
+                };
 
-        let base_url = std::env::var("GEMINI_API_BASE_URL")
-            .unwrap_or_else(|_| "https://generativelanguage.googleapis.com".to_string());
-        
-        let api_key = std::env::var("GEMINI_API_KEY").unwrap_or_default();
-        let url = format!("{}/v1beta/models/{}:streamGenerateContent?alt=sse&key={}", base_url, model_str, api_key);
-        
-        let egress_req = gateway.reqwest_client.post(&url).json(&payload.payload);
+                let model = permission.granted_model.clone();
+                let expected_cost = permission.expected_cost_nanocents;
+                crate::introspection::log(&format!("Market granted permission for model: {:?}", model));
+                let model_str = serde_json::to_value(&model).unwrap().as_str().unwrap().to_string();
 
-        let mut res = match egress_req.send().await {
-            Ok(response) => {
-                let status = response.status();
-                if is_retryable_status(status.as_u16()) {
-                    crate::coordinator::market::ArbitrationMarket::report_model_failure(&ipc_state.token_market, model.clone()).await;
-                    tracing::warn!("Model {} hit {}. Reported failure to market.", model_str, status);
-                    crate::introspection::log(&format!("Proxy upstream HTTP {} hit. Returning SERVICE_UNAVAILABLE natively.", status));
-                    return (StatusCode::SERVICE_UNAVAILABLE, "Upstream HTTP Error").into_response();
-                }
+                let base_url = std::env::var("GEMINI_API_BASE_URL")
+                    .unwrap_or_else(|_| "https://generativelanguage.googleapis.com".to_string());
                 
-                if !status.is_success() {
-                    let text = response.text().await.unwrap_or_default();
-                    tracing::error!("LLM Proxy terminal failure: {} - {}\nPayload: {}", status, text, serde_json::to_string(&payload.payload).unwrap_or_default());
-                    return (StatusCode::BAD_REQUEST, "Terminal LLM Error").into_response();
-                }
+                let api_key = std::env::var("GEMINI_API_KEY").unwrap_or_default();
+                let url = format!("{}/v1beta/models/{}:streamGenerateContent?alt=sse&key={}", base_url, model_str, api_key);
+                
+                let egress_req = gateway.reqwest_client.post(&url).timeout(std::time::Duration::from_secs(300)).json(&payload.payload);
 
-                response
-            }
-            Err(e) => {
-                if e.is_timeout() || e.is_connect() {
-                    crate::coordinator::market::ArbitrationMarket::report_model_failure(&ipc_state.token_market, model.clone()).await;
-                    tracing::warn!("Model {} hit connection error: {}. Reported failure to market.", model_str, e);
-                    crate::introspection::log(&format!("Proxy upstream connection error. Returning SERVICE_UNAVAILABLE."));
-                    return (StatusCode::SERVICE_UNAVAILABLE, "Upstream Connection Error").into_response();
-                } else {
-                    return (StatusCode::INTERNAL_SERVER_ERROR, "Proxy Internal Error").into_response();
+                match egress_req.send().await {
+                    Ok(response) => {
+                        let status = response.status();
+                        if is_retryable_status(status.as_u16()) {
+                            crate::coordinator::market::ArbitrationMarket::report_model_failure(&ipc_state.token_market, model.clone()).await;
+                            crate::coordinator::market::ArbitrationMarket::refund_expected_budget(&ipc_state.token_market, expected_cost).await;
+                            tracing::warn!("Model {} hit {}. Reported failure to market.", model_str, status);
+                            crate::introspection::log(&format!("Proxy upstream HTTP {} hit. Attempt {}. Retrying indefinitely.", status, attempts));
+                            continue;
+                        }
+                        
+                        if !status.is_success() {
+                            let text = response.text().await.unwrap_or_default();
+                            crate::coordinator::market::ArbitrationMarket::refund_expected_budget(&ipc_state.token_market, expected_cost).await;
+                            tracing::error!("LLM Proxy terminal failure: {} - {}\nPayload: {}", status, text, serde_json::to_string(&payload.payload).unwrap_or_default());
+                            return (StatusCode::BAD_REQUEST, "Terminal LLM Error").into_response();
+                        }
+
+                        active_model = Some(model);
+                        active_cost = Some(expected_cost);
+                        final_res = Some(response);
+                        break;
+                    }
+                    Err(e) => {
+                        if e.is_timeout() || e.is_connect() {
+                            crate::coordinator::market::ArbitrationMarket::report_model_failure(&ipc_state.token_market, model.clone()).await;
+                            crate::coordinator::market::ArbitrationMarket::refund_expected_budget(&ipc_state.token_market, expected_cost).await;
+                            tracing::warn!("Model {} hit connection error: {}. Reported failure to market.", model_str, e);
+                            crate::introspection::log(&format!("Proxy upstream connection error. Attempt {}. Retrying indefinitely.", attempts));
+                            continue;
+                        } else {
+                            crate::coordinator::market::ArbitrationMarket::refund_expected_budget(&ipc_state.token_market, expected_cost).await;
+                            return (StatusCode::INTERNAL_SERVER_ERROR, "Proxy Internal Error").into_response();
+                        }
+                    }
                 }
             }
-        };
+            
+            let mut res = final_res.unwrap();
+            let model = active_model.unwrap();
+            let expected_cost = active_cost.unwrap();
 
     // Construct natively streaming response
     crate::introspection::log(&format!("Establishing SSE stream internally recursively..."));
@@ -184,7 +205,8 @@ pub async fn proxy_handler(
                 input_tokens,
                 output_tokens,
                 cached_tokens,
-                agent_path.clone()
+                agent_path.clone(),
+                expected_cost,
             ).await;
 
             tracing::debug!(
@@ -195,6 +217,9 @@ pub async fn proxy_handler(
                 cached_tokens,
                 cost_nanocents.0 as f64 / 1_000_000_000.0
             );
+        } else {
+            // The request yielded streams but resulted in zero measurable bounds natively. Always refund structurally safely!
+            crate::coordinator::market::ArbitrationMarket::refund_expected_budget(&token_market, expected_cost).await;
         }
     });
 

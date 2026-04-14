@@ -17,7 +17,7 @@ pub struct ReadyForPollResponse {
 }
 
 pub use schema::{NanoCent, ModelChoice, UsageMetrics, PendingBidInfo, Quotas, ModelUsageStats, MarketStateResponse};
-pub type ActiveLeaseInfo = schema::RequestModelResponse;
+pub type GrantedPermissionInfo = schema::GrantedPermissionResponse;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct LlmRequest {

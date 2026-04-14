@@ -56,7 +56,9 @@ impl AgentToolsBuilder {
             final_write.extend(ip.write_dirs.clone());
         }
 
+        let base_dir = final_write.first().or(final_read.first()).cloned();
         let perms = std::sync::Arc::new(Permissions {
+            base_dir,
             read_dirs: final_read,
             write_dirs: final_write,
         });

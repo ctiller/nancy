@@ -66,8 +66,13 @@ pub fn logs_view() -> Html {
                             <div class="glass-panel" style="padding: 20px;">
                                 <div style="display: flex; justify-content: space-between; align-items: center;">
                                     <h3>{"Model Consumption Metrics"}</h3>
-                                    <div style="font-size: 1.1em; color: var(--accent-light); font-weight: bold;">
-                                        { format!("Budget Pool: ${:.2}", state.budget_pool_nanocents.0 as f64 / 100_000_000_000.0) }
+                                    <div style="text-align: right;">
+                                        <div style="font-size: 1.1em; color: var(--accent-light); font-weight: bold;">
+                                            { format!("Current Budget: ${:.2}", state.budget_pool_nanocents.0 as f64 / 100_000_000_000.0) }
+                                        </div>
+                                        <div style="font-size: 0.9em; color: var(--text-muted);">
+                                            { format!("Available (less expected costs): ${:.2}", state.budget_pool_nanocents.0.saturating_sub(state.inflight_costs_nanocents.0) as f64 / 100_000_000_000.0) }
+                                        </div>
                                     </div>
                                 </div>
                                 <table style="width: 100%; border-collapse: collapse; text-align: left;">
@@ -76,7 +81,7 @@ pub fn logs_view() -> Html {
                                             <th style="padding: 10px;">{"Model"}</th>
                                             <th style="padding: 10px;">{"Status"}</th>
                                             <th style="padding: 10px;">{"Quotas (RPM/TPM/RPD)"}</th>
-                                            <th style="padding: 10px;">{"Expected Lease (Req/Tok/Cost)"}</th>
+                                            <th style="padding: 10px;">{"Expected Grant (Req/Tok/Cost)"}</th>
                                             <th style="padding: 10px;">{"1m (Tok/Req/$)"}</th>
                                             <th style="padding: 10px;">{"3m (Tok/Req/$)"}</th>
                                             <th style="padding: 10px;">{"10m (Tok/Req/$)"}</th>
@@ -114,9 +119,9 @@ pub fn logs_view() -> Html {
                                                 </td>
                                                 <td style="padding: 10px;">
                                                     { format!("{:.1} / {} / ${:.4}",
-                                                        stats.expected_lease_requests,
-                                                        fmt_tok(stats.expected_lease_tokens as u64),
-                                                        stats.expected_lease_cost)
+                                                        stats.expected_grant_requests,
+                                                        fmt_tok(stats.expected_grant_tokens as u64),
+                                                        stats.expected_grant_cost)
                                                     }
                                                 </td>
                                                 <td style="padding: 10px;">{ format!("{} / {} / ${:.4}", fmt_tok(stats.trailing_1m.input_tokens + stats.trailing_1m.output_tokens), stats.trailing_1m.requests, stats.trailing_1m.cost_nanocents.0 as f64 / 100_000_000_000.0) }</td>
@@ -154,35 +159,7 @@ pub fn logs_view() -> Html {
                                     </div>
                                 </div>
 
-                                <div class="glass-panel" style="padding: 20px;">
-                                    <h3>{ format!("Active Leases ({})", state.active_leases.len()) }</h3>
-                                    <div style="display: flex; flex-direction: column; gap: 10px; max-height: 400px; overflow-y: auto;">
-                                        { for state.active_leases.iter().map(|lease| {
-                                            let current_now = (js_sys::Date::now() / 1000.0) as u64;
-                                            let expires_at = lease.granted_at_unix + lease.lease_duration_sec;
-                                            html! {
-                                            <div style="background: rgba(0,0,0,0.3); padding: 12px; border-radius: 6px; border-left: 4px solid var(--accent-light);">
-                                                <div style="font-weight: bold; margin-bottom: 4px;">{ format!("Model: {}", lease.granted_model) }</div>
-                                                <div style="font-size: 0.85em; color: var(--text-muted);">
-                                                    { "Subagent: " } { lease.subagent_id.clone() }
-                                                </div>
-                                                <div style="font-size: 0.85em; color: var(--text-muted);">
-                                                    { "Lease: " } { lease.lease_id.clone() }
-                                                </div>
-                                                <div style="font-size: 0.85em; color: var(--text-muted);">
-                                                    { "Expires in: " }
-                                                    {
-                                                        if expires_at > current_now {
-                                                            format!("{}s", expires_at - current_now)
-                                                        } else {
-                                                            "Expired (Awaiting cleanup)".to_string()
-                                                        }
-                                                    }
-                                                </div>
-                                            </div>
-                                        }})}
-                                    </div>
-                                </div>
+
                                 <div class="glass-panel" style="padding: 20px;">
                                     <h3>{ "Subagent Costs" }</h3>
                                     <div style="display: flex; flex-direction: column; gap: 10px; max-height: 400px; overflow-y: auto;">

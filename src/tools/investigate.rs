@@ -294,6 +294,7 @@ mod tests {
     #[tokio::test]
     async fn test_investigate_coverage() {
         let perms = Arc::new(crate::tools::filesystem::Permissions {
+            base_dir: None,
             read_dirs: vec![],
             write_dirs: vec![],
         });
@@ -304,7 +305,8 @@ mod tests {
     #[tokio::test]
     async fn test_multi_investigate_coverage() {
         let perms = Arc::new(crate::tools::filesystem::Permissions {
-            read_dirs: vec![],
+            base_dir: None,
+            read_dirs: vec![std::path::PathBuf::from("/tmp/does_not_exist")],
             write_dirs: vec![],
         });
         let _ = multi_investigate_impl(
@@ -376,6 +378,7 @@ mod tests {
 
         // Run Investigate Tool inside context
         let perms = Arc::new(crate::tools::filesystem::Permissions {
+            base_dir: None,
             read_dirs: vec![],
             write_dirs: vec![],
         });

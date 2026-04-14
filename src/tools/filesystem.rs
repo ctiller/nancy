@@ -13,18 +13,26 @@ const MAX_LINES_PER_VIEW: usize = 2000;
 
 #[derive(Clone)]
 pub struct Permissions {
+    pub base_dir: Option<PathBuf>,
     pub read_dirs: Vec<PathBuf>,
     pub write_dirs: Vec<PathBuf>,
 }
 
 impl Permissions {
-    fn check_access(dirs: &[PathBuf], path: &Path) -> bool {
-        let mut target_to_check = path.to_path_buf();
-        if !target_to_check.is_absolute() {
-            if let Ok(cwd) = std::env::current_dir() {
-                target_to_check = cwd.join(target_to_check);
+    pub fn resolve_path(&self, path: &Path) -> PathBuf {
+        let mut target = path.to_path_buf();
+        if !target.is_absolute() {
+            if let Some(base) = &self.base_dir {
+                target = base.join(target);
+            } else if let Ok(cwd) = std::env::current_dir() {
+                target = cwd.join(target);
             }
         }
+        target
+    }
+
+    fn check_access(dirs: &[PathBuf], resolved_target: &Path) -> bool {
+        let mut target_to_check = resolved_target.to_path_buf();
 
         while !target_to_check.exists() {
             if let Some(parent) = target_to_check.parent() {
@@ -48,12 +56,12 @@ impl Permissions {
         false
     }
 
-    pub fn can_read(&self, path: &Path) -> bool {
-        Self::check_access(&self.read_dirs, path)
+    pub fn can_read(&self, resolved_target: &Path) -> bool {
+        Self::check_access(&self.read_dirs, resolved_target)
     }
 
-    pub fn can_write(&self, path: &Path) -> bool {
-        Self::check_access(&self.write_dirs, path)
+    pub fn can_write(&self, resolved_target: &Path) -> bool {
+        Self::check_access(&self.write_dirs, resolved_target)
     }
 }
 
@@ -114,11 +122,15 @@ pub async fn grep_search_impl(
 
     let mut results = Vec::new();
 
-    for path in &search_paths {
-        if !perms.can_read(Path::new(path)) {
+    for path_str in &search_paths {
+        let raw_path = Path::new(path_str);
+        let path_buf = perms.resolve_path(raw_path);
+        let path = path_buf.as_path();
+
+        if !perms.can_read(path) {
             bail!(
                 "Execution denied: Explicit permission missing to natively access structural component bound: {}",
-                path
+                path_str
             );
         }
         let builder = WalkBuilder::new(path);
@@ -173,7 +185,9 @@ pub async fn list_dir_impl(
     let is_recursive = recursive.unwrap_or(false);
     let max_depth = if is_recursive { 3 } else { 1 };
 
-    let path = Path::new(&target_directory);
+    let raw_path = Path::new(&target_directory);
+    let path_buf = perms.resolve_path(raw_path);
+    let path = path_buf.as_path();
 
     if !perms.can_read(path) {
         bail!(
@@ -236,7 +250,9 @@ pub async fn view_files_impl(
     let mut results = Vec::new();
 
     for (i, target) in target_paths.iter().enumerate() {
-        let path = Path::new(target);
+        let raw_path = Path::new(target);
+        let path_buf = perms.resolve_path(raw_path);
+        let path = path_buf.as_path();
         if !perms.can_read(path) {
             results.push(serde_json::json!({ "file": target, "error": "Execution denied: Explicit permission missing to structurally map boundary target natively." }));
             continue;
@@ -311,9 +327,12 @@ pub struct ReplacementChunk {
 pub async fn multi_replace_file_content_impl(
     perms: Arc<Permissions>,
     target_file: String,
-    replacement_chunks: Vec<ReplacementChunk>,
+    mut replacement_chunks: Vec<ReplacementChunk>,
 ) -> Result<serde_json::Value> {
-    let path = Path::new(&target_file);
+    let raw_path = Path::new(&target_file);
+    let path_buf = perms.resolve_path(raw_path);
+    let path = path_buf.as_path();
+
     if !perms.can_write(path) {
         bail!(
             "Execution denied: Explicit permission missing to natively mutate boundary target: {}",
@@ -373,20 +392,22 @@ pub async fn write_files_impl(
     perms: Arc<Permissions>,
     files: Vec<WritePayload>,
 ) -> Result<serde_json::Value> {
-    for file in &files {
-        let path = Path::new(&file.target_path);
+    for req in &files {
+        let raw_path = Path::new(&req.target_path);
+        let path_buf = perms.resolve_path(raw_path);
+        let path = path_buf.as_path();
 
         if !perms.can_write(path) {
             bail!(
                 "Execution denied: Explicit permission missing to natively write to boundary target explicitly: {}",
-                file.target_path
+                req.target_path
             );
         }
 
-        if path.exists() && !file.overwrite.unwrap_or(false) {
+        if path.exists() && !req.overwrite.unwrap_or(false) {
             bail!(
                 "Error: Path '{}' already strictly exists! Protectively blocking destruction. Re-issue the sequence explicitly dictating overwrite: true manually.",
-                file.target_path
+                req.target_path
             );
         }
 
@@ -394,7 +415,7 @@ pub async fn write_files_impl(
             fs::create_dir_all(parent).await?;
         }
 
-        fs::write(path, &file.content).await?;
+        fs::write(path, &req.content).await?;
     }
 
     Ok(
@@ -460,8 +481,10 @@ pub async fn manage_paths_impl(
     perms: Arc<Permissions>,
     operations: Vec<PathOperation>,
 ) -> Result<serde_json::Value> {
-    for op in &operations {
-        let target = Path::new(&op.target_path);
+    for op in operations {
+        let raw_path = Path::new(&op.target_path);
+        let path_buf = perms.resolve_path(raw_path);
+        let target = path_buf.as_path();
         if !perms.can_write(target) {
             bail!(
                 "Execution denied: Explicit permission missing to structurally manage target boundary: {}",
@@ -643,12 +666,45 @@ pub fn create_filesystem_tools(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::tempdir;
+    use std::path::PathBuf;
+
+    #[test]
+    fn test_permissions_resolve_path() {
+        let perms_with_base = Permissions {
+            base_dir: Some(PathBuf::from("/mock/base")),
+            read_dirs: vec![],
+            write_dirs: vec![],
+        };
+        
+        let abs_path = PathBuf::from(if cfg!(windows) { "C:\\test\\abs" } else { "/test/abs" });
+        assert_eq!(perms_with_base.resolve_path(&abs_path), abs_path);
+        
+        let rel_path = PathBuf::from("relative/dir");
+        assert_eq!(perms_with_base.resolve_path(&rel_path), std::path::PathBuf::from("/mock/base").join(&rel_path));
+        
+        let perms_no_base = Permissions {
+            base_dir: None,
+            read_dirs: vec![],
+            write_dirs: vec![],
+        };
+        let expected = if let Ok(c) = std::env::current_dir() {
+            c.join(&rel_path)
+        } else {
+            rel_path.clone()
+        };
+        assert_eq!(perms_no_base.resolve_path(&rel_path), expected);
+
+        let temp = tempfile::tempdir().unwrap();
+        let _ = std::env::set_current_dir(temp.path());
+        assert_eq!(perms_no_base.resolve_path(&rel_path), temp.path().join(&rel_path));
+    }
 
     use std::fs;
-    use tempfile::tempdir;
 
     fn get_test_tool(name: &str) -> Box<dyn crate::llm::tool::LlmTool> {
         let perms = Arc::new(Permissions {
+            base_dir: None,
             read_dirs: vec![PathBuf::from("/")],
             write_dirs: vec![PathBuf::from("/")],
         });
@@ -665,6 +721,7 @@ mod tests {
         let root_str = if cfg!(windows) { "C:\\" } else { "/" };
 
         let perms = Permissions {
+            base_dir: None,
             read_dirs: vec![
                 dir.path().to_path_buf(),
                 PathBuf::from("/nonexistent/fake/dir"),

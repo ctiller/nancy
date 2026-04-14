@@ -36,7 +36,7 @@ impl Default for ModelHealth {
 #[derive(Debug)]
 pub struct AuctionBid {
     pub payload: LlmRequest,
-    pub tx: oneshot::Sender<ActiveLeaseInfo>,
+    pub tx: oneshot::Sender<crate::schema::ipc::GrantedPermissionInfo>,
     pub submitted_at_unix: u64,
 }
 
@@ -68,14 +68,14 @@ pub struct ActiveQuotas {
 }
 
 pub struct ArbitrationMarket {
-    pub pending_bids: Vec<AuctionBid>,
-    pub active_leases: Vec<ActiveLeaseInfo>,
+    pub stalled_requests: Vec<AuctionBid>,
     pub consumption_history: HashMap<schema::LlmModel, VecDeque<UsageRecord>>,
     pub active_quotas: HashMap<schema::LlmModel, ActiveQuotas>,
-    pub lease_history: HashMap<schema::LlmModel, VecDeque<u64>>,
+    pub grant_history: HashMap<schema::LlmModel, VecDeque<u64>>,
     pub historical_rates: HashMap<schema::LlmModel, ConsumptionRates>,
     pub subagent_costs: HashMap<String, schema::NanoCent>,
     pub budget_pool_nanocents: schema::NanoCent,
+    pub inflight_costs_nanocents: schema::NanoCent,
     pub config: CoordinatorConfig,
     pub model_health: HashMap<schema::LlmModel, ModelHealth>,
 }
@@ -218,14 +218,14 @@ impl ArbitrationMarket {
         let initial_budget = ((config.daily_budget_usd * 100_000_000_000.0) / 24.0) as u64;
 
         let market = Arc::new(RwLock::new(Self {
-            pending_bids: Vec::new(),
-            active_leases: Vec::new(),
+            stalled_requests: Vec::new(),
             consumption_history: HashMap::new(),
-            lease_history: HashMap::new(),
+            grant_history: HashMap::new(),
             historical_rates,
             active_quotas,
             subagent_costs: HashMap::new(),
             budget_pool_nanocents: schema::NanoCent(initial_budget),
+            inflight_costs_nanocents: schema::NanoCent(0),
             config,
             model_health: HashMap::new(),
         }));
@@ -241,7 +241,7 @@ impl ArbitrationMarket {
     pub fn submit_bid(
         market: &SharedArbitrationMarket,
         payload: LlmRequest,
-    ) -> oneshot::Receiver<ActiveLeaseInfo> {
+    ) -> oneshot::Receiver<crate::schema::ipc::GrantedPermissionInfo> {
         let (tx, rx) = oneshot::channel();
         let submitted_at_unix = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -257,7 +257,61 @@ impl ArbitrationMarket {
         let m = market.clone();
         tokio::spawn(async move {
             let mut lock = m.write().await;
-            lock.pending_bids.push(bid);
+            
+            if lock.stalled_requests.is_empty() {
+                let mut best_choice = None;
+                let mut best_ratio = std::f64::MIN;
+                let mut chosen_expected_cost = schema::NanoCent(0);
+                let mut chosen_expected_requests = 0.0;
+                let mut chosen_expected_tokens = 0.0;
+
+                for choice in &bid.payload.model_choices {
+                    let is_backoff = lock.model_health.get(&choice.name).map(|h| h.state_value != HealthStateValue::Healthy).unwrap_or(false);
+                    if is_backoff { continue; }
+
+                    let (expected_cost, expected_tokens, expected_requests) = Self::expected_grant_metrics_for(&lock, &choice.name);
+                    let (rpm, tpm, rpd) = {
+                        let active = lock.active_quotas.entry(choice.name.clone()).or_default();
+                        (active.rpm, active.tpm, active.rpd)
+                    };
+                    let rpm_ok = rpm.map_or(true, |r| r >= expected_requests);
+                    let tpm_ok = tpm.map_or(true, |t| t >= expected_tokens);
+                    let rpd_ok = rpd.map_or(true, |rd| rd >= expected_requests);
+                    let available_budget = schema::NanoCent(lock.budget_pool_nanocents.0.saturating_sub(lock.inflight_costs_nanocents.0));
+                    if rpm_ok && tpm_ok && rpd_ok && available_budget >= expected_cost {
+                        let ratio = (choice.bid_value as f64) / (expected_cost.0 as f64).max(1.0);
+                        if ratio > best_ratio {
+                            best_ratio = ratio;
+                            best_choice = Some(choice.clone());
+                            chosen_expected_cost = expected_cost;
+                            chosen_expected_tokens = expected_tokens;
+                            chosen_expected_requests = expected_requests;
+                        }
+                    }
+                }
+
+                if let Some(choice) = best_choice {
+                    let active = lock.active_quotas.entry(choice.name.clone()).or_default();
+                    if let Some(ref mut r) = active.rpm { *r -= chosen_expected_requests; }
+                    if let Some(ref mut t) = active.tpm { *t -= chosen_expected_tokens; }
+                    if let Some(ref mut rd) = active.rpd { *rd -= chosen_expected_requests; }
+                    lock.inflight_costs_nanocents += chosen_expected_cost;
+                    lock.grant_history.entry(choice.name.clone()).or_default().push_back(submitted_at_unix);
+                    
+                    let resp = crate::schema::ipc::GrantedPermissionInfo {
+                        granted_model: choice.name.clone(),
+                        expected_cost_nanocents: chosen_expected_cost,
+                        expected_tokens: chosen_expected_tokens,
+                        expected_requests: chosen_expected_requests,
+                        granted_at_unix: submitted_at_unix,
+                        subagent_id: bid.payload.worker_did.clone(),
+                    };
+                    let _ = bid.tx.send(resp);
+                    return;
+                }
+            }
+
+            lock.stalled_requests.push(bid);
         });
 
         rx
@@ -277,6 +331,14 @@ impl ArbitrationMarket {
         entry.next_tx_ms = now + duration.as_millis() as u64;
     }
 
+    pub async fn refund_expected_budget(
+        market: &SharedArbitrationMarket,
+        expected_cost_nanocents: schema::NanoCent,
+    ) {
+        let mut lock = market.write().await;
+        lock.inflight_costs_nanocents -= expected_cost_nanocents;
+    }
+
     pub async fn record_consumption(
         market: &SharedArbitrationMarket,
         model: schema::LlmModel,
@@ -284,6 +346,7 @@ impl ArbitrationMarket {
         output_tokens: u64,
         cached_tokens: u64,
         agent_path: String,
+        expected_cost_nanocents: schema::NanoCent,
     ) -> schema::NanoCent {
         let mut lock = market.write().await;
         let model_cost_schema = Self::cost_for(model, input_tokens);
@@ -293,7 +356,8 @@ impl ArbitrationMarket {
 
         let cost_nanocents = schema::NanoCent(actual_cost);
 
-        // Exact spend subtraction strictly safely mapped mathematically natively
+        // True-up budget computation
+        lock.inflight_costs_nanocents -= expected_cost_nanocents;
         lock.budget_pool_nanocents -= cost_nanocents;
 
         *lock
@@ -341,12 +405,12 @@ impl ArbitrationMarket {
         target.cost_nanocents += rec.cost_nanocents;
     }
 
-    pub fn expected_lease_metrics_for(
+    pub fn expected_grant_metrics_for(
         market: &ArbitrationMarket,
         model: &schema::LlmModel,
     ) -> (schema::NanoCent, f64, f64) {
-        let leases_count = market
-            .lease_history
+        let grants_count = market
+            .grant_history
             .get(model)
             .map(|l| l.len())
             .unwrap_or(0);
@@ -356,7 +420,7 @@ impl ArbitrationMarket {
             schema::NanoCent(100_000_000)
         };
 
-        if leases_count > 0 {
+        if grants_count > 0 {
             if let Some(records) = market.consumption_history.get(model) {
                 let total_cost: u64 = records.iter().map(|r| r.metrics.cost_nanocents.0).sum();
                 let total_tokens: f64 = records
@@ -364,11 +428,11 @@ impl ArbitrationMarket {
                     .map(|r| r.metrics.input_tokens as f64 + r.metrics.output_tokens as f64)
                     .sum();
                 let total_requests: f64 = records.iter().map(|r| r.metrics.requests as f64).sum();
-                let leases_f64 = leases_count as f64;
+                let grants_f64 = grants_count as f64;
                 (
-                    schema::NanoCent((total_cost as f64 / leases_f64) as u64),
-                    total_tokens / leases_f64,
-                    f64::max(1.0, total_requests / leases_f64),
+                    schema::NanoCent((total_cost as f64 / grants_f64) as u64),
+                    total_tokens / grants_f64,
+                    f64::max(1.0, total_requests / grants_f64),
                 )
             } else if let Some(rates) = market.historical_rates.get(model) {
                 (
@@ -400,8 +464,8 @@ impl ArbitrationMarket {
         let mut per_model_stats = std::collections::BTreeMap::new();
 
         for (model, records) in &lock.consumption_history {
-            let (expected_lease_cost, expected_lease_tokens, expected_lease_requests) =
-                Self::expected_lease_metrics_for(&lock, model);
+            let (expected_grant_cost, expected_grant_tokens, expected_grant_requests) =
+                Self::expected_grant_metrics_for(&lock, model);
             let status_str = lock.model_health.get(model).map(|h| match h.state_value {
                 HealthStateValue::Healthy => "Healthy",
                 HealthStateValue::Unhealthy => "Unhealthy",
@@ -426,9 +490,9 @@ impl ArbitrationMarket {
                 trailing_10m: UsageMetrics::default(),
                 trailing_30m: UsageMetrics::default(),
                 trailing_100m: UsageMetrics::default(),
-                expected_lease_cost,
-                expected_lease_tokens,
-                expected_lease_requests,
+                expected_grant_cost,
+                expected_grant_tokens,
+                expected_grant_requests,
             };
 
             for r in records {
@@ -456,8 +520,8 @@ impl ArbitrationMarket {
         // Fill in bounds for models with NO historical usage yet
         for (model, quota) in &lock.active_quotas {
             if !per_model_stats.contains_key(model) {
-                let (expected_lease_cost, expected_lease_tokens, expected_lease_requests) =
-                    Self::expected_lease_metrics_for(&lock, model);
+                let (expected_grant_cost, expected_grant_tokens, expected_grant_requests) =
+                    Self::expected_grant_metrics_for(&lock, model);
                 let status_str = lock.model_health.get(model).map(|h| match h.state_value {
                     HealthStateValue::Healthy => "Healthy",
                     HealthStateValue::Unhealthy => "Unhealthy",
@@ -479,16 +543,16 @@ impl ArbitrationMarket {
                         trailing_10m: UsageMetrics::default(),
                         trailing_30m: UsageMetrics::default(),
                         trailing_100m: UsageMetrics::default(),
-                        expected_lease_cost,
-                        expected_lease_tokens,
-                        expected_lease_requests,
+                        expected_grant_cost,
+                        expected_grant_tokens,
+                        expected_grant_requests,
                     },
                 );
             }
         }
 
         let pending_bids = lock
-            .pending_bids
+            .stalled_requests
             .iter()
             .map(|b| PendingBidInfo {
                 requester_id: b.payload.worker_did.clone(),
@@ -506,13 +570,12 @@ impl ArbitrationMarket {
             .collect();
         subagent_costs_vec
             .sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-
         MarketStateResponse {
             per_model_stats: per_model_stats_vec,
             pending_bids,
-            active_leases: lock.active_leases.clone(),
             budget_pool_nanocents: lock.budget_pool_nanocents,
-            subagent_costs: subagent_costs_vec,
+            inflight_costs_nanocents: lock.inflight_costs_nanocents,
+            subagent_costs: lock.subagent_costs.iter().map(|(n, c)| (n.clone(), *c)).collect(),
         }
     }
 
@@ -569,15 +632,9 @@ impl ArbitrationMarket {
             let bump_per_loop = schema::NanoCent(daily_nanocents / rounds_per_day);
             lock.budget_pool_nanocents = std::cmp::min(lock.budget_pool_nanocents + bump_per_loop, hourly_cap);
 
-            let mut available_tick_budget = lock.budget_pool_nanocents;
-
-            // 3. Clear expired leases organically
-            lock.active_leases
-                .retain(|lease| now < lease.granted_at_unix + lease.lease_duration_sec);
-
-            // Clean up stale lease history
+            // Clean up stale grant history
             let oldest_valid = now.saturating_sub(100 * 60);
-            for history in lock.lease_history.values_mut() {
+            for history in lock.grant_history.values_mut() {
                 while let Some(front) = history.front() {
                     if *front < oldest_valid {
                         history.pop_front();
@@ -587,8 +644,8 @@ impl ArbitrationMarket {
                 }
             }
 
-            // 4. Extract and flat-map bids into individual choice tickets
-            let bids = std::mem::take(&mut lock.pending_bids);
+            // 4. Extract and flat-map bids into individual choice tickets for Priority-aging HVF
+            let bids = std::mem::take(&mut lock.stalled_requests);
             let mut inflight_requests: Vec<Option<AuctionBid>> = bids
                 .into_iter()
                 .filter(|b| !b.tx.is_closed())
@@ -597,10 +654,11 @@ impl ArbitrationMarket {
 
             // Auction Fixed-Point Iteration Loop
             loop {
-                // Round 1 - find all bids that meet rpm/tpm/rpd constraints, ignoring $
+                // Round 1 - find all bids that meet rpm/tpm/rpd constraints and current budget
                 let mut round_1_tickets = Vec::new();
                 for (idx, req) in inflight_requests.iter().enumerate() {
                     if let Some(bid) = req {
+                        let wait_time = now.saturating_sub(bid.submitted_at_unix);
                         for choice in &bid.payload.model_choices {
                             let is_backoff = lock.model_health.get(&choice.name).map(|h| h.state_value != HealthStateValue::Healthy).unwrap_or(false);
                             if is_backoff {
@@ -608,7 +666,7 @@ impl ArbitrationMarket {
                             }
 
                             let (expected_cost, expected_tokens, expected_requests) =
-                                Self::expected_lease_metrics_for(&lock, &choice.name);
+                                Self::expected_grant_metrics_for(&lock, &choice.name);
 
                             let active = lock.active_quotas.entry(choice.name.clone()).or_default();
 
@@ -616,9 +674,10 @@ impl ArbitrationMarket {
                             let tpm_ok = active.tpm.map_or(true, |t| t >= expected_tokens);
                             let rpd_ok = active.rpd.map_or(true, |rd| rd >= expected_requests);
 
+                            let available_budget = schema::NanoCent(lock.budget_pool_nanocents.0.saturating_sub(lock.inflight_costs_nanocents.0));
                             // Purely declarative in Round 1
-                            if rpm_ok && tpm_ok && rpd_ok {
-                                round_1_tickets.push((choice.bid_value, expected_cost, idx, choice.clone()));
+                            if rpm_ok && tpm_ok && rpd_ok && available_budget >= expected_cost {
+                                round_1_tickets.push((choice.bid_value, expected_cost, idx, choice.clone(), wait_time));
                             }
                         }
                     }
@@ -628,42 +687,48 @@ impl ArbitrationMarket {
                     break;
                 }
 
-                // Round 2 - sort by value / cost ratio (fallback to oldest natively if bids tie identically)
+                // Round 2 - sort by value/cost ratio + priority aging (5% boost per second)
                 round_1_tickets.sort_by(|a, b| {
-                    let a_ratio = (a.0 as f64) / (a.1.0 as f64).max(1.0);
-                    let b_ratio = (b.0 as f64) / (b.1.0 as f64).max(1.0);
-                    b_ratio.partial_cmp(&a_ratio)
+                    let a_base = (a.0 as f64) / (a.1.0 as f64).max(1.0);
+                    let b_base = (b.0 as f64) / (b.1.0 as f64).max(1.0);
+                    let age_factor_per_sec = 0.05;
+                    let a_score = a_base * (1.0 + (a.4 as f64 * age_factor_per_sec));
+                    let b_score = b_base * (1.0 + (b.4 as f64 * age_factor_per_sec));
+
+                    b_score.partial_cmp(&a_score)
                         .unwrap_or(std::cmp::Ordering::Equal)
                         .then_with(|| a.2.cmp(&b.2))
                 });
 
                 let mut restart_round_1 = false;
 
-                // Round 3 - take most valuable until expected $ budget is < 0
-                for (_value, _expected_cost, req_idx, choice) in round_1_tickets {
+                // Round 3 - take most valuable until expected $ budget breaks
+                for (_value, expected_cost, req_idx, choice, _wait) in round_1_tickets {
                     let Some(_bid_data): Option<&AuctionBid> = inflight_requests[req_idx].as_ref() else {
                         continue; // Reached if another choice from this same request previously satisfied it!
                     };
 
-                    let (expected_cost, expected_tokens, expected_requests) =
-                        Self::expected_lease_metrics_for(&lock, &choice.name);
+                    let (_ec, expected_tokens, expected_requests) =
+                        Self::expected_grant_metrics_for(&lock, &choice.name);
 
-                    let active = lock.active_quotas.entry(choice.name.clone()).or_default();
-                    let rpm_ok = active.rpm.map_or(true, |r| r >= expected_requests);
-                    let tpm_ok = active.tpm.map_or(true, |t| t >= expected_tokens);
-                    let rpd_ok = active.rpd.map_or(true, |rd| rd >= expected_requests);
+                    let (rpm, tpm, rpd) = {
+                        let active = lock.active_quotas.entry(choice.name.clone()).or_default();
+                        (active.rpm, active.tpm, active.rpd)
+                    };
+                    let rpm_ok = rpm.map_or(true, |r| r >= expected_requests);
+                    let tpm_ok = tpm.map_or(true, |t| t >= expected_tokens);
+                    let rpd_ok = rpd.map_or(true, |rd| rd >= expected_requests);
+
+                    let available_budget = schema::NanoCent(lock.budget_pool_nanocents.0.saturating_sub(lock.inflight_costs_nanocents.0));
 
                     // Dynamic assertion - if limits dwindled due to previous grants in Round 3, restart natively!
-                    if !(rpm_ok && tpm_ok && rpd_ok) {
+                    if !(rpm_ok && tpm_ok && rpd_ok && available_budget >= expected_cost) {
                         restart_round_1 = true;
                         break;
                     }
 
-                    if available_tick_budget < expected_cost {
-                        break;
-                    }
-
                     // Execute and mutate allocations cleanly uniquely here!
+                    let active = lock.active_quotas.get_mut(&choice.name).unwrap();
                     if let Some(ref mut r) = active.rpm {
                         *r -= expected_requests;
                     }
@@ -674,20 +739,19 @@ impl ArbitrationMarket {
                         *rd -= expected_requests;
                     }
 
-                    available_tick_budget -= expected_cost;
+                    lock.inflight_costs_nanocents += expected_cost;
 
                     let bid_data: AuctionBid = inflight_requests[req_idx].take().unwrap();
-                    let lease_id = uuid::Uuid::new_v4().to_string();
-                    let resp = ActiveLeaseInfo {
+                    let resp = crate::schema::ipc::GrantedPermissionInfo {
                         granted_model: choice.name.clone(),
-                        lease_id: lease_id.clone(),
-                        lease_duration_sec: LEASE_TIME_SECS,
+                        expected_cost_nanocents: expected_cost,
+                        expected_tokens,
+                        expected_requests,
                         granted_at_unix: now,
                         subagent_id: bid_data.payload.worker_did.clone(),
                     };
 
-                    lock.active_leases.push(resp.clone());
-                    lock.lease_history
+                    lock.grant_history
                         .entry(choice.name.clone())
                         .or_default()
                         .push_back(now);
@@ -700,14 +764,14 @@ impl ArbitrationMarket {
                 }
             }
 
-            lock.pending_bids = inflight_requests.into_iter().flatten().collect();
+            lock.stalled_requests = inflight_requests.into_iter().flatten().collect();
 
             let rates_json_and_path = if let Some(mut rates_path) = lock.config.nancy_dir.clone() {
                 rates_path.push("consumption_rates.json");
                 let mut current_rates = HashMap::new();
                 for model in schema::LlmModel::ALL {
-                    let leases_count = lock.lease_history.get(model).map(|l| l.len()).unwrap_or(0);
-                    if leases_count > 0 {
+                    let grants_count = lock.grant_history.get(model).map(|l| l.len()).unwrap_or(0);
+                    if grants_count > 0 {
                         if let Some(records) = lock.consumption_history.get(model) {
                             let total_cost: u64 = records.iter().map(|r| r.metrics.cost_nanocents.0).sum();
                             let total_tokens: f64 = records
@@ -718,13 +782,13 @@ impl ArbitrationMarket {
                                 .sum();
                             let total_requests: f64 =
                                 records.iter().map(|r| r.metrics.requests as f64).sum();
-                            let leases_f64 = leases_count as f64;
+                            let grants_f64 = grants_count as f64;
                             current_rates.insert(
                                 *model,
                                 ConsumptionRates {
-                                    expected_cost: schema::NanoCent((total_cost as f64 / leases_f64) as u64),
-                                    expected_tokens: total_tokens / leases_f64,
-                                    expected_requests: f64::max(1.0, total_requests / leases_f64),
+                                    expected_cost: schema::NanoCent((total_cost as f64 / grants_f64) as u64),
+                                    expected_tokens: total_tokens / grants_f64,
+                                    expected_requests: f64::max(1.0, total_requests / grants_f64),
                                 },
                             );
                         }
@@ -772,14 +836,14 @@ mod tests {
             };
 
             let market = Arc::new(RwLock::new(ArbitrationMarket {
-                pending_bids: Vec::new(),
-                active_leases: Vec::new(),
+                stalled_requests: Vec::new(),
                 consumption_history: HashMap::new(),
-                lease_history: HashMap::new(),
+                grant_history: HashMap::new(),
                 historical_rates: HashMap::new(),
                 active_quotas,
                 subagent_costs: HashMap::new(),
                 budget_pool_nanocents: schema::NanoCent(0),
+                inflight_costs_nanocents: schema::NanoCent(0),
                 config,
                 model_health: HashMap::new(),
             }));

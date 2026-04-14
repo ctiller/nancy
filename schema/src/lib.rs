@@ -221,10 +221,11 @@ pub struct ModelChoice {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
-pub struct RequestModelResponse {
+pub struct GrantedPermissionResponse {
     pub granted_model: LlmModel,
-    pub lease_id: String,
-    pub lease_duration_sec: u64,
+    pub expected_cost_nanocents: NanoCent,
+    pub expected_tokens: f64,
+    pub expected_requests: f64,
     pub granted_at_unix: u64,
     pub subagent_id: String,
 }
@@ -263,16 +264,16 @@ pub struct ModelUsageStats {
     pub trailing_10m: UsageMetrics,
     pub trailing_30m: UsageMetrics,
     pub trailing_100m: UsageMetrics,
-    pub expected_lease_cost: NanoCent,
-    pub expected_lease_tokens: f64,
-    pub expected_lease_requests: f64,
+    pub expected_grant_cost: NanoCent,
+    pub expected_grant_tokens: f64,
+    pub expected_grant_requests: f64,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct MarketStateResponse {
     pub per_model_stats: Vec<(LlmModel, ModelUsageStats)>,
     pub pending_bids: Vec<PendingBidInfo>,
-    pub active_leases: Vec<RequestModelResponse>,
     pub budget_pool_nanocents: NanoCent,
+    pub inflight_costs_nanocents: NanoCent,
     pub subagent_costs: Vec<(String, NanoCent)>,
 }
