@@ -26,9 +26,18 @@ pub fn logs_view() -> Html {
                     }
                     if let Ok(resp) = req.send().await {
                         if resp.ok() {
-                            if let Ok(data) = resp.json::<MarketStateResponse>().await {
-                                market_state.set(Some(data));
+                            if let Ok(text) = resp.text().await {
+                                match serde_json::from_str::<MarketStateResponse>(&text) {
+                                    Ok(data) => {
+                                        market_state.set(Some(data));
+                                    }
+                                    Err(e) => {
+                                        web_sys::console::error_1(&format!("Logs parse error: {}", e).into());
+                                    }
+                                }
                             }
+                        } else {
+                            web_sys::console::error_1(&format!("Logs status error: {}", resp.status()).into());
                         }
                     }
 
