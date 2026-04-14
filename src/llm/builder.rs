@@ -22,6 +22,7 @@ struct LoopDetectionStatus {
 
 pub struct LlmBuilder {
     kind: Kind,
+    task_type: schema::TaskType,
     temperature: Option<f32>,
     system_prompt: Vec<String>,
     tools: Vec<Box<dyn crate::llm::tool::LlmTool>>,
@@ -33,20 +34,20 @@ pub struct LlmBuilder {
     max_history: usize,
 }
 
-pub fn lite_llm(name: &str) -> LlmBuilder {
-    LlmBuilder::new(Kind::Lite, name)
+pub fn lite_llm(name: &str, task_type: schema::TaskType) -> LlmBuilder {
+    LlmBuilder::new(Kind::Lite, name, task_type)
 }
 
-pub fn fast_llm(name: &str) -> LlmBuilder {
-    LlmBuilder::new(Kind::Fast, name)
+pub fn fast_llm(name: &str, task_type: schema::TaskType) -> LlmBuilder {
+    LlmBuilder::new(Kind::Fast, name, task_type)
 }
 
-pub fn thinking_llm(name: &str) -> LlmBuilder {
-    LlmBuilder::new(Kind::Thinking, name)
+pub fn thinking_llm(name: &str, task_type: schema::TaskType) -> LlmBuilder {
+    LlmBuilder::new(Kind::Thinking, name, task_type)
 }
 
 impl LlmBuilder {
-    fn new(mut kind: Kind, name: &str) -> Self {
+    fn new(mut kind: Kind, name: &str, task_type: schema::TaskType) -> Self {
         if cfg!(test) {
             kind = Kind::Fast;
         }
@@ -59,6 +60,7 @@ impl LlmBuilder {
 
         Self {
             kind,
+            task_type,
             temperature: None,
             system_prompt: Vec::new(),
             tools: Vec::new(),
@@ -178,7 +180,7 @@ impl LlmBuilder {
                         trimmed_history
                     );
 
-                    if let Ok(mut checker) = fast_llm(&format!("{}_loop_detector", subagent_name))
+                    if let Ok(mut checker) = fast_llm(&format!("{}_loop_detector", subagent_name), schema::TaskType::Validation)
                         .system_prompt(
                             "You are a loop detector. Extract the loop details structurally.",
                         )
@@ -200,6 +202,7 @@ impl LlmBuilder {
 
         Ok(LlmClient {
             kind: self.kind,
+            task_type: self.task_type,
             api_key,
             temperature: self.temperature,
             system_prompt: self.system_prompt,
@@ -306,15 +309,15 @@ mod tests {
 
     #[test]
     fn test_llm_constructors() {
-        let lite = lite_llm("test_lite");
+        let lite = lite_llm("test_lite", schema::TaskType::Chat);
         assert!(lite.subagent.starts_with("test_lite_"));
         assert!(matches!(lite.kind, Kind::Fast)); // in tests, it defaults to Fast
 
-        let fast = fast_llm("test_fast");
+        let fast = fast_llm("test_fast", schema::TaskType::Chat);
         assert!(fast.subagent.starts_with("test_fast_"));
         assert!(matches!(fast.kind, Kind::Fast));
 
-        let thinking = thinking_llm("test_thinking");
+        let thinking = thinking_llm("test_thinking", schema::TaskType::Chat);
         assert!(thinking.subagent.starts_with("test_thinking_"));
         assert!(matches!(thinking.kind, Kind::Fast)); // in tests, it defaults to Fast
     }

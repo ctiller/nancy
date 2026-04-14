@@ -43,6 +43,8 @@ pub struct AuctionBid {
 #[derive(Debug, Clone)]
 pub struct UsageRecord {
     pub timestamp: u64,
+    pub task_type: schema::TaskType,
+    pub raw_input_size: usize,
     pub metrics: UsageMetrics,
 }
 
@@ -269,7 +271,7 @@ impl ArbitrationMarket {
                     let is_backoff = lock.model_health.get(&choice.name).map(|h| h.state_value != HealthStateValue::Healthy).unwrap_or(false);
                     if is_backoff { continue; }
 
-                    let (expected_cost, expected_tokens, expected_requests) = Self::expected_grant_metrics_for(&lock, &choice.name);
+                    let (expected_cost, expected_tokens, expected_requests) = Self::expected_grant_metrics_for_bid(&lock, &choice.name, bid.payload.task_type, bid.payload.raw_input_size);
                     let (rpm, tpm, rpd) = {
                         let active = lock.active_quotas.entry(choice.name.clone()).or_default();
                         (active.rpm, active.tpm, active.rpd)
@@ -346,6 +348,8 @@ impl ArbitrationMarket {
         output_tokens: u64,
         cached_tokens: u64,
         agent_path: String,
+        task_type: schema::TaskType,
+        raw_input_size: usize,
         expected_cost_nanocents: schema::NanoCent,
     ) -> schema::NanoCent {
         let mut lock = market.write().await;
@@ -376,6 +380,8 @@ impl ArbitrationMarket {
 
         entry.push_back(UsageRecord {
             timestamp: now,
+            task_type,
+            raw_input_size,
             metrics: UsageMetrics {
                 requests: 1,
                 input_tokens,
@@ -405,7 +411,7 @@ impl ArbitrationMarket {
         target.cost_nanocents += rec.cost_nanocents;
     }
 
-    pub fn expected_grant_metrics_for(
+    pub fn expected_grant_metrics_for_generic(
         market: &ArbitrationMarket,
         model: &schema::LlmModel,
     ) -> (schema::NanoCent, f64, f64) {
@@ -454,6 +460,70 @@ impl ArbitrationMarket {
         }
     }
 
+    pub fn expected_grant_metrics_for_bid(
+        market: &ArbitrationMarket,
+        model: &schema::LlmModel,
+        task_type: schema::TaskType,
+        raw_input_size: usize,
+    ) -> (schema::NanoCent, f64, f64) {
+        let records = market.consumption_history.get(model);
+        let mut relevant = Vec::new();
+        if let Some(recs) = records {
+            for r in recs {
+                if r.task_type == task_type {
+                    relevant.push(r.clone());
+                }
+            }
+        }
+
+        if relevant.len() < 2 {
+            return Self::expected_grant_metrics_for_generic(market, model);
+        }
+
+        use smartcore::linear::linear_regression::LinearRegression;
+        use smartcore::neighbors::knn_regressor::KNNRegressor;
+        use smartcore::linalg::basic::matrix::DenseMatrix;
+
+        let mut x_train = Vec::new();
+        let mut y_in = Vec::new();
+        let mut y_out = Vec::new();
+        let mut y_cached = Vec::new();
+        let mut requests_sum = 0.0;
+
+        for r in &relevant {
+            x_train.push(vec![r.raw_input_size as f64]);
+            y_in.push(r.metrics.input_tokens as f64);
+            y_out.push(r.metrics.output_tokens as f64);
+            y_cached.push(r.metrics.cached_tokens as f64);
+            requests_sum += r.metrics.requests as f64;
+        }
+
+        let density = DenseMatrix::from_2d_vec(&x_train).unwrap();
+        
+        let pred_in = if let Ok(lr) = LinearRegression::fit(&density, &y_in, Default::default()) {
+             lr.predict(&DenseMatrix::from_2d_vec(&vec![vec![raw_input_size as f64]]).unwrap()).unwrap_or(vec![y_in[0]])[0].max(0.0)
+        } else { y_in[0] };
+
+        let pred_cached = if let Ok(lr) = LinearRegression::fit(&density, &y_cached, Default::default()) {
+             lr.predict(&DenseMatrix::from_2d_vec(&vec![vec![raw_input_size as f64]]).unwrap()).unwrap_or(vec![y_cached[0]])[0].max(0.0)
+        } else { y_cached[0] };
+
+        // Ensure K is bounded by how many items we actually have
+        let k_val = std::cmp::min(5, relevant.len());
+        let knn_params = smartcore::neighbors::knn_regressor::KNNRegressorParameters::default().with_k(k_val);
+
+        let pred_out = if let Ok(knn) = KNNRegressor::fit(&density, &y_out, knn_params) {
+             knn.predict(&DenseMatrix::from_2d_vec(&vec![vec![raw_input_size as f64]]).unwrap()).unwrap_or(vec![y_out[0]])[0].max(0.0)
+        } else { y_out[0] };
+
+        let model_cost_schema = Self::cost_for(*model, pred_in as u64);
+        let expected_cost = ((pred_in as u64).saturating_sub(pred_cached as u64) * model_cost_schema.input)
+            + ((pred_cached as u64) * model_cost_schema.cached_input)
+            + ((pred_out as u64) * model_cost_schema.output);
+
+        (schema::NanoCent(expected_cost), pred_in + pred_out, requests_sum / (relevant.len() as f64))
+    }
+
     pub async fn get_market_state(market: &SharedArbitrationMarket) -> MarketStateResponse {
         let lock = market.read().await;
         let now = SystemTime::now()
@@ -465,7 +535,7 @@ impl ArbitrationMarket {
 
         for (model, records) in &lock.consumption_history {
             let (expected_grant_cost, expected_grant_tokens, expected_grant_requests) =
-                Self::expected_grant_metrics_for(&lock, model);
+                Self::expected_grant_metrics_for_generic(&lock, model);
             let status_str = lock.model_health.get(model).map(|h| match h.state_value {
                 HealthStateValue::Healthy => "Healthy",
                 HealthStateValue::Unhealthy => "Unhealthy",
@@ -521,7 +591,7 @@ impl ArbitrationMarket {
         for (model, quota) in &lock.active_quotas {
             if !per_model_stats.contains_key(model) {
                 let (expected_grant_cost, expected_grant_tokens, expected_grant_requests) =
-                    Self::expected_grant_metrics_for(&lock, model);
+                    Self::expected_grant_metrics_for_generic(&lock, model);
                 let status_str = lock.model_health.get(model).map(|h| match h.state_value {
                     HealthStateValue::Healthy => "Healthy",
                     HealthStateValue::Unhealthy => "Unhealthy",
@@ -666,7 +736,7 @@ impl ArbitrationMarket {
                             }
 
                             let (expected_cost, expected_tokens, expected_requests) =
-                                Self::expected_grant_metrics_for(&lock, &choice.name);
+                                Self::expected_grant_metrics_for_bid(&lock, &choice.name, bid.payload.task_type, bid.payload.raw_input_size);
 
                             let active = lock.active_quotas.entry(choice.name.clone()).or_default();
 
@@ -704,12 +774,12 @@ impl ArbitrationMarket {
 
                 // Round 3 - take most valuable until expected $ budget breaks
                 for (_value, expected_cost, req_idx, choice, _wait) in round_1_tickets {
-                    let Some(_bid_data): Option<&AuctionBid> = inflight_requests[req_idx].as_ref() else {
+                    let Some(bid_data) = inflight_requests[req_idx].as_ref() else {
                         continue; // Reached if another choice from this same request previously satisfied it!
                     };
 
                     let (_ec, expected_tokens, expected_requests) =
-                        Self::expected_grant_metrics_for(&lock, &choice.name);
+                        Self::expected_grant_metrics_for_bid(&lock, &choice.name, bid_data.payload.task_type, bid_data.payload.raw_input_size);
 
                     let (rpm, tpm, rpd) = {
                         let active = lock.active_quotas.entry(choice.name.clone()).or_default();
@@ -874,5 +944,74 @@ mod tests {
                 assert!(lock.budget_pool_nanocents <= hourly_cap); // Check strict max hourly pools
             });
         }
+    }
+
+    #[test]
+    fn test_expected_grant_metrics_fallback() {
+        let mut market = ArbitrationMarket {
+            stalled_requests: Vec::new(),
+            consumption_history: HashMap::new(),
+            grant_history: HashMap::new(),
+            historical_rates: HashMap::new(),
+            active_quotas: HashMap::new(),
+            subagent_costs: HashMap::new(),
+            budget_pool_nanocents: schema::NanoCent(0),
+            inflight_costs_nanocents: schema::NanoCent(0),
+            config: CoordinatorConfig { daily_budget_usd: 10.0, nancy_dir: None },
+            model_health: HashMap::new(),
+        };
+
+        // Lines 409-410 coverage
+        let mut target = UsageMetrics::default();
+        let rec = UsageMetrics {
+            requests: 1,
+            input_tokens: 10,
+            output_tokens: 20,
+            cached_tokens: 30,
+            cost_nanocents: schema::NanoCent(100),
+        };
+        ArbitrationMarket::merge_metrics(&mut target, &rec);
+        assert_eq!(target.output_tokens, 20);
+        assert_eq!(target.cached_tokens, 30);
+
+        // Lines 483, 502, 506 coverage
+        let model = schema::LlmModel::TestMockModel;
+        
+        // Colinear X values so LinearRegression::fit fails
+        let rec1 = UsageRecord {
+            timestamp: 0,
+            metrics: UsageMetrics {
+                requests: 1,
+                input_tokens: 10,
+                output_tokens: 20,
+                cached_tokens: 5,
+                cost_nanocents: schema::NanoCent(10),
+            },
+            task_type: schema::TaskType::Chat,
+            raw_input_size: 10,
+        };
+        let rec2 = UsageRecord {
+            timestamp: 0,
+            metrics: UsageMetrics {
+                requests: 1,
+                input_tokens: 100, // Different Y
+                output_tokens: 200,
+                cached_tokens: 50,
+                cost_nanocents: schema::NanoCent(100),
+            },
+            task_type: schema::TaskType::Chat,
+            raw_input_size: 10, // Same X! Singular matrix!
+        };
+
+        market.consumption_history.insert(model, vec![rec1, rec2].into());
+
+        let (cost, predicted_tokens, reqs) = ArbitrationMarket::expected_grant_metrics_for_bid(
+            &market,
+            &model,
+            schema::TaskType::Chat,
+            50
+        );
+
+        assert!(predicted_tokens > 0.0);
     }
 }

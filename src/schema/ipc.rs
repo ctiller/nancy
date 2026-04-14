@@ -25,6 +25,8 @@ pub struct LlmRequest {
     pub worker_did: String,
     pub agent_path: String,
     pub task_name: String, 
+    pub task_type: schema::TaskType,
+    pub raw_input_size: usize,
     pub payload: serde_json::Value,
 }
 

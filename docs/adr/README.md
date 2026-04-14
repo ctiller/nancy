@@ -75,3 +75,5 @@ This directory contains the documented architectural and design decisions for Na
 * [0070: Hoisted Persistent HTTP UDS Client](0070-hoisted-persistent-http-uds-client.md) - Replaces dynamic polling reconstructions of the UDS HTTP connection pool with a static global singleton natively safely across structural abstractions.
 * [0072: Sandbox Canonicalization and Gateway Retries](0072-sandbox-canonicalization-and-gateway-retries.md) - Standardizes sandbox environment mapping and gateway retry logic natively.
 * [0071: NanoCent Integer Math](0071-nanocent-integer-math.md) - Replaces floating-point USD calculations with a strongly-typed integer NanoCent mathematically bounded natively across the system.
+* [0073: LLM Token Prediction Models](0073-llm-token-prediction-models.md) - Introduces TaskType classification and `smartcore` KNN/Linear token regression natively.
+* [0074: Leverage External Crates Over Self-Implementation](0074-leverage-external-crates.md) - Policies enforcing the use of established third-party dependencies natively structurally to minimize testing and maintenance burdens.

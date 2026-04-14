@@ -169,6 +169,18 @@ pub struct ReviewPlanPayload {
     pub document: TddDocument,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[serde(rename_all = "snake_case")]
+pub enum TaskType {
+    Implement,
+    Investigate,
+    Review,
+    Planning,
+    Validation,
+    Summarization,
+    Chat,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Hash, Copy, PartialOrd, Ord)]
 pub enum LlmModel {
     #[serde(rename = "gemini-2.5-flash-lite")]

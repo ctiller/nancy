@@ -176,7 +176,7 @@ impl ReviewSession {
                     .context(&format!("Reviewing: {}", persona.name), &client_name)
                     .build();
 
-                let new_client = fast_llm(&client_name)
+                let new_client = fast_llm(&client_name, schema::TaskType::Review)
                     .system_prompt(&sys_prompt)
                     .tools(tools)
                     .with_loop_detection()

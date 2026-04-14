@@ -54,6 +54,8 @@ pub async fn proxy_handler(
             let mut active_cost = None;
             let agent_path = payload.agent_path.clone();
             let task_name = payload.task_name.clone();
+            let payload_task_type = payload.task_type;
+            let payload_raw_input_size = payload.raw_input_size;
 
             loop {
                 attempts += 1;
@@ -206,6 +208,8 @@ pub async fn proxy_handler(
                 output_tokens,
                 cached_tokens,
                 agent_path.clone(),
+                payload_task_type,
+                payload_raw_input_size,
                 expected_cost,
             ).await;
 

@@ -145,7 +145,7 @@ impl TaskViewEvaluator {
             dump
         );
 
-        let mut llm = crate::llm::builder::fast_llm("dreamer-task-view")
+        let mut llm = crate::llm::builder::fast_llm("dreamer-task-view", schema::TaskType::Planning)
             .system_prompt("You are an analytical evaluator scoring log events. Ignore formatting errors and gracefully output only an integer.")
             .temperature(0.0)
             .build()?;

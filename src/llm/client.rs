@@ -39,6 +39,7 @@ pub type TaskPriorityFn = std::sync::Arc<
 
 pub struct LlmClient {
     pub kind: crate::llm::builder::Kind,
+    pub task_type: schema::TaskType,
     pub api_key: String,
     pub temperature: Option<f32>,
     pub system_prompt: Vec<String>,
@@ -452,12 +453,17 @@ impl LlmClient {
                     },
                 };
                 
+                let payload_json = serde_json::to_value(&request)?;
+                let raw_input_size = serde_json::to_string(&request).unwrap_or_default().len();
+                
                 let payload = crate::schema::ipc::LlmRequest {
                     model_choices: choices.clone(),
                     worker_did: self.subagent.clone(),
                     agent_path: self.subagent.clone(),
                     task_name: std::env::var("NANCY_TASK_ID").unwrap_or_default(),
-                    payload: serde_json::to_value(&request)?,
+                    task_type: self.task_type,
+                    raw_input_size,
+                    payload: payload_json,
                 };
 
                 let coord_sock = crate::agent::get_coordinator_socket_path(None);
@@ -618,6 +624,7 @@ mod tests {
 
         let mut client = LlmClient {
             kind: crate::llm::builder::Kind::Fast,
+            task_type: schema::TaskType::Chat,
             api_key: "xxx".to_string(),
             temperature: None,
             system_prompt: vec![],
@@ -752,6 +759,7 @@ mod tests {
 
         let client = LlmClient {
             kind: crate::llm::builder::Kind::Fast,
+            task_type: schema::TaskType::Chat,
             api_key: "xxx".to_string(),
             temperature: None,
             system_prompt: vec![],
@@ -815,6 +823,7 @@ mod tests {
 
         let mut client = LlmClient {
             kind: crate::llm::builder::Kind::Fast,
+            task_type: schema::TaskType::Chat,
             api_key: "xxx".to_string(),
             temperature: None,
             system_prompt: vec![],
@@ -845,6 +854,7 @@ mod tests {
 
         let mut client = LlmClient {
             kind: crate::llm::builder::Kind::Fast,
+            task_type: schema::TaskType::Chat,
             api_key: "xxx".to_string(),
             temperature: None,
             system_prompt: vec![],
@@ -898,6 +908,7 @@ mod tests {
 
         let mut client = LlmClient {
             kind: crate::llm::builder::Kind::Fast,
+            task_type: schema::TaskType::Chat,
             api_key: "xxx".to_string(),
             temperature: None,
             system_prompt: vec![],

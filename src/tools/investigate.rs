@@ -177,7 +177,7 @@ async fn investigate_inner(
             is_repetition: bool,
         }
 
-        if let Ok(mut checker) = crate::llm::lite_llm("repetition_checker").build() {
+        if let Ok(mut checker) = crate::llm::lite_llm("repetition_checker", schema::TaskType::Validation).build() {
             if let Ok(res) = checker.ask::<RepetitionCheck>(&prompt).await {
                 if res.is_repetition {
                     return Ok("Execution denied: question is a repetition of a previous investigation bounds on the active subagent lineage.".to_string());
@@ -210,7 +210,7 @@ DO NOT USE `.` as a target directory, always use absolute paths starting from yo
         .context(&task_name, &inner_agent)
         .build();
 
-    let mut client = thinking_llm("investigator")
+    let mut client = thinking_llm("investigator", schema::TaskType::Investigate)
         .temperature(0.3)
         .tools(tools)
         .system_prompt(&system_prompt_str)

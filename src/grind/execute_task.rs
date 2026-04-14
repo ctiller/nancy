@@ -147,7 +147,7 @@ async fn handle_plan_task(
         let all_personas = crate::personas::get_all_personas();
         let mod_prompt = crate::grind::prompts::ModeratorPromptTemplate { personas: &all_personas }.render()?;
 
-        let mut coord_client = crate::llm::fast_llm("planning_moderator")
+        let mut coord_client = crate::llm::fast_llm("planning_moderator", schema::TaskType::Planning)
             .system_prompt(&mod_prompt)
             .with_loop_detection()
             .with_task_priority(appview_task_priority(task_ref.to_string()))
@@ -194,7 +194,7 @@ async fn handle_plan_task(
     let mut feedback_context = String::new();
     let mut iteration = 0;
     
-    let mut synthesizer = crate::llm::fast_llm("moderator_synthesizer")
+    let mut synthesizer = crate::llm::fast_llm("moderator_synthesizer", schema::TaskType::Planning)
         .system_prompt(&crate::grind::prompts::ModeratorSynthesizerSystemPromptTemplate {
             task_description: &task_payload.description,
             tdd_guidelines: crate::grind::prompts::TDD_GUIDELINES,
@@ -422,7 +422,7 @@ pub async fn handle_implement_task(
                 let mut tasks = Vec::new();
                 for cond in &task_payload.preconditions {
                     let c = cond.clone();
-                    let mut client = crate::llm::fast_llm("precondition_checker").system_prompt(&sp).build()?;
+                    let mut client = crate::llm::fast_llm("precondition_checker", schema::TaskType::Validation).system_prompt(&sp).build()?;
                     tasks.push(tokio::spawn(async move {
                         let prompt = format!(
                             "Check if the following precondition is currently met in the codebase:\n\nPrecondition: {}\n\nReturn a JSON object with `passed` (boolean), `failed_reason` (string explaining why), and `remedy_task_description` (string describing a new task to fix this if it failed, otherwise empty string).",
@@ -458,7 +458,7 @@ pub async fn handle_implement_task(
                     crate::introspection::log("Synthesizing composite remediation task...");
                     let synthesis_prompt = format!("The following preconditions failed:\n\n{}\n\nSynthesize a single comprehensive remediation task description that addresses all of these failures.", serde_json::to_string(&failed_preconds).unwrap_or_default());
                     
-                    let mut syn_client = crate::llm::fast_llm("remedy_synthesizer").build()?;
+                    let mut syn_client = crate::llm::fast_llm("remedy_synthesizer", schema::TaskType::Implement).build()?;
                     syn_client.ask::<String>(&synthesis_prompt).await.unwrap_or_else(|_| "Fix multiple precondition failures.".to_string())
                 };
 
@@ -507,7 +507,7 @@ pub async fn handle_implement_task(
                 .context(&task_payload.description, "implementer")
                 .build();
 
-            let mut client = crate::llm::thinking_llm("implementer")
+            let mut client = crate::llm::thinking_llm("implementer", schema::TaskType::Implement)
                 .tools(tools)
                 .system_prompt(&crate::grind::prompts::implementer_system_prompt(
                     &target_path,
@@ -533,7 +533,7 @@ pub async fn handle_implement_task(
                     let mut tasks = Vec::new();
                     for cond in &task_payload.postconditions {
                         let c = cond.clone();
-                        let mut p_client = crate::llm::fast_llm("postcondition_checker").system_prompt(&sp).build()?;
+                        let mut p_client = crate::llm::fast_llm("postcondition_checker", schema::TaskType::Validation).system_prompt(&sp).build()?;
                         tasks.push(tokio::spawn(async move {
                             let postcond_prompt = format!(
                                 "Check if the following postcondition is met in the codebase:\n\nPostcondition: {}\n\nReturn JSON with `passed` (bool), `failed_reason` (string), and `remedy_task_description` (string, empty if none).",
@@ -585,7 +585,7 @@ pub async fn handle_implement_task(
             }).await?;
 
             let mut session = crate::pre_review::session::ReviewSession::new(target_path.to_path_buf());
-            let mut coordinator_client = crate::llm::fast_llm("review_coordinator")
+            let mut coordinator_client = crate::llm::fast_llm("review_coordinator", schema::TaskType::Review)
                 .system_prompt(crate::grind::prompts::review_team_selection_prompt())
                 .with_market_weight(0.7)
                 .build()?;
@@ -621,7 +621,7 @@ pub async fn handle_implement_task(
 
             crate::introspection::log(&format!("Dispatching review round {} exactly...", iteration));
 
-            let mut sizer_client = crate::llm::fast_llm("diff_sizer").system_prompt("Determine the complexity of this git diff. If it contains only trivial text modifications (e.g. basic string swaps, comment changes), return 'Lite'. If it contains logic branches, algorithmic additions, or multi-file architectural transitions, return 'Strict'. Return only the word 'Lite' or 'Strict'.").build()?;
+            let mut sizer_client = crate::llm::fast_llm("diff_sizer", schema::TaskType::Validation).system_prompt("Determine the complexity of this git diff. If it contains only trivial text modifications (e.g. basic string swaps, comment changes), return 'Lite'. If it contains logic branches, algorithmic additions, or multi-file architectural transitions, return 'Strict'. Return only the word 'Lite' or 'Strict'.").build()?;
             let sizer_res = sizer_client.ask::<String>(&review_context).await.unwrap_or_else(|_| "Strict".to_string());
             let strictness_enum = if sizer_res.trim().eq_ignore_ascii_case("Lite") {
                 crate::pre_review::session::QuorumStrictness::Lite
@@ -643,7 +643,7 @@ pub async fn handle_implement_task(
                 )
                 .await?;
 
-            let mut synthesis_client = crate::llm::fast_llm("review_synthesis")
+            let mut synthesis_client = crate::llm::fast_llm("review_synthesis", schema::TaskType::Review)
                 .system_prompt(&crate::grind::prompts::review_synthesis_prompt(
                     &target_path,
                 ))
