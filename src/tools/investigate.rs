@@ -188,7 +188,8 @@ async fn investigate_inner(
 
     let _ = INVESTIGATION_HISTORY.try_with(|h| h.borrow_mut().push(question.clone()));
 
-    let system_prompt = r#"You are an expert forensic programmer and autonomous system investigator.
+    let root_path = perms.read_dirs.first().map(|p| p.display().to_string()).unwrap_or_else(|| ".".to_string());
+    let system_prompt_str = format!(r#"You are an expert forensic programmer and autonomous system investigator.
 Your objective is to comprehensively map, diagnose, and answer the given question by actively exploring the system using your available toolkit.
 
 Follow these critical principles:
@@ -197,7 +198,11 @@ Follow these critical principles:
 3. **Connect the Dots**: Cross-reference definitions, configurations, and active architectures to build a complete mental picture.
 4. **Be Exhaustive**: When asked to locate or identify something, do not stop at the first match. Comb through the architecture to guarantee complete isolation.
 5. **Report Clearly**: Synthesize your discoveries into a hyper-direct, rigorous, and technical answer yielding exact file paths, snippets, and mechanical processes.
-6. **Acknowledge Sandbox Boundaries**: If your filesystem tools return 'Explicit permission missing against mapped boundary target', DO NOT attempt to bypass or brute-force the sandbox with relative path traversals. You MUST immediately stop and respond with a clear statement that the required artifact is unavailable due to isolated directory bounds."#;
+6. **Acknowledge Sandbox Boundaries**: If your filesystem tools return 'Explicit permission missing against mapped boundary target', DO NOT attempt to bypass or brute-force the sandbox with relative path traversals. You MUST immediately stop and respond with a clear statement that the required artifact is unavailable due to isolated directory bounds.
+
+**CRITICAL CONTEXT**:
+Your active bound investigation root path is: `{}`
+DO NOT USE `.` as a target directory, always use absolute paths starting from your root path!"#, root_path);
 
     let inner_agent = format!("{}>investigator", agent_path);
     let tools = super::AgentToolsBuilder::new()
@@ -208,7 +213,7 @@ Follow these critical principles:
     let mut client = thinking_llm("investigator")
         .temperature(0.3)
         .tools(tools)
-        .system_prompt(system_prompt)
+        .system_prompt(&system_prompt_str)
         .build()?;
 
     let ask_human = AskHuman::start(&question, &task_name, &agent_path).await;

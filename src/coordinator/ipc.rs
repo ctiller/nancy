@@ -255,6 +255,7 @@ mod tests {
             let (tx_ready, _rx_ready) = tokio::sync::watch::channel::<u64>(0);
             let shared_tx_ready = Arc::new(tx_ready);
             let (tx_updates, mut _rx_updates) = tokio::sync::mpsc::unbounded_channel();
+            let gateway = Arc::new(crate::coordinator::llm_proxy::GatewayState::new());
             let ipc_state = IpcState {
                 tx_ready: shared_tx_ready.clone(),
                 tx_updates: Arc::new(tx_updates),
@@ -269,7 +270,7 @@ mod tests {
                 token_market: crate::coordinator::market::ArbitrationMarket::new(
                     crate::schema::coordinator_config::CoordinatorConfig::default(),
                 ),
-                gateway: Arc::new(crate::coordinator::llm_proxy::GatewayState::new()),
+                gateway: Arc::clone(&gateway),
                 tree_root: Arc::new(crate::introspection::IntrospectionTreeRoot::new()),
             };
 

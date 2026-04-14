@@ -89,12 +89,13 @@ impl Coordinator {
             };
 
         let tree_root = Arc::new(crate::introspection::IntrospectionTreeRoot::new());
+        let gateway = Arc::new(crate::coordinator::llm_proxy::GatewayState::new());
         let ipc_state = IpcState {
             tx_ready: shared_tx_ready.clone(),
             tx_updates: Arc::new(tx_updates),
             shared_identity: shared_identity.clone(),
             token_market: crate::coordinator::market::ArbitrationMarket::new(coord_config),
-            gateway: Arc::new(crate::coordinator::llm_proxy::GatewayState::new()),
+            gateway: Arc::clone(&gateway),
             tree_root: tree_root.clone(),
         };
 

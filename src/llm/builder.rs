@@ -227,18 +227,42 @@ impl LlmBuilder {
         })
     }
 
-    pub fn resolve_model(kind: &Kind, version: &Version) -> schema::LlmModel {
+    pub fn resolve_model(kind: &Kind, version: &Version) -> Vec<(schema::LlmModel, f32)> {
         match (kind, version) {
-            (Kind::Lite, Version::V2_5) => schema::LlmModel::Gemini25FlashLite,
-            (Kind::Lite, Version::V3_1) => schema::LlmModel::Gemini31FlashLitePreview,
-            (Kind::Fast, Version::V2_5) => schema::LlmModel::Gemini25Flash,
-            (Kind::Fast, Version::V3_1) => schema::LlmModel::Gemini30FlashPreview,
-            (Kind::Thinking, Version::V2_5) | (Kind::Flexible(_), Version::V2_5) => {
-                schema::LlmModel::Gemini25Pro
-            }
-            (Kind::Thinking, Version::V3_1) | (Kind::Flexible(_), Version::V3_1) => {
-                schema::LlmModel::Gemini31ProPreview
-            }
+            (Kind::Lite, Version::V2_5) => vec![
+                (schema::LlmModel::Gemini25FlashLite, 1.0),
+                (schema::LlmModel::Gemini31FlashLitePreview, 1.0)
+            ],
+            (Kind::Lite, Version::V3_1) => vec![
+                (schema::LlmModel::Gemini31FlashLitePreview, 1.0)
+            ],
+            (Kind::Fast, Version::V2_5) => vec![
+                (schema::LlmModel::Gemini25Flash, 1.0),
+                (schema::LlmModel::Gemini30FlashPreview, 1.0)
+            ],
+            (Kind::Fast, Version::V3_1) => vec![
+                (schema::LlmModel::Gemini30FlashPreview, 1.0)
+            ],
+            (Kind::Thinking, Version::V2_5) => vec![
+                (schema::LlmModel::Gemini25Pro, 1.0),
+                (schema::LlmModel::Gemini31ProPreview, 1.0),
+                (schema::LlmModel::Gemini25Flash, 0.01),
+                (schema::LlmModel::Gemini30FlashPreview, 0.01),
+            ],
+            (Kind::Thinking, Version::V3_1) => vec![
+                (schema::LlmModel::Gemini31ProPreview, 1.0),
+                (schema::LlmModel::Gemini30FlashPreview, 0.01),
+            ],
+            (Kind::Flexible(w), Version::V2_5) => vec![
+                (schema::LlmModel::Gemini25Pro, 1.0),
+                (schema::LlmModel::Gemini31ProPreview, 1.0),
+                (schema::LlmModel::Gemini25Flash, *w as f32),
+                (schema::LlmModel::Gemini30FlashPreview, *w as f32),
+            ],
+            (Kind::Flexible(w), Version::V3_1) => vec![
+                (schema::LlmModel::Gemini31ProPreview, 1.0),
+                (schema::LlmModel::Gemini30FlashPreview, *w as f32),
+            ],
         }
     }
 }
@@ -249,28 +273,33 @@ mod tests {
 
     #[test]
     fn test_resolve_model() {
+        let l_25 = LlmBuilder::resolve_model(&Kind::Lite, &Version::V2_5);
+        assert_eq!(l_25[0].0, schema::LlmModel::Gemini25FlashLite);
+        
+        let mut has_31 = false;
+        for c in l_25 {
+            if c.0 == schema::LlmModel::Gemini31FlashLitePreview { has_31 = true; }
+        }
+        assert!(has_31);
+
         assert_eq!(
-            LlmBuilder::resolve_model(&Kind::Lite, &Version::V2_5),
-            schema::LlmModel::Gemini25FlashLite
-        );
-        assert_eq!(
-            LlmBuilder::resolve_model(&Kind::Lite, &Version::V3_1),
+            LlmBuilder::resolve_model(&Kind::Lite, &Version::V3_1)[0].0,
             schema::LlmModel::Gemini31FlashLitePreview
         );
         assert_eq!(
-            LlmBuilder::resolve_model(&Kind::Fast, &Version::V2_5),
+            LlmBuilder::resolve_model(&Kind::Fast, &Version::V2_5)[0].0,
             schema::LlmModel::Gemini25Flash
         );
         assert_eq!(
-            LlmBuilder::resolve_model(&Kind::Fast, &Version::V3_1),
+            LlmBuilder::resolve_model(&Kind::Fast, &Version::V3_1)[0].0,
             schema::LlmModel::Gemini30FlashPreview
         );
         assert_eq!(
-            LlmBuilder::resolve_model(&Kind::Thinking, &Version::V2_5),
+            LlmBuilder::resolve_model(&Kind::Thinking, &Version::V2_5)[0].0,
             schema::LlmModel::Gemini25Pro
         );
         assert_eq!(
-            LlmBuilder::resolve_model(&Kind::Thinking, &Version::V3_1),
+            LlmBuilder::resolve_model(&Kind::Thinking, &Version::V3_1)[0].0,
             schema::LlmModel::Gemini31ProPreview
         );
     }

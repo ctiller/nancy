@@ -566,10 +566,21 @@ pub async fn handle_implement_task(
 
             let diff_text = crate::introspection::frame("get_diff", async {
                 let target_repo = crate::git::AsyncRepository::discover(target_path).await?;
-                let parent_oid = target_repo.revparse_single(&task_payload.parent_branch).await?;
-                let head_oid = target_repo.revparse_single("HEAD").await?;
+                
+                target_repo.add(vec![".".to_string()]).await?;
+                let current_head = target_repo.revparse_single("HEAD").await?;
+                let _ = target_repo.commit_tree(
+                    &format!("Implement {}", task_ref),
+                    "Nancy Orchestrator",
+                    "nancy@localhost",
+                    None,
+                    vec![current_head.0.clone()]
+                ).await;
 
-                let res = target_repo.diff_tree_to_tree(&parent_oid.0, &head_oid.0).await?;
+                let parent_oid = target_repo.revparse_single(&task_payload.parent_branch).await?;
+                let new_head_oid = target_repo.revparse_single("HEAD").await?;
+
+                let res = target_repo.diff_tree_to_tree(&parent_oid.0, &new_head_oid.0).await?;
                 Ok::<String, anyhow::Error>(res)
             }).await?;
 
@@ -598,7 +609,7 @@ pub async fn handle_implement_task(
             }
 
             let review_context = format!("Git Diff:\n{}", diff_text);
-            let focus_criteria = "Review the diff for runtime correctness and boundary logic. The scope revolves entirely around physical syntax and file modifications.";
+            let focus_criteria = "Review the diff for runtime correctness and boundary logic. The scope revolves entirely around physical syntax and file modifications.\nIf the Git Diff block is completely empty, you MUST return a vote of `changes_required` and state `No diff provided in prompt`.";
             let task_prompt = crate::pre_review::runner::reviewer_task_prompt(
                 1,
                 10 - iteration,

@@ -3,41 +3,12 @@ use axum::{
     response::{IntoResponse, sse::{Event, Sse}},
     Json,
 };
-use backoff::backoff::Backoff;
-use std::collections::HashMap;
-use std::sync::Arc;
-use tokio::sync::{Mutex, RwLock};
+// Removed backoff import here
 use crate::schema::ipc::{LlmRequest, LlmStreamChunk};
 use reqwest::StatusCode;
 
-#[derive(Clone, Copy, PartialEq, Debug)]
-pub enum HealthStateValue {
-    Healthy,
-    Unhealthy,
-    Recovering,
-}
-
-pub struct ModelHealth {
-    pub state_value: HealthStateValue,
-    pub backoff: backoff::ExponentialBackoff,
-    pub next_tx_ms: u64,
-    pub recovering_until_ms: u64,
-}
-
-impl Default for ModelHealth {
-    fn default() -> Self {
-        Self {
-            state_value: HealthStateValue::Healthy,
-            backoff: backoff::ExponentialBackoff::default(),
-            next_tx_ms: 0,
-            recovering_until_ms: 0,
-        }
-    }
-}
-
 pub struct GatewayState {
     pub reqwest_client: reqwest::Client,
-    pub models: RwLock<HashMap<String, Arc<Mutex<ModelHealth>>>>,
 }
 
 impl GatewayState {
@@ -48,21 +19,7 @@ impl GatewayState {
                 .pool_idle_timeout(std::time::Duration::from_secs(90))
                 .build()
                 .unwrap_or_default(),
-            models: RwLock::new(HashMap::new()),
         }
-    }
-
-    pub async fn get_model(&self, model_name: &str) -> Arc<Mutex<ModelHealth>> {
-        let read = self.models.read().await;
-        if let Some(m) = read.get(model_name) {
-            return m.clone();
-        }
-        drop(read);
-        let mut write = self.models.write().await;
-        write
-            .entry(model_name.to_string())
-            .or_insert_with(|| Arc::new(Mutex::new(ModelHealth::default())))
-            .clone()
     }
 }
 
@@ -103,34 +60,6 @@ pub async fn proxy_handler(
             let model = lease.granted_model.clone();
             crate::introspection::log(&format!("Auction granted lease for model: {:?}", model));
             let model_str = serde_json::to_value(&model).unwrap().as_str().unwrap().to_string();
-            let health_mutex = gateway.get_model(&model_str).await;
-
-    // Execution loop natively
-    let mut res = loop {
-        {
-            let mut health = health_mutex.lock().await;
-            let now = current_time_ms();
-
-            if health.state_value == HealthStateValue::Unhealthy && now >= health.next_tx_ms {
-                tracing::info!("Model {} organic backoff expired. Transitioning to Recovering natively.", model_str);
-                health.state_value = HealthStateValue::Recovering;
-                health.recovering_until_ms = now + 60_000;
-            }
-            if health.state_value == HealthStateValue::Recovering && now >= health.recovering_until_ms {
-                tracing::info!("Model {} organic recovery complete. Transitioning to Healthy natively.", model_str);
-                health.state_value = HealthStateValue::Healthy;
-                health.backoff.reset();
-            }
-
-            if now < health.next_tx_ms {
-                let wait_ms = health.next_tx_ms - now;
-                tokio::time::sleep(std::time::Duration::from_millis(wait_ms)).await;
-            }
-
-            if health.state_value == HealthStateValue::Recovering {
-                health.next_tx_ms = current_time_ms() + 1_500;
-            }
-        }
 
         let base_url = std::env::var("GEMINI_API_BASE_URL")
             .unwrap_or_else(|_| "https://generativelanguage.googleapis.com".to_string());
@@ -140,19 +69,14 @@ pub async fn proxy_handler(
         
         let egress_req = gateway.reqwest_client.post(&url).json(&payload.payload);
 
-        match egress_req.send().await {
+        let mut res = match egress_req.send().await {
             Ok(response) => {
                 let status = response.status();
                 if is_retryable_status(status.as_u16()) {
-                    let mut health = health_mutex.lock().await;
-                    let duration = health.backoff.next_backoff().unwrap_or(std::time::Duration::from_secs(10));
-                    health.state_value = HealthStateValue::Unhealthy;
-                    health.recovering_until_ms = 0;
-                    let now = current_time_ms();
-                    health.next_tx_ms = now + duration.as_millis() as u64;
-                    tracing::warn!("Model {} hit {}. Backing off proxy for {:?}", model_str, status, duration);
-                    crate::introspection::log(&format!("Proxy upstream HTTP {} hit. Backoff initiated loop.", status));
-                    continue;
+                    crate::coordinator::market::ArbitrationMarket::report_model_failure(&ipc_state.token_market, model.clone()).await;
+                    tracing::warn!("Model {} hit {}. Reported failure to market.", model_str, status);
+                    crate::introspection::log(&format!("Proxy upstream HTTP {} hit. Returning SERVICE_UNAVAILABLE natively.", status));
+                    return (StatusCode::SERVICE_UNAVAILABLE, "Upstream HTTP Error").into_response();
                 }
                 
                 if !status.is_success() {
@@ -161,24 +85,19 @@ pub async fn proxy_handler(
                     return (StatusCode::BAD_REQUEST, "Terminal LLM Error").into_response();
                 }
 
-                break response;
+                response
             }
             Err(e) => {
                 if e.is_timeout() || e.is_connect() {
-                    let mut health = health_mutex.lock().await;
-                    let duration = health.backoff.next_backoff().unwrap_or(std::time::Duration::from_secs(10));
-                    health.state_value = HealthStateValue::Unhealthy;
-                    health.recovering_until_ms = 0;
-                    let now = current_time_ms();
-                    health.next_tx_ms = now + duration.as_millis() as u64;
-                    tracing::warn!("Model {} hit connection error. Backing off proxy for {:?}", model_str, duration);
-                    continue;
+                    crate::coordinator::market::ArbitrationMarket::report_model_failure(&ipc_state.token_market, model.clone()).await;
+                    tracing::warn!("Model {} hit connection error: {}. Reported failure to market.", model_str, e);
+                    crate::introspection::log(&format!("Proxy upstream connection error. Returning SERVICE_UNAVAILABLE."));
+                    return (StatusCode::SERVICE_UNAVAILABLE, "Upstream Connection Error").into_response();
                 } else {
                     return (StatusCode::INTERNAL_SERVER_ERROR, "Proxy Internal Error").into_response();
                 }
             }
-        }
-    };
+        };
 
     // Construct natively streaming response
     crate::introspection::log(&format!("Establishing SSE stream internally recursively..."));

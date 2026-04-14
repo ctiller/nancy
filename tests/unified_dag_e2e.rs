@@ -330,6 +330,7 @@ async fn test_worktree_extermination_and_ledger_consistency() -> Result<()> {
     nancy::llm::mock::builder::MockChatBuilder::new()
         .respond("Implemented this nicely.") // Implementer
         .respond(r#"{"experts": ["MockReviewer"]}"#) // TeamSelection
+        .respond("Lite") // diff_sizer
         .respond(r#"{"vote": "approve", "agree_notes": "", "disagree_notes": ""}"#) // Review Output
         .commit();
 

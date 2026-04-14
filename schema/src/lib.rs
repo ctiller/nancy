@@ -217,7 +217,7 @@ impl std::fmt::Display for LlmModel {
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct ModelChoice {
     pub name: LlmModel,
-    pub bid_value: NanoCent,
+    pub bid_value: f32,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
@@ -255,6 +255,7 @@ pub struct Quotas {
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct ModelUsageStats {
+    pub status: String,
     pub total: UsageMetrics,
     pub active_quotas: Quotas,
     pub trailing_1m: UsageMetrics,

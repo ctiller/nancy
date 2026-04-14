@@ -8,6 +8,31 @@ use tokio::sync::{RwLock, oneshot};
 pub const TICK_TIME_SECS: u64 = 3;
 pub const LEASE_TIME_SECS: u64 = 12;
 
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum HealthStateValue {
+    Healthy,
+    Unhealthy,
+    Recovering,
+}
+
+pub struct ModelHealth {
+    pub state_value: HealthStateValue,
+    pub backoff: backoff::ExponentialBackoff,
+    pub next_tx_ms: u64,
+    pub recovering_until_ms: u64,
+}
+
+impl Default for ModelHealth {
+    fn default() -> Self {
+        Self {
+            state_value: HealthStateValue::Healthy,
+            backoff: backoff::ExponentialBackoff::default(),
+            next_tx_ms: 0,
+            recovering_until_ms: 0,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct AuctionBid {
     pub payload: LlmRequest,
@@ -52,6 +77,7 @@ pub struct ArbitrationMarket {
     pub subagent_costs: HashMap<String, schema::NanoCent>,
     pub budget_pool_nanocents: schema::NanoCent,
     pub config: CoordinatorConfig,
+    pub model_health: HashMap<schema::LlmModel, ModelHealth>,
 }
 
 pub type SharedArbitrationMarket = Arc<RwLock<ArbitrationMarket>>;
@@ -201,6 +227,7 @@ impl ArbitrationMarket {
             subagent_costs: HashMap::new(),
             budget_pool_nanocents: schema::NanoCent(initial_budget),
             config,
+            model_health: HashMap::new(),
         }));
 
         let m_clone = market.clone();
@@ -234,6 +261,20 @@ impl ArbitrationMarket {
         });
 
         rx
+    }
+
+    pub async fn report_model_failure(market: &SharedArbitrationMarket, model: schema::LlmModel) {
+        let mut lock = market.write().await;
+        use backoff::backoff::Backoff;
+        let entry = lock.model_health.entry(model).or_default();
+        let duration = entry.backoff.next_backoff().unwrap_or(std::time::Duration::from_secs(10));
+        entry.state_value = HealthStateValue::Unhealthy;
+        entry.recovering_until_ms = 0;
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
+        entry.next_tx_ms = now + duration.as_millis() as u64;
     }
 
     pub async fn record_consumption(
@@ -361,7 +402,14 @@ impl ArbitrationMarket {
         for (model, records) in &lock.consumption_history {
             let (expected_lease_cost, expected_lease_tokens, expected_lease_requests) =
                 Self::expected_lease_metrics_for(&lock, model);
+            let status_str = lock.model_health.get(model).map(|h| match h.state_value {
+                HealthStateValue::Healthy => "Healthy",
+                HealthStateValue::Unhealthy => "Unhealthy",
+                HealthStateValue::Recovering => "Recovering",
+            }).unwrap_or("Healthy").to_string();
+
             let mut stat = ModelUsageStats {
+                status: status_str,
                 total: UsageMetrics::default(),
                 active_quotas: lock
                     .active_quotas
@@ -410,9 +458,16 @@ impl ArbitrationMarket {
             if !per_model_stats.contains_key(model) {
                 let (expected_lease_cost, expected_lease_tokens, expected_lease_requests) =
                     Self::expected_lease_metrics_for(&lock, model);
+                let status_str = lock.model_health.get(model).map(|h| match h.state_value {
+                    HealthStateValue::Healthy => "Healthy",
+                    HealthStateValue::Unhealthy => "Unhealthy",
+                    HealthStateValue::Recovering => "Recovering",
+                }).unwrap_or("Healthy").to_string();
+
                 per_model_stats.insert(
                     model.clone(),
                     ModelUsageStats {
+                        status: status_str,
                         total: UsageMetrics::default(),
                         active_quotas: crate::schema::ipc::Quotas {
                             rpm: quota.rpm,
@@ -470,6 +525,21 @@ impl ArbitrationMarket {
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_secs();
+            let now_ms = now * 1000;
+
+            use backoff::backoff::Backoff;
+            for (model, health) in lock.model_health.iter_mut() {
+                if health.state_value == HealthStateValue::Unhealthy && now_ms >= health.next_tx_ms {
+                    tracing::info!("Model {:?} organic backoff expired. Transitioning to Recovering natively.", model);
+                    health.state_value = HealthStateValue::Recovering;
+                    health.recovering_until_ms = now_ms + 60_000;
+                }
+                if health.state_value == HealthStateValue::Recovering && now_ms >= health.recovering_until_ms {
+                    tracing::info!("Model {:?} organic recovery complete. Transitioning to Healthy natively.", model);
+                    health.state_value = HealthStateValue::Healthy;
+                    health.backoff.reset();
+                }
+            }
 
             // 1. Replenish quotas
             let models = schema::LlmModel::ALL;
@@ -532,7 +602,12 @@ impl ArbitrationMarket {
                 for (idx, req) in inflight_requests.iter().enumerate() {
                     if let Some(bid) = req {
                         for choice in &bid.payload.model_choices {
-                            let (_, expected_tokens, expected_requests) =
+                            let is_backoff = lock.model_health.get(&choice.name).map(|h| h.state_value != HealthStateValue::Healthy).unwrap_or(false);
+                            if is_backoff {
+                                continue;
+                            }
+
+                            let (expected_cost, expected_tokens, expected_requests) =
                                 Self::expected_lease_metrics_for(&lock, &choice.name);
 
                             let active = lock.active_quotas.entry(choice.name.clone()).or_default();
@@ -543,7 +618,7 @@ impl ArbitrationMarket {
 
                             // Purely declarative in Round 1
                             if rpm_ok && tpm_ok && rpd_ok {
-                                round_1_tickets.push((choice.bid_value, idx, choice.clone()));
+                                round_1_tickets.push((choice.bid_value, expected_cost, idx, choice.clone()));
                             }
                         }
                     }
@@ -553,17 +628,19 @@ impl ArbitrationMarket {
                     break;
                 }
 
-                // Round 2 - sort by value (fallback to oldest natively if bids tie identically)
+                // Round 2 - sort by value / cost ratio (fallback to oldest natively if bids tie identically)
                 round_1_tickets.sort_by(|a, b| {
-                    b.0.partial_cmp(&a.0)
+                    let a_ratio = (a.0 as f64) / (a.1.0 as f64).max(1.0);
+                    let b_ratio = (b.0 as f64) / (b.1.0 as f64).max(1.0);
+                    b_ratio.partial_cmp(&a_ratio)
                         .unwrap_or(std::cmp::Ordering::Equal)
-                        .then_with(|| a.1.cmp(&b.1))
+                        .then_with(|| a.2.cmp(&b.2))
                 });
 
                 let mut restart_round_1 = false;
 
                 // Round 3 - take most valuable until expected $ budget is < 0
-                for (_value, req_idx, choice) in round_1_tickets {
+                for (_value, _expected_cost, req_idx, choice) in round_1_tickets {
                     let Some(_bid_data): Option<&AuctionBid> = inflight_requests[req_idx].as_ref() else {
                         continue; // Reached if another choice from this same request previously satisfied it!
                     };
@@ -704,7 +781,10 @@ mod tests {
                 subagent_costs: HashMap::new(),
                 budget_pool_nanocents: schema::NanoCent(0),
                 config,
+                model_health: HashMap::new(),
             }));
+            
+            // Note: we don't spawn the loop natively in this test since we test quota logic algebraically directly
 
             tokio::runtime::Runtime::new().unwrap().block_on(async {
                 let mut lock = market.write().await;

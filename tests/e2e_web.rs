@@ -29,6 +29,7 @@ async fn test_e2e_web_grinder_list() {
     let loaded_identity = nancy::schema::identity_config::Identity::load(tmp.path())
         .await
         .unwrap();
+    let gateway = std::sync::Arc::new(nancy::coordinator::llm_proxy::GatewayState::new());
     let ipc_state = nancy::coordinator::ipc::IpcState {
         tx_ready: std::sync::Arc::new(tx_ready),
         tx_updates: std::sync::Arc::new(tx_updates),
@@ -36,7 +37,7 @@ async fn test_e2e_web_grinder_list() {
         token_market: nancy::coordinator::market::ArbitrationMarket::new(
             nancy::schema::coordinator_config::CoordinatorConfig::default(),
         ),
-        gateway: std::sync::Arc::new(nancy::coordinator::llm_proxy::GatewayState::new()),
+        gateway: std::sync::Arc::clone(&gateway),
         tree_root: std::sync::Arc::new(nancy::introspection::IntrospectionTreeRoot::new()),
     };
     let _handle = spawn_web_server(listener, ipc_state);
@@ -72,11 +73,15 @@ async fn test_e2e_web_grinder_list() {
 
     assert_eq!(
         statuses.len(),
-        4,
-        "Expected 3 provisioned grinders + 1 dreamer from identity.json"
+        5,
+        "Expected 3 provisioned grinders + 1 dreamer + 1 coordinator from identity.json"
     );
     for s in statuses {
-        assert!(!s.is_online, "Agent {} should be offline", s.did);
+        if s.did == "coordinator" {
+            assert!(s.is_online, "Agent coordinator should be online");
+        } else {
+            assert!(!s.is_online, "Agent {} should be offline", s.did);
+        }
     }
 }
 
@@ -125,7 +130,7 @@ async fn test_e2e_web_grinders_online() {
     // 6. Poll reqwest agent list until 4 agents (3 grinders + 1 dreamer) are officially recorded ONLINE dynamically natively
     let mut online_count = 0;
     let mut attempts = 0;
-    while online_count < 4 && attempts < 1000 {
+    while online_count < 5 && attempts < 1000 {
         let res = client
             .get(&url)
             .header("Accept", "application/json")
@@ -142,7 +147,7 @@ async fn test_e2e_web_grinders_online() {
         let statuses = parsed.grinders;
 
         online_count = statuses.iter().filter(|s| s.is_online).count();
-        if online_count < 4 {
+        if online_count < 5 {
             tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
             attempts += 1;
         } else {
@@ -151,8 +156,8 @@ async fn test_e2e_web_grinders_online() {
     }
 
     assert_eq!(
-        online_count, 4,
-        "Failed to observe 4 ONLINE Agents before timeout"
+        online_count, 5,
+        "Failed to observe 5 ONLINE Agents before timeout"
     );
 }
 

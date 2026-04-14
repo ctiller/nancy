@@ -351,7 +351,18 @@ impl LlmClient {
         } else {
             crate::llm::builder::Version::V3_1
         };
-        let model = crate::llm::builder::LlmBuilder::resolve_model(&self.kind, &version);
+        let choices_from_builder = crate::llm::builder::LlmBuilder::resolve_model(&self.kind, &version);
+
+        let priority_val = (self.task_priority)().await;
+        let k = priority_val * self.local_market_weight;
+
+        let mut choices = Vec::new();
+        for (model, weight_val) in choices_from_builder {
+            choices.push(crate::schema::ipc::ModelChoice {
+                name: model,
+                bid_value: (k as f32) * weight_val,
+            });
+        }
 
         let joined_sys = self.system_prompt.join("\n\n");
         let sys_prompt = if !joined_sys.is_empty() {
@@ -360,34 +371,7 @@ impl LlmClient {
             None
         };
 
-        let priority_val = (self.task_priority)().await;
-        let k = priority_val * self.local_market_weight;
-        let k_nanocents = schema::NanoCent((k * 100_000_000_000.0) as u64);
-
-        let choices = match self.kind {
-            crate::llm::builder::Kind::Flexible(weight) => {
-                let flash_model = crate::llm::builder::LlmBuilder::resolve_model(
-                    &crate::llm::builder::Kind::Fast,
-                    &version,
-                );
-                vec![
-                    crate::schema::ipc::ModelChoice {
-                        name: model.clone(), // pro
-                        bid_value: k_nanocents,
-                    },
-                    crate::schema::ipc::ModelChoice {
-                        name: flash_model,
-                        bid_value: schema::NanoCent((k * weight * 100_000_000_000.0) as u64),
-                    },
-                ]
-            }
-            _ => vec![crate::schema::ipc::ModelChoice {
-                name: model.clone(),
-                bid_value: k_nanocents,
-            }],
-        };
-
-        let mut gemini = Gemini::new(&self.api_key, model.to_string(), sys_prompt);
+        let mut gemini = Gemini::new(&self.api_key, choices[0].name.to_string(), sys_prompt);
         if let Some(temp) = self.temperature {
             gemini.set_generation_config()["temperature"] = serde_json::json!(temp);
         }

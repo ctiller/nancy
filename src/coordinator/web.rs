@@ -828,6 +828,7 @@ mod tests {
             private_key_hex: "pk".to_string(),
         };
         let id = crate::schema::identity_config::Identity::Dreamer(id_owner);
+        let gateway = std::sync::Arc::new(crate::coordinator::llm_proxy::GatewayState::new());
         let ipc = crate::coordinator::ipc::IpcState {
             tx_ready: std::sync::Arc::new(tx),
             tx_updates: std::sync::Arc::new(tx_updates),
@@ -835,7 +836,7 @@ mod tests {
             token_market: crate::coordinator::market::ArbitrationMarket::new(
                 crate::schema::coordinator_config::CoordinatorConfig::default(),
             ),
-            gateway: std::sync::Arc::new(crate::coordinator::llm_proxy::GatewayState::new()),
+            gateway: std::sync::Arc::clone(&gateway),
             tree_root: std::sync::Arc::new(crate::introspection::IntrospectionTreeRoot::new()),
         };
         let ext = axum::extract::Extension(ipc);
@@ -879,6 +880,7 @@ mod tests {
             private_key_hex: "pk".to_string(),
         };
         let id = crate::schema::identity_config::Identity::Dreamer(id_owner);
+        let gateway = std::sync::Arc::new(crate::coordinator::llm_proxy::GatewayState::new());
         let ipc = crate::coordinator::ipc::IpcState {
             tx_ready: std::sync::Arc::new(tx),
             tx_updates: std::sync::Arc::new(tx_updates),
@@ -886,7 +888,7 @@ mod tests {
             token_market: crate::coordinator::market::ArbitrationMarket::new(
                 crate::schema::coordinator_config::CoordinatorConfig::default(),
             ),
-            gateway: std::sync::Arc::new(crate::coordinator::llm_proxy::GatewayState::new()),
+            gateway: std::sync::Arc::clone(&gateway),
             tree_root: std::sync::Arc::new(crate::introspection::IntrospectionTreeRoot::new()),
         };
         let ext = axum::extract::Extension(ipc);

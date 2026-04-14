@@ -74,6 +74,7 @@ pub fn logs_view() -> Html {
                                     <thead>
                                         <tr style="border-bottom: 1px solid rgba(255,255,255,0.2);">
                                             <th style="padding: 10px;">{"Model"}</th>
+                                            <th style="padding: 10px;">{"Status"}</th>
                                             <th style="padding: 10px;">{"Quotas (RPM/TPM/RPD)"}</th>
                                             <th style="padding: 10px;">{"Expected Lease (Req/Tok/Cost)"}</th>
                                             <th style="padding: 10px;">{"1m (Tok/Req/$)"}</th>
@@ -94,6 +95,16 @@ pub fn logs_view() -> Html {
                                             html! {
                                             <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
                                                 <td style="padding: 10px; font-family: monospace;">{ model.to_string() }</td>
+                                                <td style="padding: 10px;">
+                                                    <span style={match stats.status.as_str() {
+                                                        "Healthy" => "color: #4caf50; font-weight: bold;",
+                                                        "Unhealthy" => "color: #f44336; font-weight: bold;",
+                                                        "Recovering" => "color: #ff9800; font-weight: bold;",
+                                                        _ => "color: var(--text-muted);"
+                                                    }}>
+                                                        {stats.status.clone()}
+                                                    </span>
+                                                </td>
                                                 <td style="padding: 10px;" >
                                                     { format!("{} / {} / {}",
                                                         stats.active_quotas.rpm.map(|v| format!("{:.0}", v)).unwrap_or_else(|| "Inf".to_string()),
@@ -135,7 +146,7 @@ pub fn logs_view() -> Html {
                                                 </div>
                                                 <div style="margin-top: 8px; font-size: 0.9em; font-family: monospace;">
                                                     { for bid.choices.iter().map(|choice| html! {
-                                                        <div>{ format!("{} @ ${:.2}", choice.name, choice.bid_value) }</div>
+                                                        <div>{ format!("{} @ {:.2}", choice.name, choice.bid_value) }</div>
                                                     })}
                                                 </div>
                                             </div>
