@@ -1,3 +1,17 @@
+// Copyright 2026 Craig Tiller
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
@@ -41,12 +55,20 @@ enum Commands {
 enum DebugCommands {
     /// Debug tasks assignments
     Tasks(DebugTasksArgs),
+    /// Debug evaluation output
+    Eval(DebugEvalArgs),
 }
 
 #[derive(clap::Args, Debug)]
 pub struct DebugTasksArgs {
     #[arg(short, long)]
     pub coord_did: String,
+}
+
+#[derive(clap::Args, Debug)]
+pub struct DebugEvalArgs {
+    #[arg(short, long)]
+    pub file: PathBuf,
 }
 
 #[derive(clap::Args, Debug)]
@@ -102,6 +124,9 @@ pub(crate) async fn execute_command(args: &Args, cwd: PathBuf) -> Result<()> {
         Commands::Debug { command } => match command {
             DebugCommands::Tasks(args) => {
                 nancy::commands::debug_tasks::debug_tasks(cwd, args.coord_did.clone()).await?;
+            }
+            DebugCommands::Eval(args) => {
+                nancy::commands::debug_eval::debug_eval(args.file.clone()).await?;
             }
         },
     }
