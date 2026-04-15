@@ -1546,3 +1546,5 @@ mod tests {
 }
 
 // DOCUMENTED_BY: [docs/adr/0030-unified-task-dag-orchestration.md]
+
+// DOCUMENTED_BY: [docs/adr/0035-planning-redux.md]

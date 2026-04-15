@@ -5,3 +5,5 @@
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
 cc 1e2ab45f307aed9d4f28e141ea3cca518f75f86035dc82a61732a598a70c1a8e # shrinks to initial_reqs = 0.0, budget = 10.0, daily_usd = 10.0
+
+<!-- UNIMPLEMENTED: "Documentation only or usage guide" -->

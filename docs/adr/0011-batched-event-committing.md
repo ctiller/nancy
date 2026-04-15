@@ -18,3 +18,5 @@ We switched to a lazily evaluated **Batched Sequence Buffer** constraint.
 - **Positive:** Massive log sequences (e.g., thousands of events) process in fractional milliseconds, seamlessly executing Git bounds check constraints.
 - **Positive:** We strictly minimized disk/object writes preserving performance targets without relying on file `.log` descriptors.
 - **Negative:** Panic handlers killing execution abruptly before scope closure `.drop()` execution can drop batched un-committed logs spanning the sequence execution window.
+
+<!-- IMPLEMENTED_BY: [src/events/writer.rs] -->

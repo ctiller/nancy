@@ -29,3 +29,5 @@ fn test_md_macro() {
     assert_eq!(great.bar, "adfslkjafd\nand some more\nlines of text\n");
     assert_eq!(great.body, "Some important docuemnt\n\nblah blah blah\n");
 }
+
+// DOCUMENTED_BY: [docs/adr/README.md]

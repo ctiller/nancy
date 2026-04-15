@@ -9,3 +9,5 @@ We refactored `TaskPayload` bounds explicitly mapping `preconditions` and `postc
 ## Consequences
 - Parallelization validation in loop logic inherently becomes decoupled, mapping natively 1:1 on LLM worker validation tasks reliably.
 - All evaluation structures (Mock harnesses and internal testing schemas) MUST serialize strict empty arrays `[]` instead of strings gracefully.
+
+<!-- UNIMPLEMENTED: "Conceptual decision or policy guideline" -->

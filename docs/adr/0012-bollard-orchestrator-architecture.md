@@ -18,3 +18,5 @@ We establish a formalized Multi-Agent architecture governed by **The Coordinator
 - Requires persistent local Docker daemons enabled when operating the `nancy run` execution pipeline.
 - Modifies `.nancy/identity.json` schemas globally requiring full compatibility updates across existing clusters.
 - Tests will require actual Docker orchestration configurations mimicking internal deployments to enforce adherence to ADR-0009 standard 100% LLVM coverage.
+
+<!-- IMPLEMENTED_BY: [src/coordinator/docker.rs] -->

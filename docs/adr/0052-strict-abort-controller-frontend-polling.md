@@ -13,3 +13,5 @@ We fundamentally integrated JavaScript browser-native `AbortController` function
 1. Resolves all HTTP/1.1 thread starvation limits immediately securely.
 2. Internal Rust Axum UDS proxy error pipelines gracefully trap `RecvError::Closed` and `SendError` silently instead of panicking natively upon remote drops.
 3. Memory profiles per viewing client compress natively, avoiding exponential loop recursion faults.
+
+<!-- UNIMPLEMENTED: "Conceptual decision or policy guideline" -->

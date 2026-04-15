@@ -15,4 +15,4 @@ Examples of BAD things you must reject:
 - Using hyped, bleeding-edge tech stacks for simple, solved problems.
 - Taking days to implement theoretical scaling limits when today's traffic rounds to zero.
 
-<!-- DOCUMENTED_BY: [docs/adr/0028-agentic-perona-registry.md] -->
+<!-- DOCUMENTED_BY: [docs/adr/0028-agentic-persona-registry.md] -->

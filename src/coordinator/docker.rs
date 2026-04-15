@@ -593,3 +593,7 @@ impl Drop for DockerOrchestrator {
 }
 
 // DOCUMENTED_BY: [docs/adr/0040-strict-docker-sandboxing.md]
+
+// DOCUMENTED_BY: [docs/adr/0012-bollard-orchestrator-architecture.md]
+
+// DOCUMENTED_BY: [docs/adr/0014-environment-configuration-and-secrets.md]

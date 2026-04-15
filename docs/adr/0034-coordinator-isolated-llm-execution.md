@@ -19,3 +19,5 @@ LLMs should only be executed within Grinder instances running in isolated enviro
 - **Strict Boundary**: Any implementation adding LLM client dependencies (`src/llm::*`) directly into the `src/commands/coordinator.rs` or `src/coordinator/` module explicitly violates core architecture and must be rejected.
 - **Dedicated Task Actions**: Process steps requiring LLM interaction must be dispatched as autonomous discrete tasks (i.e. `TaskAction::Plan` instead of being handled implicitly).
 - **Execution Consistency**: Grinder nodes remain the unified entry point for LLM interactions. This ensures standard security guardrails, filesystem staging (e.g. detached worktrees), tool invocation binding, and system determinism uniformly applies to all LLM requests.
+
+<!-- UNIMPLEMENTED: "Policy restriction or strategic preference" -->

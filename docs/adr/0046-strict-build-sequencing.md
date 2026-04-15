@@ -22,3 +22,5 @@ This perfectly stalls the backend compiler and macro execution indefinitely unti
 - We can flawlessly resume executing `include_bytes!()` macro evaluation within the binary at pure compile-time.
 - Local developers testing builds must explicitly route their invocations via `./build.sh` rather than natively firing bare `cargo leptos build` to guarantee compilation consistency.
 - Any CI workflows testing production bundles must sequentially isolate frontend generation.
+
+<!-- UNIMPLEMENTED: "Conceptual decision or policy guideline" -->

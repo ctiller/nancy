@@ -11,3 +11,5 @@ description: Use lightweight LLMs recursively to summarize active grinder status
 - The `rollup` is seamlessly transported across the UDS proxies to the Yew frontend.
 - Increases minimal ambient token burn during deep operations, justifying the requirement to exclusively use `fast_llm()` builders.
 - Provides an extremely fast mechanism to understand agent progress without analyzing raw API payloads manually.
+
+<!-- UNIMPLEMENTED: "Conceptual decision or policy guideline" -->

@@ -17,3 +17,5 @@ Furthermore, if an agent is forcefully dropped, there was no native structural m
 - **Prevented Deadlocks**: Review sessions are structurally blocked by an immutable boundary that ensures even highly adversarial schema definitions or loops cannot stall system responses.
 - **Improved Context Flow**: The `SystemHeaderTemplate` (via `askama`) dynamically feeds runtime contexts symmetrically natively tracking the time.
 - By injecting `__system_notice__` directly natively into serialized tool call outputs, any active subagent implicitly realizes the 5-minute deadline automatically immediately natively within the identical schema contract boundary.
+
+<!-- UNIMPLEMENTED: "Conceptual decision or policy guideline" -->

@@ -79,3 +79,5 @@ This directory contains the documented architectural and design decisions for Na
 * [0074: Leverage External Crates Over Self-Implementation](0074-leverage-external-crates.md) - Policies enforcing the use of established third-party dependencies natively structurally to minimize testing and maintenance burdens.
 * [0075: Pull-Based Task Assignments via UDS IPC](0075-pull-based-task-assignments-via-uds-ipc.md) - Transitions assignment ledger creation gracefully migrating natively statically binding UDS boundaries via explicit local index resolutions natively dynamically structurally preserving mapping organically.
 * [0076: Linked Context Microformat (xlink)](0076-xlink-microformat.md) - Enforces codebase-wide link maintenance via text mapping microformats cleanly.
+
+<!-- IMPLEMENTED_BY: [src/dreamer/mod.rs, web/tests/repo_tests.rs, src/debug/mod.rs, llm-macros/tests/md_test.rs, build.rs] -->

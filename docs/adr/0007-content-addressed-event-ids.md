@@ -17,3 +17,5 @@ The fingerprint is dynamically added as the `id` string inside the final JSON `E
 - **Positive:** Events are mathematically addressed by their literal state context ensuring integrity checking across transports.
 - **Positive:** A uniform reference standard allows graph DAG relationships and relational event targeting universally across the system.
 - **Negative:** Validating an event hash mandates strict JSON canonical reserialization of the wrapped object fields, creating minor hurdles for strict parsing across different language targets.
+
+<!-- IMPLEMENTED_BY: [src/events/writer.rs] -->

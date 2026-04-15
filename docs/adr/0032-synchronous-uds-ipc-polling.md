@@ -25,3 +25,5 @@ This means a Grinder's HTTP request will "hang" until the Coordinator actually f
 - **Better Synchronization**: Grinders now know for a fact that if they get a success response from `/updates-ready`, the Coordinator has fully processed their completed tasks.
 - **Slightly Slower Requests**: Grinders will experience a slight delay on their HTTP requests because they are waiting for the Coordinator's loop to finish reading the data. Tools talking to the Coordinator need to be okay with this brief wait.
 - **Fewer Bugs**: This eliminates race conditions. We no longer have to worry about a Grinder racing ahead of the Coordinator's data processing.
+
+<!-- UNIMPLEMENTED: "Deprecated/Superseded by newer architecture" -->

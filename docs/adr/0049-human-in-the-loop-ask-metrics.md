@@ -14,3 +14,5 @@ Agents automatically enter a long-polling boundary, pausing inference safely unt
 1. Agents will poll indefinitely or wait securely, lowering execution bounds.
 2. Web interfaces (`AppView`) inherently assume the obligation to detect `Ask` payloads dynamically and pulse/alert human operators visually.
 3. Tests and orchestration loops must support or explicitly skip human delays via mocking mechanisms `NANCY_HUMAN_DID` constraints.
+
+<!-- UNIMPLEMENTED: "Conceptual decision or policy guideline" -->

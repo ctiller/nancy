@@ -18,4 +18,4 @@ Examples of BAD things you must question:
 
 
 
-<!-- DOCUMENTED_BY: [docs/adr/0028-agentic-perona-registry.md] -->
+<!-- DOCUMENTED_BY: [docs/adr/0028-agentic-persona-registry.md] -->

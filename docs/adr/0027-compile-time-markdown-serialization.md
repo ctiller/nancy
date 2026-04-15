@@ -19,3 +19,5 @@ We implemented a pair of procedural macros within the `llm-macros` crate to dese
 - **`Option<T>` Fallbacks**: The `#[md_defined]` compiler statically assesses schemas mapped over `Option<...>` syntax or mismatched assignments to safely build a native `const __MD_DEFAULT` representation for the struct. Missing data implicitly executes across `..#struct::__MD_DEFAULT` to support robust, zero-allocation Optional struct features completely.
 - **Custom Body Target Fields**: The `include_md!` macro supports dynamic destination fields mapping `include_md!(Struct, "file.md", arbitrary_field)` out of the box when standard `body` terminology isn't preferred.
 - We utilize `serde` and `serde_yaml` as local build dependencies inside the `llm-macros` procedural parsing pipeline to achieve robust, nested, and multiline frontmatter YAML extraction seamlessly without penalizing the final application's production runtime binary size.
+
+<!-- UNIMPLEMENTED: "Conceptual decision or policy guideline" -->

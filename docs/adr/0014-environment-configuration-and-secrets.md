@@ -22,3 +22,5 @@ Additionally, when `nancy run` provisions execution environments using `bollard`
 - Developers are now required to maintain local `.env` bindings mirroring API credentials.
 - Grinder containers strictly load explicit variables parsed exclusively through `build_worker_env_vars`. 
 - Our coverage metrics accurately map multi-state environments perfectly leveraging sealed concurrent thread locks.
+
+<!-- IMPLEMENTED_BY: [src/coordinator/docker.rs] -->

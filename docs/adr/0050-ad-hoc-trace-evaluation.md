@@ -13,3 +13,5 @@ We completely deleted `src/events/logger.rs` and the legacy `trace_tx` structs n
 1. Background and unit test routines easily spin up parallel operations without singleton channel intersections.
 2. Agents effectively must securely manage or explicitly mask `NANCY_NO_TRACE_EVENTS=1` if bypassing log propagation for pure dry-runs.
 3. `Identity` definitions must be dynamically reconstructed ad-hoc based on contextual worker namespaces structurally, avoiding legacy pipeline passing bottlenecks.
+
+<!-- UNIMPLEMENTED: "Conceptual decision or policy guideline" -->

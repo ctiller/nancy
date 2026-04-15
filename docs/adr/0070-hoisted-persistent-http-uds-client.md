@@ -22,3 +22,5 @@ All UDS requests bounded safely to the Coordinator must statically retrieve path
 - HTTP/2 multiplexing guarantees apply automatically comprehensively bypassing pipeline reconstruction delays dynamically across boundaries.
 - Reallocating `reqwest::Client` boundaries across abstractions (such as native tools or heavily decoupled LLM evaluation boundaries) strictly enforces `get_coordinator_client...` retrievals gracefully without relying on injected `fn` parameter references dynamically structurally.
 - Explicit lifecycle closures apply transparently (i.e. shutting the socket strictly halts processes).
+
+<!-- UNIMPLEMENTED: "Conceptual decision or policy guideline" -->

@@ -477,3 +477,7 @@ pub async fn run_agent<P: AsRef<Path>, Processor: AgentTaskProcessor>(
 }
 
 // DOCUMENTED_BY: [docs/adr/0030-unified-task-dag-orchestration.md]
+
+// DOCUMENTED_BY: [docs/adr/0038-grinder-introspection-architecture.md]
+
+// DOCUMENTED_BY: [docs/adr/0041-deterministic-shutdown-notification.md]

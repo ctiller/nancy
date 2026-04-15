@@ -73,3 +73,5 @@ pub enum EventPayload {
 }
 
 // DOCUMENTED_BY: [docs/adr/0005-schema-registry.md]
+
+// DOCUMENTED_BY: [docs/adr/0025-git-native-eval-tracing.md]

@@ -1,2 +1,0 @@
-
-<!-- IMPLEMENTED_BY: [src/personas/mod.rs, src/personas/a11y_expert.md, src/personas/devils_advocate.md, src/personas/devops_sre.md, src/personas/historian.md, src/personas/ideas_man.md, src/personas/junior_developer.md, src/personas/pedant.md, src/personas/performance_expert.md, src/personas/pragmatist.md, src/personas/product_manager.md, src/personas/project_expert.md, src/personas/security_expert.md, src/personas/senior_architect.md, src/personas/staff_writer.md, src/personas/team_player.md, src/personas/testing_expert.md, src/personas/ux_expert.md] -->

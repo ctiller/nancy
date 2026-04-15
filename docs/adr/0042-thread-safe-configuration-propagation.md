@@ -19,3 +19,5 @@ Concurrently, we introduced the cryptographic abstraction `DidOwner::generate()`
 - The Coordinator is now fundamentally safe against filesystem data cache delays and implicitly reads the guaranteed latest structural bounds on every heartbeat.
 - The Axum endpoints safely block identical configuration generation natively without file-based collisions.
 - All future `Identity` structural manipulation MUST proxy through the `RwLock` securely, ensuring thread-safe data flow organically.
+
+<!-- UNIMPLEMENTED: "Conceptual decision or policy guideline" -->

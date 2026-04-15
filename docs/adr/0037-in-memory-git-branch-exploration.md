@@ -25,3 +25,5 @@ The UI reactivity system (via `leptos`) now preserves an active branch selection
 1. **State Isolation**: The UI dashboard now operates entirely isolated from the user's filesystem context, avoiding all lock collisions and modification errors during task evaluation.
 2. **Immutable Navigation**: Users can no longer use the dashboard to accidentally overwrite unstaged tracking files since there is no `git checkout` call.
 3. **Rust Type Saftey**: `repo.rs` server methods must strictly decouple native C library types (`git2::Repository`) from macro evaluation during target `wasm32-unknown-unknown` compilations via `cfg_if` and `#[cfg(feature = "ssr")]` function boundaries.
+
+<!-- UNIMPLEMENTED: "Conceptual decision or policy guideline" -->

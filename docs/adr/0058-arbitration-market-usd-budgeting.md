@@ -23,3 +23,5 @@ We have replaced the `TokenMarket` with a robust `ArbitrationMarket` in `src/coo
 - **Robust Cost Isolation**: An agent or process cannot rapidly overrun the USD budget because the pool strictly accumulates across bounded intervals (capped at 1 hour of spend).
 - **Accurate Financial Granularity**: Front-end telemetry dashboards now represent `UsageMetrics` tracking literal cost instead of abstract "consumed tokens".
 - **IPC Protocol Refactor**: The previous `/consumed-tokens` endpoint is natively deprecated in favor of `/llm-usage` which reports segregated prompt and candidate tokens securely.
+
+<!-- UNIMPLEMENTED: "Conceptual decision or policy guideline" -->

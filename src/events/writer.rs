@@ -476,3 +476,9 @@ mod tests {
 }
 
 // DOCUMENTED_BY: [docs/adr/0006-events-library.md]
+
+// DOCUMENTED_BY: [docs/adr/0007-content-addressed-event-ids.md]
+
+// DOCUMENTED_BY: [docs/adr/0010-native-git-orphaned-branch-log-storage.md]
+
+// DOCUMENTED_BY: [docs/adr/0011-batched-event-committing.md]

@@ -12,3 +12,5 @@ We refactored `coordinator/web.rs` natively discarding deep macro limits, explic
 ## Consequences
 1. Compiler stability implicitly guaranteed securely over rapidly expanding UI architectures.
 2. The UI must be cleanly baked structurally per exact URL definitions mechanically without relying on recursive glob boundaries implicitly natively.
+
+<!-- UNIMPLEMENTED: "Conceptual decision or policy guideline" -->

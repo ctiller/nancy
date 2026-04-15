@@ -12,3 +12,5 @@ We appended `auto_remove: true` into the host-configuration constraints explicit
 ## Consequences
 1. Docker hosts gracefully maintain healthy storage sizes natively avoiding node exhaustion safely.
 2. Standard out traces correctly map to bounded local files mechanisms `logs/` organically rather than requiring `docker logs` CLI executions cleanly preventing diagnostic losses safely.
+
+<!-- UNIMPLEMENTED: "Conceptual decision or policy guideline" -->

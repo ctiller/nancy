@@ -1,15 +1,18 @@
 # 0071: NanoCent Integer Math
 
 ## Context
-The LLM cost accounting system, including internal APIs and the Arbitration Market schemas, utilized `cost_usd: f64` natively for calculating tracking and spending metrics. Due to the scale of high-precision calculations inherent when dealing with token mapping (fractions of a cent per million tokens), the `f64` representation risked floating-point accumulation rounding errors natively, deterministic mismatches structurally between agents checking equivalent states, and awkward serialization bounds in testing logic strictly seamlessly.
+The LLM cost accounting system used `f64` for calculations. Dealing with token costs (fractions of a cent) using floating-point numbers risks accumulation errors and non-deterministic results across different systems.
 
 ## Decision
-We refactored all internal accounting representations away from `f64` into a custom, strongly-typed tuple struct natively: `schema::NanoCent(pub u64)`.
-This wrapper guarantees overflow checking, explicit `u64` bounded math (`saturating_add`, `saturating_sub`), strictly deterministic budget boundaries safely internally natively, and structural mapping transparency securely cleanly cleanly across the IPC bus.
+We refactored accounting to use a custom tuple struct: `schema::NanoCent(pub u64)`.
+This wrapper uses integer math with overflow checks (`saturating_add`, `saturating_sub`), ensuring strict determinism.
 
-The only external `f64` mapping maintained is the CLI config's `daily_budget_usd`, which strictly translates organically immediately into NanoCents on application map initialization natively efficiently smoothly gracefully securely bounding seamlessly across the network mapping directly perfectly safely cleanly natively.
+The CLI configuration accepts `daily_budget_usd` as `f64`, which is immediately converted to `NanoCent` internally.
 
 ## Consequences
-- Testing boundary bounds gracefully cleanly evaluated.
-- Any future logic assigning or recording costs must interface natively naturally strongly typed `schema::NanoCent` structural instances properly cleanly organically strictly.
-- Frontend rendering must securely explicitly convert `cost_nanocents.0 as f64 / 100_000_000_000.0` securely formatting safely explicitly organically structurally locally purely dynamically strictly seamlessly effectively mapping successfully reliably directly correctly safely organically!
+- **Precision**: Eliminates floating-point rounding errors.
+- **Strict Typing**: Code must use `NanoCent` for cost operations.
+- **Explicit Conversion**: Conversions for display or external APIs are handled explicitly.
+
+<!-- IMPLEMENTED_BY: [src/coordinator/market.rs] -->
+

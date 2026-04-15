@@ -73,6 +73,4 @@ pub async fn run_add_documented_by(cwd: PathBuf, source: PathBuf, doc: PathBuf) 
     run_add_implemented_by(cwd, doc, source).await
 }
 
-// IMPLEMENTED_BY: [source]
-
-// DOCUMENTED_BY: [doc, docs/adr/0076-xlink-microformat.md]
+// DOCUMENTED_BY: [docs/adr/0076-xlink-microformat.md]

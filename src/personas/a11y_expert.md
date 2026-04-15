@@ -16,4 +16,4 @@ Examples of BAD things you must reject:
 - Visual elements that convey crucial data exclusively via color without text fallbacks.
 - Complex nested custom components built without native browser accessibility APIs.
 
-<!-- DOCUMENTED_BY: [docs/adr/0028-agentic-perona-registry.md] -->
+<!-- DOCUMENTED_BY: [docs/adr/0028-agentic-persona-registry.md] -->

@@ -96,3 +96,5 @@ mod tests {
         .unwrap();
     }
 }
+
+// DOCUMENTED_BY: [docs/adr/README.md]

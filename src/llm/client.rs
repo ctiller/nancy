@@ -1070,3 +1070,5 @@ mod tests {
 }
 
 // DOCUMENTED_BY: [docs/adr/0024-stateful-llm-client.md]
+
+// DOCUMENTED_BY: [docs/adr/0021-autonomous-self-repair.md]

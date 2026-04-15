@@ -8,3 +8,5 @@
 3. The Reviewer relies on the `ProofOfWork` output map instead of duplicating shell executions recursively, accelerating the quorum evaluation cycle drastically.
 
 *Caveat:* We must be careful to distinguish between test commands (read-only verification blocks) and mutation commands (e.g., `npm i`, `npm run build`), which may silently alter the state tree before tests execute. We should only capture the command trace leading immediately up to the successful return loop.
+
+<!-- UNIMPLEMENTED: "Documentation only or usage guide" -->

@@ -1031,3 +1031,5 @@ mod tests {
 }
 
 // DOCUMENTED_BY: [docs/adr/0057-token-arbitration-spot-market.md]
+
+// DOCUMENTED_BY: [docs/adr/0071-nanocent-integer-math.md]

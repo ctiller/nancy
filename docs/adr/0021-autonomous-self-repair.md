@@ -14,3 +14,5 @@ We've introduced autonomous **Self-Repair** inside the `LlmClient` task processi
 - Requires continuous dynamic loop parsing (a simple `loop` trapping `gemini.ask`). 
 - Resolves syntax mismatch and hallucination bottlenecks seamlessly via transparent AI self-correction mappings.
 - Avoids strict crashing for common casing mismatches, relying strictly on Agent loop closures safely resolving backoffs organically.
+
+<!-- IMPLEMENTED_BY: [src/llm/client.rs] -->

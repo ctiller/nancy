@@ -16,3 +16,5 @@ The primary "cost" of this paradigm is an expanded `Cargo.lock` binary footprint
 
 ## Consequences
 Agents must first search for established, high-quality dependencies to fulfill logic requests cleanly. Review sequences must prioritize verifying whether native utilities could be replaced safely gracefully.
+
+<!-- UNIMPLEMENTED: "Policy restriction or strategic preference" -->

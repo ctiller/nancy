@@ -67,3 +67,5 @@ Grinder nodes report status to the Coordinator via local Unix Domain Sockets (UD
 If a Review validation step continuously fails:
 - Check that the `ReviewSession` logic properly extracted the correct diff payload via `generate_diff`. 
 - Ensure that mock Review tools (e.g. `review_coordinator`, `review_synthesis`) format valid JSON outputs explicitly matching `TeamSelectionPayload` and `ReviewReportPayload` schemas, as defined in `execute_task.rs`.
+
+<!-- UNIMPLEMENTED: "Documentation only or usage guide" -->

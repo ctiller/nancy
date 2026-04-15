@@ -15,3 +15,5 @@ We refactored the task registry decoupling planning abstractions from atomic exe
 ## Consequences
 - The DAG is heavily unbound from strict single-variant structures allowing diverse assignment types mapped cleanly under identical completion scopes.
 - `grind.rs` (workers) properly log structured `AssignmentComplete` records indexing the coordinator's event ID back sequentially rather than generic tasks identifiers securing distributed states without collision.
+
+<!-- UNIMPLEMENTED: "Deprecated/Superseded by newer architecture" -->

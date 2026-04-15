@@ -15,3 +15,5 @@ The Coordinator now hosts UDS HTTP routes (`/ready-for-poll`, `/shutdown-request
 
 ## Consequences
 Evaluators, orchestration nodes, and mocked integration tests no longer endure synchronization deadlocks or race conditions. Distributed node synchronization executes cleanly, driven by near-zero latency event notifications over the local socket, which greatly simplifies the orchestration logic.
+
+<!-- UNIMPLEMENTED: "Deprecated/Superseded by newer architecture" -->

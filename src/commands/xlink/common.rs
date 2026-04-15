@@ -132,3 +132,5 @@ pub fn remove_tag(path: &PathBuf, tag: &str, target: &str) -> Result<()> {
     }
     Ok(())
 }
+
+// DOCUMENTED_BY: [docs/adr/0076-xlink-microformat.md]

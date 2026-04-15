@@ -20,3 +20,5 @@ We mandate a stateless approach to crash recovery governed directly mathematical
 ## Consequences
 - The `.git` index acts universally as the sole source of truth natively housing agent operations, telemetry payloads cleanly through `AgentCrashReport`, and blob logs mapping synchronously over explicit log identifiers.
 - The `Coordinator` backend serves incident blob strings on-the-fly dynamically via `/api/incidents` without requiring external metrics services.
+
+<!-- UNIMPLEMENTED: "Conceptual decision or policy guideline" -->

@@ -16,3 +16,5 @@ We migrate the system from stateless broadcasting to state-tracked Long Polling 
 
 * **Absolute Deadlock Immunity**: Grinder routines cannot miss native IPC events safely. Even if local HTTP execution lags locally naturally behind native fast Coordinator filesystem evaluations securely, the watch state captures the exact differential smoothly safely seamlessly organically.
 * **Deterministic Synchronicity**: Eliminates arbitrary loop timeouts and polling latency, optimizing computational profiles effectively.
+
+<!-- IMPLEMENTED_BY: [src/coordinator/ipc.rs] -->

@@ -13,3 +13,5 @@ The Coordinator's own internal web proxy routes directly map web requests from t
 - Local introspection traffic never transverses standard HTTP network layers or polls git ledgers.
 - Grinder bounds must reliably scrub their internal socket files (`.nancy/grinder-<did>.sock`) aggressively upon graceful shutdown and startup routines, to avoid dangling socket failures.
 - Web proxies mapping onto `.nancy/grinder-<did>.sock` requests must execute cleanly.
+
+<!-- IMPLEMENTED_BY: [src/agent.rs] -->

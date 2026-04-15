@@ -7,3 +7,5 @@ bar: |
 Some important docuemnt
 
 blah blah blah
+
+<!-- UNIMPLEMENTED: "Documentation only or usage guide" -->

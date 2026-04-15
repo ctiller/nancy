@@ -20,3 +20,5 @@ On the server, we use `tokio::sync::watch` primitives (`watch::Sender` / `watch:
 - Single HTTP requests block peacefully in memory indefinitely until a state mutation safely fulfills them, effectively mimicking WebSocket latency perfectly over simple HTTP boundaries.
 - Resolves all synchronization deadlocks inherently. If events fire while a client request is dropped/reconnecting, the underlying version counter natively de-synchronizes ensuring the client's next loop yields the newest data immediately tracking.
 - Clients explicitly mandate mechanisms such as Javascript `AbortController` or robust `reqwest` timeout configurations allowing reliable retries successfully routing safe aborts.
+
+<!-- UNIMPLEMENTED: "Conceptual decision or policy guideline" -->

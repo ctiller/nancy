@@ -14,3 +14,5 @@ During the recent refinement of the `CoordinatorAssignmentPayload` execution tra
 - The event ledger drops unsupported query payloads, tightening the schema surface.
 - `EventPayload::Plan` restores the ability to trace generated plans historically through the ledger before they translate into granular execution directives.
 - Required updating strict scoped testing modules (reintegrating `DidOwner` imports specifically) to mechanically adhere to the project's strict 100% LLVM coverage requirements on the newly restricted registry structure.
+
+<!-- UNIMPLEMENTED: "Deprecated/Superseded by newer architecture" -->

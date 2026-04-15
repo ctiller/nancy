@@ -9,3 +9,5 @@ We established a multi-root tree architecture via `IntrospectionTreeRoot`. Core 
 ## Consequences
 - Synchronous and asynchronous execution threads MUST inject and bridge `IntrospectionContext` explicitly in their actor initialization message-passing schemas (e.g. `GitRequestEnvelope` capturing `IntrospectionContext`) to preserve span integrity.
 - Web UI clients natively observe distinct parallel task execution traces cleanly.
+
+<!-- UNIMPLEMENTED: "Conceptual decision or policy guideline" -->

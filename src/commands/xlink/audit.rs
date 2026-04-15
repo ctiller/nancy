@@ -26,6 +26,7 @@ struct XlinkData {
     deprecates: Vec<String>,
     deprecated_by: Vec<String>,
     see_also: Vec<String>,
+    unimplemented: Option<String>,
 }
 
 fn extract_tags(content: &str) -> XlinkData {
@@ -56,6 +57,11 @@ fn extract_tags(content: &str) -> XlinkData {
             "SEE_ALSO" => data.see_also.extend(paths),
             _ => {}
         }
+    }
+
+    let unimp_re = Regex::new(r#"UNIMPLEMENTED:\s*"(.*?)""#).unwrap();
+    if let Some(cap) = unimp_re.captures(content) {
+        data.unimplemented = Some(cap.get(1).unwrap().as_str().to_string());
     }
 
     data
@@ -114,8 +120,11 @@ pub async fn run(cwd: PathBuf) -> Result<()> {
         let is_source = is_persona || (!is_doc && (file.ends_with(".rs") || file.ends_with(".js") || file.ends_with(".html")));
 
         if is_doc {
-            if data.implemented_by.is_empty() {
-                errors.push(format!("Documentation {} missing IMPLEMENTED_BY tag", file));
+            if data.implemented_by.is_empty() && data.unimplemented.is_none() {
+                errors.push(format!("Documentation {} missing IMPLEMENTED_BY or UNIMPLEMENTED tag", file));
+            }
+            if data.implemented_by.contains(&"none".to_string()) {
+                errors.push(format!("Documentation {} IMPLEMENTED_BY tag cannot be 'none'", file));
             }
         }
 
@@ -189,15 +198,15 @@ mod tests {
 
     #[test]
     fn test_extract_tags() {
-        let content = r#"
+        let content = format!(r#"
         /*
-        DOCUMENTED_BY: [
+        {}: [
             foo/bar.md,
             baz.md
         ]
-        IMPLEMENTED_BY: [none]
+        {}: [none]
         */
-        "#;
+        "#, "DOCUMENTED_BY", "IMPLEMENTED_BY");
         let data = extract_tags(content);
         assert_eq!(data.documented_by, vec!["foo/bar.md", "baz.md"]);
         assert_eq!(data.implemented_by, vec!["none"]);

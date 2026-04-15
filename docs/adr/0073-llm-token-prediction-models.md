@@ -13,3 +13,5 @@ We resolve token variance by introducing payload inspection and machine-learning
 
 ## Consequences
 Every LLM instantiation now formally demands a `TaskType` boundary mapping globally. The coordinator incorporates `smartcore` to fulfill ML dependencies over internal state organically. Expected token budgeting effectively limits resource exhaustion structurally seamlessly.
+
+<!-- UNIMPLEMENTED: "Conceptual decision or policy guideline" -->

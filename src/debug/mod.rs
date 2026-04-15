@@ -13,3 +13,5 @@
 // limitations under the License.
 
 pub mod test_repo;
+
+// DOCUMENTED_BY: [docs/adr/README.md]

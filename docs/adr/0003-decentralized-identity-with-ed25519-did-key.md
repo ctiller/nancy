@@ -20,3 +20,5 @@ During `nancy init`, a new identity is generated automatically.
 
 - **Positive:** Local identities are offline-first, highly secure (Ed25519), and can trivially conform to W3C Decentralized Identifier standards via the `did:key` resolution rules.
 - **Negative:** Exposing the raw `private_key_hex` in essentially cleartext json within the hidden folder depends heavily on local filesystem permissions. Care must strictly be taken (as addressed in ADR 0002 via `.gitignore`) to not expose this file publicly.
+
+<!-- IMPLEMENTED_BY: [src/commands/init.rs] -->

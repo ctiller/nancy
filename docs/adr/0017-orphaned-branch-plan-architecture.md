@@ -17,3 +17,5 @@ We are pivoting the system to use "Orphaned Branch Plans."
 - Requires adapting `PlanPayload` schema dropping unstructured description parameters.
 - Introduces mocked implementation loops intercepting `PlanTask` via grinders to mock initializing these branches.
 - Further formalizes standardizing event payloads as pointers, rather than storage blobs.
+
+<!-- UNIMPLEMENTED: "Deprecated/Superseded by newer architecture" -->

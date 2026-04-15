@@ -16,4 +16,4 @@ Examples of BAD things to critique:
 - Failure to utilize modern tools or conceptual frameworks.
 - Stiff, rigid architectures that lack dynamic flexibility.
 
-<!-- DOCUMENTED_BY: [docs/adr/0028-agentic-perona-registry.md] -->
+<!-- DOCUMENTED_BY: [docs/adr/0028-agentic-persona-registry.md] -->

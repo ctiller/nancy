@@ -16,4 +16,4 @@ Examples of BAD things you must reject:
 - Colloquial hand-waving instead of rigorous definitive statements.
 - Poor grammar.
 
-<!-- DOCUMENTED_BY: [docs/adr/0028-agentic-perona-registry.md] -->
+<!-- DOCUMENTED_BY: [docs/adr/0028-agentic-persona-registry.md] -->

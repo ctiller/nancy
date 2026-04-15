@@ -13,3 +13,5 @@ We implemented a localized "Dreamer" administrative agent running a detached bac
 - **Decentralized Execution**: We strictly enforce architectural boundaries—the coordinator remains highly concurrent because evaluating scores has been decentralized perfectly onto independent dreamer agent hardware bounds.
 - **Complete Audit Trails**: Because task evaluations are stored symmetrically inside the identical Git branches that the subagents use, system heuristics are easily auditable, re-playable, and formally protected under test bounds. 
 - **Predictable Performance**: Tapping an explicitly constrained `fast_llm` configuration model bounds financial overhead and latency directly rather than monopolizing high-reasoning cycles, securing efficient scalability.
+
+<!-- UNIMPLEMENTED: "Conceptual decision or policy guideline" -->

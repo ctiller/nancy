@@ -16,4 +16,4 @@ Examples of BAD things you must reject:
 - Stateful, pet-server designs that cannot be spun up deterministically.
 - Undocumented, manual deployment scripts that require tribal knowledge.
 
-<!-- DOCUMENTED_BY: [docs/adr/0028-agentic-perona-registry.md] -->
+<!-- DOCUMENTED_BY: [docs/adr/0028-agentic-persona-registry.md] -->

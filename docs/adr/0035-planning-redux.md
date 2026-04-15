@@ -43,3 +43,5 @@ If a panel triggers a `ChangesRequired` vote or a `Veto` rejection action:
 - Physical footprint scale drops astronomically for complex plans by eliminating unnecessary plan branch Git commits.
 - High structural task capability manages scaling exclusively through LLM sub-roles isolating orchestrator complexity boundaries tightly off the SQLite framework. 
 - Deterministic schema-checks ensure the Coordinator never crashes mapping raw invalid LLM instruction hallucination formats.
+
+<!-- IMPLEMENTED_BY: [src/grind/execute_task.rs] -->

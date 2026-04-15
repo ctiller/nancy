@@ -23,3 +23,5 @@ All sub-components, internal loops, and UI evaluation logic must:
 - Single truth deterministic resolution for all Docker-mapped orchestration sockets guarantees UI dashboard metrics inherently collect trailing usage loops natively out-of-the-box.
 - Less likelihood of silent IPC failures during isolated local evaluation cycles safely preventing edge-case bugs spanning distributed environments organically.
 - Refinement bounds are seamlessly inherited across `LlmClient` execution, dynamically guaranteeing arbitration spot-markets seamlessly securely execute natively without fail.
+
+<!-- UNIMPLEMENTED: "Conceptual decision or policy guideline" -->

@@ -1140,3 +1140,5 @@ mod tests {
 }
 
 // DOCUMENTED_BY: [docs/adr/0022-native-grinder-tool-boundaries.md]
+
+// DOCUMENTED_BY: [docs/adr/0072-sandbox-canonicalization-and-gateway-retries.md]

@@ -14,3 +14,5 @@ As the Nancy orchestration system matures into evaluating LLM execution trajecto
 ## Consequences
 - Evaluation scenarios are executed safely within isolated directories and test configurations, decoupled from global application state.
 - Our Git ledger captures LLM evaluations intrinsically, creating traceable immutable logs of deterministic system executions.
+
+<!-- IMPLEMENTED_BY: [src/schema/registry.rs] -->

@@ -115,3 +115,6 @@ This prompt drives the main LLM loop that evaluates the votes and decides the ne
 ### Automated Tests
 - Create unit tests for `GhostVeto` consensus clearance algorithms (i.e. assert that a `GhostVeto` clears *only* if `Technical`, `Paradigm`, and `Orchestration` categories appear in the `clearance_ledger`).
 - Validate standard `serde` generation for the schema payload.
+
+<!-- UNIMPLEMENTED: "Documentation only or usage guide" -->
+

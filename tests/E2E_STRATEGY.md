@@ -64,3 +64,5 @@ test('Agent submits execution task via Monaco Editor', async ({ page }) => {
 ```
 
 This establishes absolute decoupling. Nancy developers can freely build the frontend without stalling on intensive coordinator lifecycle delays.
+
+<!-- UNIMPLEMENTED: "Documentation only or usage guide" -->

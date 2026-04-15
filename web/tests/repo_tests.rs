@@ -128,3 +128,5 @@ fn test_get_git_branches_system_shell() {
         );
     });
 }
+
+// DOCUMENTED_BY: [docs/adr/README.md]

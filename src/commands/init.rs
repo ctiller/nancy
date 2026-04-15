@@ -288,3 +288,5 @@ mod tests {
 }
 
 // DOCUMENTED_BY: [docs/adr/0004-modular-command-architecture.md]
+
+// DOCUMENTED_BY: [docs/adr/0003-decentralized-identity-with-ed25519-did-key.md]

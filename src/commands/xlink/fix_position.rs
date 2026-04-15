@@ -79,3 +79,5 @@ pub async fn run(cwd: PathBuf) -> Result<()> {
     println!("Successfully corrected xlink positions.");
     Ok(())
 }
+
+// DOCUMENTED_BY: [docs/adr/0076-xlink-microformat.md]
