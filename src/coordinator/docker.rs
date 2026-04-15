@@ -63,7 +63,7 @@ pub async fn build_container_config(
         .unwrap_or_else(|_| host_workdir.display().to_string());
 
     // To support git worktree absolute path references in sandboxes securely,
-    // we must mount the host workdir natively. To enforce strict sandboxing,
+    // we provide volume endpoints directing explicitly. To enforce strict sandboxing,
     // we mount the root repo read-only (so agents cannot touch other host files),
     // and we predictably override `.git` and the specific worktree as read-write!
     let mut binds = vec![
@@ -247,7 +247,7 @@ impl DockerOrchestrator {
                     );
                     while let Some(res) = pull_stream.next().await {
                         if let Err(e) = res {
-                            tracing::warn!("Docker image pull partial error natively: {}", e);
+                            tracing::warn!("Docker image pull partial error: {}", e);
                         }
                     }
                 });
@@ -289,7 +289,7 @@ impl DockerOrchestrator {
             };
 
             // With auto_remove: true, the docker daemon will implicitly destroy the container the
-            // instant it exits. Therefore, if inspect_container returns Err, we evaluate its volume logs natively!
+            // instant it exits. Therefore, if inspect_container returns Err, we evaluate its volume logs.
             if let Ok(_inspect) = self.docker.inspect_container(container_name, None).await {
                 // Container is actively breathing
             } else {
@@ -391,7 +391,7 @@ impl DockerOrchestrator {
             if !target_path.exists() {
                 let branch_name = format!("refs/heads/nancy/workers/{}", worker.did);
 
-                // Natively ensure the target branch exists organically resolving empty repository crashes gracefully!
+                // Ensure the target branch exists to avoid crashes.
                 if let Ok(repo) = git2::Repository::open(&self.workdir) {
                     if repo.find_reference(&branch_name).is_err() {
                         if let Ok(sig) =
@@ -428,7 +428,7 @@ impl DockerOrchestrator {
                     .unwrap_or_else(|e| panic!("Failed executing sh worktree bounds: {}", e));
 
                 if !status.success() {
-                    tracing::error!("Failed applying git worktree command natively");
+                    tracing::error!("Failed applying git worktree command");
                     continue; // Skip this container safely since the worktree failed
                 }
             }
@@ -445,7 +445,7 @@ impl DockerOrchestrator {
             let human_clone = human.clone();
 
             deployment_tasks.push(tokio::spawn(async move {
-                // Provision socket directory boundaries perfectly natively avoiding Docker Daemon ROOT ownership mapping escalations natively
+                // Bind appropriate daemon endpoints avoiding container privilege escalations.
                 let worker_socket_dir = workdir.join(".nancy").join("sockets").join(&worker.did);
                 fs::create_dir_all(&worker_socket_dir)
                     .await
@@ -524,7 +524,7 @@ impl DockerOrchestrator {
                             None
                         } else {
                             tracing::info!("Container worker {} physically launched.", response.id);
-                            // Record running natively to avoid dupes across loop
+                            // Record running to avoid duplicates across loop
                             Some(container_name_clone)
                         }
                     }
@@ -546,7 +546,7 @@ impl DockerOrchestrator {
                                 .await;
                             None
                         } else {
-                            tracing::error!("Failed to build container node natively: {}", e);
+                            tracing::error!("Failed to build container: {}", e);
                             None
                         }
                     }

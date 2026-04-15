@@ -143,7 +143,7 @@ pub async fn run_agent<P: AsRef<Path>, Processor: AgentTaskProcessor>(
             ..
         } => {
             if agent_type == "grinder" {
-                // To safely execute locally without docker boundary overrides, map to first worker natively
+                // To execute locally without docker limitations, use the default worker execution environment.
                 if let Some(w) = workers.first() {
                     (w.did.clone(), Identity::Grinder(w.clone()))
                 } else {
@@ -228,7 +228,7 @@ pub async fn run_agent<P: AsRef<Path>, Processor: AgentTaskProcessor>(
                 {
                     let json = serde_json::to_string(&snap).unwrap_or_default();
                     let prompt = format!(
-                        "Summarize the current action being performed by this autonomous agent based on its internal frame state. Extract the lowest meaningful active task. If it is waiting on a quorum or executing a multi-agent review map, explicitly include the current round iteration and exact count of agents finished/in-progress/votes natively! Keep it very terse, 1 short sentence max.\n\nYou have been provided a top-level state snapshot (depth=1). If you need to see deeper details about a specific frame, use the `explore_frame` tool to fetch its deep internal state.\n\nState:\n```json\n{}\n```",
+                        "Summarize the current action being performed by this autonomous agent based on its internal frame state. Extract the lowest meaningful active task. If it is waiting on a quorum or executing a multi-agent review map, explicitly include the current round iteration tracking votes explicitly! Keep it very terse, 1 short sentence max.\n\nYou have been provided a top-level state snapshot (depth=1). If you need to see deeper details about a specific frame, use the `explore_frame` tool to fetch its deep internal state.\n\nState:\n```json\n{}\n```",
                         json
                     );
                     if let Ok(result) = llm.ask::<String>(&prompt).await {

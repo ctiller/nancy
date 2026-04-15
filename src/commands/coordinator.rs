@@ -148,7 +148,7 @@ impl Coordinator {
 
         while !condition(&AppView::new()) && !SHUTDOWN.load(Ordering::SeqCst) {
             let active_identity = { shared_identity.read().await.clone() };
-            // Ensure git resource descriptors drop each loop native avoiding OS handle exhaustion entirely seamlessly natively!
+            // Ensure git resource descriptors are dropped each loop to avoid OS handle exhaustion.
             let active_repo = crate::git::AsyncRepository::discover(&self.workdir).await?;
             let git_ctx = crate::introspection::IntrospectionContext {
                 current_frame: tree_root.git_root.clone(),

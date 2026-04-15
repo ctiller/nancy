@@ -143,7 +143,7 @@ pub async fn grep_search_impl(
 
         if !perms.can_read(path) {
             bail!(
-                "Execution denied: Explicit permission missing to natively access structural component bound: {}",
+                "Execution denied: Permission denied for: {}",
                 path_str
             );
         }
@@ -268,7 +268,7 @@ pub async fn view_files_impl(
         let path_buf = perms.resolve_path(raw_path);
         let path = path_buf.as_path();
         if !perms.can_read(path) {
-            results.push(serde_json::json!({ "file": target, "error": "Execution denied: Explicit permission missing to structurally map boundary target natively." }));
+            results.push(serde_json::json!({ "file": target, "error": "Execution denied: Explicit permission missing to map boundary target." }));
             continue;
         }
 
@@ -349,7 +349,7 @@ pub async fn multi_replace_file_content_impl(
 
     if !perms.can_write(path) {
         bail!(
-            "Execution denied: Explicit permission missing to natively mutate boundary target: {}",
+            "Execution denied: Explicit permission missing to mutate boundary target: {}",
             target_file
         );
     }
@@ -413,7 +413,7 @@ pub async fn write_files_impl(
 
         if !perms.can_write(path) {
             bail!(
-                "Execution denied: Explicit permission missing to natively write to boundary target explicitly: {}",
+                "Execution denied: Explicit permission missing to write to boundary target: {}",
                 req.target_path
             );
         }
@@ -553,7 +553,7 @@ pub async fn manage_paths_impl(
                 let source = Path::new(source_raw);
                 if !perms.can_read(source) {
                     bail!(
-                        "Execution denied: Explicit permission missing to natively extract logically mapped boundary: {}",
+                        "Execution denied: Explicit permission missing to extract boundary: {}",
                         source_raw
                     );
                 }

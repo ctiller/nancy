@@ -10,12 +10,12 @@ Previously, Nancy agents and task runner (Grinder) instances directly managed th
 We transition to completely centralizing LLM communication by implementing an internal API Proxy within the Nancy Coordinator mapping strictly to `/proxy/api` over the internal Unix Domain Socket (UDS). 
 
 1. **Schema**: Unified IPC interaction through `LlmRequest` (incorporating previous model request payload details) and continuous `LlmStreamChunk` chunks streaming tokens, thoughts, tool responses efficiently dynamically back to agents.
-2. **Proxy Handler**: `coordinator/llm_proxy.rs` securely proxies natively constructed Gemini SSE streams dynamically evaluating prompt token counts upon resolution natively securing `ArbitrationMarket` token metrics automatically inside proxy scope! 
+2. **Proxy Handler**: `coordinator/llm_proxy.rs` securely proxies constructed Gemini SSE streams dynamically evaluating prompt token counts upon resolution, securing `ArbitrationMarket` token metrics automatically inside proxy scope! 
 3. **Container Sandboxing**: Docker runtime flags for Grinder containers are formally decoupled organically migrating strictly from `network_mode: "host"` to `network_mode: "none"` enforcing perfect network isolation dynamically.
 
 ## Consequences
 - Agents are entirely decoupled organically from actual HTTP network capabilities preventing native task leakage dynamically!
 - All billing execution securely happens completely synchronously prior to the client responding reducing async mismatch failures.
-- `LlmClient` logic natively dramatically simplifies organically removing retries looping organically delegating resilience gracefully mapping naturally entirely to proxy internals.
+- `LlmClient` logic is simplified by delegating resilience to proxy internals.
 
 <!-- IMPLEMENTED_BY: [src/coordinator/llm_proxy.rs] -->

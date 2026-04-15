@@ -189,7 +189,7 @@ pub async fn proxy_handler(
 
             loop {
                 attempts += 1;
-                // 1. Submit Bid Natively
+                // 1. Submit Bid
                 crate::introspection::log(&format!("Submitting market bid for {}", payload.task_name));
                 let rx = crate::coordinator::market::ArbitrationMarket::submit_bid(&ipc_state.token_market, payload.clone());
                 let permission = match rx.await {
@@ -252,7 +252,7 @@ pub async fn proxy_handler(
             let model = active_model.unwrap();
             let expected_cost = active_cost.unwrap();
 
-    // Construct natively streaming response
+    // Construct streaming response
     crate::introspection::log(&format!("Establishing SSE stream internally recursively..."));
     let (tx, rx) = tokio::sync::mpsc::channel::<Result<Event, std::convert::Infallible>>(128);
     let token_market = ipc_state.token_market.clone();
@@ -296,7 +296,7 @@ pub async fn proxy_handler(
         let evt = Event::default().json_data(&final_chunk).unwrap();
         let _ = tx.send(Ok(evt)).await;
 
-        // Perform natively securely organic billing directly!
+        // Perform billing directly.
         if processor.input_tokens > 0 || processor.output_tokens > 0 || processor.cached_tokens > 0 {
             let cost_nanocents = crate::coordinator::market::ArbitrationMarket::record_consumption(
                 &token_market,
@@ -319,7 +319,7 @@ pub async fn proxy_handler(
                 cost_nanocents.0 as f64 / 1_000_000_000.0
             );
         } else {
-            // The request yielded streams but resulted in zero measurable bounds natively. Always refund structurally safely!
+            // The request yielded streams but resulted in zero measurable bounds. Refund.
             crate::coordinator::market::ArbitrationMarket::refund_expected_budget(&token_market, expected_cost).await;
         }
     });
@@ -359,7 +359,7 @@ mod tests {
         assert_eq!(processor.current_thought_signature.as_deref(), Some("12345"));
         assert!(processor.final_function_calls.is_empty());
 
-        // Chunk 2: Function call arrives later without signature natively!
+        // Chunk 2: Function call arrives later without signature.
         let resp2 = GeminiResponse {
             candidates: Some(vec![Candidate {
                 content: Content {

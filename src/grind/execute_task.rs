@@ -711,7 +711,7 @@ pub async fn handle_implement_task(
                 continue;
             }
 
-            crate::introspection::log("Executing branch checkout safely natively...");
+            crate::introspection::log("Checking out branch...");
             let target_repo = crate::git::AsyncRepository::discover(target_path).await?;
             if let Err(e) = target_repo.checkout(&task_payload.parent_branch).await {
                 return Ok((
@@ -720,12 +720,12 @@ pub async fn handle_implement_task(
                 ));
             }
 
-            crate::introspection::log("Executing ff-merge natively mapping structurally...");
+            crate::introspection::log("Performing fast-forward merge...");
             if let Err(e) = target_repo.merge(&task_payload.branch).await {
                 let _ = target_repo.checkout(&task_payload.branch).await;
                 
                 feedback = format!(
-                    "Merge to parent branch '{}' failed (likely not a fast-forward). Please rebase your branch natively on top of '{}'. Error: {}",
+                    "Merge to parent branch '{}' failed (likely not a fast-forward). Please rebase your branch on top of '{}'. Error: {}",
                     task_payload.parent_branch, task_payload.parent_branch, e
                 );
                 continue;

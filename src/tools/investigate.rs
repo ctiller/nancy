@@ -400,7 +400,7 @@ mod tests {
             investigate_impl(perms, "test".to_string(), "t".to_string(), "a".to_string()).await;
         assert!(res.is_ok());
 
-        // Validate traces got injected natively on the main agent branch
+        // Validate traces were injected on the main agent branch
         let id_obj = crate::schema::identity_config::Identity::load(&td_path)
             .await
             .unwrap();

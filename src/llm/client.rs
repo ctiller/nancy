@@ -488,7 +488,7 @@ impl LlmClient {
 
                 let coord_sock = crate::agent::get_coordinator_socket_path(None);
                 if !coord_sock.exists() {
-                    anyhow::bail!("Coordinator connection natively missing securely.");
+                    anyhow::bail!("Coordinator connection missing.");
                 }
                 let client = crate::agent::get_coordinator_client(None);
                 let res = client.post("http://localhost/proxy/api").json(&payload).send().await?;
@@ -556,7 +556,7 @@ impl LlmClient {
 
             if !final_function_calls.is_empty() {
                 self.session.add_model_parts(final_function_calls.clone());
-                // Mock Gemini chat instance strictly cleanly natively safely to resolve backwards compatibility organically.
+                // Mock Gemini chat instance to resolve backwards compatibility.
                 let mut mock_chat = crate::llm::api::GeminiResponse::default();
                 mock_chat.candidates = Some(vec![crate::llm::api::Candidate {
                     content: crate::llm::api::Content {

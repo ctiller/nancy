@@ -295,7 +295,7 @@ mod tests {
             }
         }
 
-        // Give spawned coordinator bounds 1000ms to gracefully crash natively on drop under llvm-cov slowing execution
+        // Give spawned coordinator 1000ms to gracefully crash on drop under llvm-cov
         tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
 
         nancy::agent::SHUTDOWN.store(true, std::sync::atomic::Ordering::SeqCst);

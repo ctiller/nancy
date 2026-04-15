@@ -49,7 +49,7 @@ pub async fn run(cwd: PathBuf) -> Result<()> {
         }
     }
 
-    println!("Successfully hydrated codebase xlinks natively.");
+    println!("Successfully hydrated codebase xlinks.");
     Ok(())
 }
 

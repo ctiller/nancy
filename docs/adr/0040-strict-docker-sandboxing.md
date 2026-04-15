@@ -14,13 +14,13 @@ However, parallel evaluation loops such as `nancy eval` and the local test harne
 ## Decision
 
 We will strictly enforce execution of the inner `nancy grind` process inside a sandboxed Docker container (`bollard` API).
-The standalone `nancy run` orchestration interface will be completely abolished. The local bounding logics constructing and executing container workflows will be entirely subsumed natively inside `Coordinator::run_until` as intrinsic components of the Core Control Plane. The single valid execution command for deploying the system locally becomes structurally limited solely to `nancy coordinator`. 
+The standalone `nancy run` orchestration interface will be completely abolished. The local bounding logics constructing and executing container workflows will be entirely subsumed inside `Coordinator::run_until` as intrinsic components of the Core Control Plane. The single valid execution command for deploying the system locally becomes structurally limited solely to `nancy coordinator`. 
 All evaluations (`nancy eval`) seamlessly bind the Docker daemon cleanly enforcing rigorous physical node mapping to test bounds accurately matching deployed targets realistically safely tracking.
 
 ## Consequences
 
 - The `commands/run.rs` CLI functionality is deprecated and subsumed entirely.
-- Execution speed within integration test pipelines (`cargo test`) might linearly increase in delay depending heavily on iterative base-image pulls tracking organically cleanly natively.
+- Execution speed within integration test pipelines (`cargo test`) might linearly increase in delay depending heavily on the latency of iterative base-image pulls.
 - CI pipelines processing tests strictly require mocked `DOCKER_HOST` proxies implicitly if evaluating cleanly across restricted unprivileged workflows.
 - `AppView` assignments are physically enforced, preventing arbitrary host destruction generated physically autonomously safely wrapping context limitations precisely safely executing.
 

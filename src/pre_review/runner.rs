@@ -79,7 +79,7 @@ pub fn coordinator_system_prompt(workspace: &std::path::Path, max_rounds: u32) -
     \n\
     ## Execution Environment Bounds\n\
     Your strict dynamically mounted root workspace is absolutely restricted to: {}\n\
-    You MUST NEVER act outside this directory natively securely dynamically effectively completely powerfully formally optimally purely explicitly legitimately cleanly robustly properly implicitly functionally correctly.\n\
+    You MUST NEVER act outside this directory.\n\
     \n\
     ## Orchestration Playbook\n\
     1. **Address Feedback:** You receive all reviewer feedback and must prioritize integrating requested changes by editing the codebase before generating the next round's diff.\n\

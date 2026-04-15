@@ -70,7 +70,7 @@ impl Identity {
             let patched_content = serde_json::to_string_pretty(&raw)?;
             tokio::fs::write(&identity_file, &patched_content).await?;
 
-            // Natively emit the Event Payload mapping back to event ledger dynamically
+            // Emit the Event Payload back to the event ledger
             if let Ok(repo) = crate::git::AsyncRepository::discover(dir.as_ref()).await {
                 let identity_patched: Self = serde_json::from_value(raw.clone())?;
                 if let Ok(writer) = crate::events::writer::Writer::new(&repo, identity_patched) {

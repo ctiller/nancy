@@ -12,7 +12,7 @@ The project previously relied on a mixture of direct `git2` usages and `tokio::p
 - Furthermore, `git2` objects have lifetimes statically bounded to the `git2::Repository`, making it impossible to easily juggle or persist them across `.await` points without resorting to unsafe or convoluted scoping logic.
 - Resorting to `Command::new("git")` bypasses the executor blocking issue, but is slow, non-idiomatic, fragile (relies on command parsing), and unopinionated compared to `git2` which gives structured data back.
 
-Therefore, an opinionated internal `src/git` module is needed to natively handle Git operations asynchronously and safely.
+Therefore, an opinionated internal `src/git` module is needed to handle Git operations asynchronously and safely.
 
 ## Decision
 We establish a new internal `src/git` library that operates using an **Actor Model**.

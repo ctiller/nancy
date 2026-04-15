@@ -121,7 +121,7 @@ postconditions: vec![],
 
         writer.commit_batch().await?;
 
-        // Ensure command succeeds reading the trace natively
+        // Ensure command succeeds reading the trace
         debug_tasks(temp_dir.path().to_path_buf(), did).await?;
 
         Ok(())

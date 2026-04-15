@@ -7,7 +7,7 @@ As the Nancy orchestration runtime scales to support multiple concurrent Grinder
 We implemented a localized "Dreamer" administrative agent running a detached background evaluation loop (`TaskViewEvaluator`).
 - **Scoring Pipeline**: The Dreamer iterates over the workspace event logs across all registered subagents. For every unprocessed event, it evaluates raw operational urgency utilizing a zero-context `fast_llm` model invocation, bounding it smoothly linearly between a numerical priority score of `0-100`.
 - **Deterministic Storage**: Instead of proxying temporary metrics in volatile memory, the Dreamer writes its output explicitly as `TaskEvaluation` payload definitions formatted back into the persistent Git Event Ledger.
-- **Direct Subscriptions**: The Axum web Coordinator natively surfaces these persisted evaluation logs via an uncorrelated long-polling `/api/tasks/evaluations` route.
+- **Direct Subscriptions**: The Axum web Coordinator exposes these evaluation logs dynamically via a long-polling `/api/tasks/evaluations` route.
 
 ## Consequences
 - **Decentralized Execution**: We strictly enforce architectural boundaries—the coordinator remains highly concurrent because evaluating scores has been decentralized perfectly onto independent dreamer agent hardware bounds.

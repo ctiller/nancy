@@ -88,7 +88,7 @@ pub async fn remove_grinder_handler(
                 .send()
                 .await;
 
-            // Wait for it to close cleanly natively gracefully dropping Docker containers natively structurally
+            // Wait for Docker networks to resolve clean exits gracefully.
             let start = std::time::Instant::now();
             while sock_path.exists() && start.elapsed().as_secs() < 10 {
                 tokio::time::sleep(std::time::Duration::from_millis(200)).await;

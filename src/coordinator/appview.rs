@@ -641,7 +641,7 @@ postconditions: vec![],
             "e3",
         );
 
-        // Coordinator Assignments natively deprecated. Tasks become independently accessible instantly!
+        // Coordinator Assignments deprecated. Tasks are independently accessible.
 
         let ready = view.get_highest_impact_ready_tasks();
         assert_eq!(ready.len(), 2); // T2 and T3 are now ready

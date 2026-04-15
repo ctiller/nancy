@@ -677,12 +677,12 @@ impl ArbitrationMarket {
             use backoff::backoff::Backoff;
             for (model, health) in lock.model_health.iter_mut() {
                 if health.state_value == HealthStateValue::Unhealthy && now_ms >= health.next_tx_ms {
-                    tracing::info!("Model {:?} organic backoff expired. Transitioning to Recovering natively.", model);
+                    tracing::info!("Model {:?} organic backoff expired. Transitioning to Recovering.", model);
                     health.state_value = HealthStateValue::Recovering;
                     health.recovering_until_ms = now_ms + 60_000;
                 }
                 if health.state_value == HealthStateValue::Recovering && now_ms >= health.recovering_until_ms {
-                    tracing::info!("Model {:?} organic recovery complete. Transitioning to Healthy natively.", model);
+                    tracing::info!("Model {:?} organic recovery complete. Transitioning to Healthy.", model);
                     health.state_value = HealthStateValue::Healthy;
                     health.backoff.reset();
                 }
@@ -709,7 +709,7 @@ impl ArbitrationMarket {
                 }
             }
 
-            // 2. Replenish Budget Pool natively
+            // 2. Replenish Budget Pool
             let daily_nanocents = (lock.config.daily_budget_usd * 100_000_000_000.0) as u64;
             let hourly_cap = schema::NanoCent(daily_nanocents / 24);
             let rounds_per_day = 86400 / TICK_TIME_SECS;
@@ -805,7 +805,7 @@ impl ArbitrationMarket {
 
                     let available_budget = schema::NanoCent(lock.budget_pool_nanocents.0.saturating_sub(lock.inflight_costs_nanocents.0));
 
-                    // Dynamic assertion - if limits dwindled due to previous grants in Round 3, restart natively!
+                    // If limits dwindled due to previous grants in Round 3, restart.
                     if !(rpm_ok && tpm_ok && rpd_ok && available_budget >= expected_cost) {
                         restart_round_1 = true;
                         break;
@@ -932,7 +932,7 @@ mod tests {
                 model_health: HashMap::new(),
             }));
             
-            // Note: we don't spawn the loop natively in this test since we test quota logic algebraically directly
+            // Note: we don't spawn the loop in this test since we test quota logic directly
 
             tokio::runtime::Runtime::new().unwrap().block_on(async {
                 let mut lock = market.write().await;

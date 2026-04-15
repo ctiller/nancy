@@ -4,13 +4,14 @@
 
 **Context**: 
 During extended evaluation traces, we observed two critical architectural failures:
-1. Agents utilizing filesystem tools (like `list_dir(".")`) triggered permission denial closures because relative paths inherited the native process directory bound (`std::env::current_dir()`) instead of their isolated workspace boundaries natively mapping out of bounds erroneously.
-2. Extended implementation task LLM streams faced sporadic gateway timeouts or strict rate limits. The architecture surfaced these failures physically up to the Agent's specific worker loops leading to unexpected task destruction instead of securely managing dynamic fallbacks globally securely without structural disruption.
+1. Agents utilizing filesystem tools (like `list_dir(".")`) triggered permission denial closures because relative paths inherited the process's current directory (`std::env::current_dir()`) instead of their isolated workspace boundaries.
+2. Extended implementation task LLM streams faced sporadic gateway timeouts or strict rate limits. The architecture surfaced these failures to the Agent's specific worker loops leading to unexpected task destruction instead of managing dynamic fallbacks globally.
 
 **Decision**:
 We resolved both structural inconsistencies centrally:
-1. **Tool Path Resolution**: The `Permissions` boundaries module within `src/tools/filesystem.rs` now natively anchors a dedicated abstract `base_dir`. Any incoming structural file manipulation dynamically invokes `.resolve_path()` to transparently transpose context implicitly ahead of any structural system calls.
-2. **Infinite Gateway Polling Loop**: Instead of propagating stream breakages, the `proxy_handler` inside `src/coordinator/llm_proxy.rs` was refactored with an implicit `loop`. Upon upstream HTTP failures (e.g., Timeout, 503, 502, 429), the proxy natively swallows the connection error, structurally refunds the token cost mapping, acquires a brand new explicit spot market model lease dynamically, and blindly resubmits without triggering worker timeouts.
+1. **Tool Path Resolution**: The `Permissions` boundaries module within `src/tools/filesystem.rs` now anchors a dedicated `base_dir`. Any incoming file manipulation invokes `.resolve_path()` to clear context ahead of system calls.
+2. **Infinite Gateway Polling Loop**: Instead of propagating stream breakages, the `proxy_handler` inside `src/coordinator/llm_proxy.rs` was refactored with an implicit `loop`. Upon upstream HTTP failures, the proxy swallows the connection error, refunds token costs, acquires a new model lease dynamically, and resubmits.
+
 
 **Consequences**:
 - **Reliability Boost**: Long-running implementation evals are fundamentally isolated from Google's underlying AI traffic interruptions unconditionally securely!
