@@ -340,11 +340,12 @@ async fn test_worktree_extermination_and_ledger_consistency() -> Result<()> {
     let nancy_dir = temp_dir.path().join(".nancy");
     fs::create_dir_all(&nancy_dir)?;
 
-    let id_obj = Identity::Grinder(DidOwner {
+    let id_obj = Identity::Doer(DidOwner {
         did: "worker".into(),
         public_key_hex: "00".into(),
         private_key_hex: "00".into(),
     });
+
     fs::write(
         nancy_dir.join("identity.json"),
         serde_json::to_string(&id_obj)?,
@@ -376,7 +377,8 @@ async fn test_worktree_extermination_and_ledger_consistency() -> Result<()> {
 
     // Invoke Worktree allocation! Map to task
     let writer = nancy::events::writer::Writer::new(&async_repo, id_obj.clone())?;
-    nancy::grind::execute_task::execute(
+    nancy::doer::execute_task::execute(
+
         &async_repo,
         &id_obj,
         "t_ref_10",

@@ -160,7 +160,7 @@ async fn handle_plan_task(
     crate::introspection::frame("handle_plan_task", async {
         crate::introspection::log("Initializing planning phase...");
         let all_personas = crate::personas::get_all_personas();
-        let mod_prompt = crate::grind::prompts::ModeratorPromptTemplate { personas: &all_personas }.render()?;
+        let mod_prompt = crate::doer::prompts::ModeratorPromptTemplate { personas: &all_personas }.render()?;
 
         let mut coord_client = crate::llm::fast_llm("planning_moderator", schema::TaskType::Planning)
             .system_prompt(&mod_prompt)
@@ -191,7 +191,7 @@ async fn handle_plan_task(
     crate::introspection::frame("ideation", async {
         crate::introspection::log(&format!("Gathering ideation from {} experts", ideation_experts.len()));
         
-        let prompt = crate::grind::prompts::IdeationPromptTemplate {
+        let prompt = crate::doer::prompts::IdeationPromptTemplate {
             task_description: &task_payload.description,
         }.render()?;
 
@@ -210,10 +210,10 @@ async fn handle_plan_task(
     let mut iteration = 0;
     
     let mut synthesizer = crate::llm::fast_llm("moderator_synthesizer", schema::TaskType::Planning)
-        .system_prompt(&crate::grind::prompts::ModeratorSynthesizerSystemPromptTemplate {
+        .system_prompt(&crate::doer::prompts::ModeratorSynthesizerSystemPromptTemplate {
             task_description: &task_payload.description,
-            tdd_guidelines: crate::grind::prompts::TDD_GUIDELINES,
-            task_guidelines: crate::grind::prompts::TASK_GUIDELINES,
+            tdd_guidelines: crate::doer::prompts::TDD_GUIDELINES,
+            task_guidelines: crate::doer::prompts::TASK_GUIDELINES,
         }.render()?)
         .with_loop_detection()
         .with_task_priority(appview_task_priority(task_ref.to_string()))
@@ -230,7 +230,7 @@ async fn handle_plan_task(
 
         let iter_ctx = if iteration == 1 { &compiled_ideations } else { &feedback_context };
         
-        let plan_prompt = crate::grind::prompts::SynthesisPromptTemplate {
+        let plan_prompt = crate::doer::prompts::SynthesisPromptTemplate {
             task_description: &task_payload.description,
             preconditions: &task_payload.preconditions,
             iter_context: iter_ctx,
@@ -261,7 +261,7 @@ async fn handle_plan_task(
 
         let tasks_json = serde_json::to_string_pretty(&output.tasks)?;
         let tdd_json = serde_json::to_string_pretty(&output.tdd)?;
-        let review_prompt = crate::grind::prompts::FormalReviewPromptTemplate {
+        let review_prompt = crate::doer::prompts::FormalReviewPromptTemplate {
             task_description: &task_payload.description,
             plan_markdown: &tdd_json, // Keeping the template variable name the same for now
             tasks_json: &tasks_json,
@@ -438,7 +438,8 @@ pub async fn handle_implement_task(
     crate::introspection::frame("handle_implement_task", async {
         crate::introspection::log("Initializing implementer phase...");
         
-        let sp = crate::grind::prompts::implementer_system_prompt(&target_path);
+        let sp = crate::doer::prompts::implementer_system_prompt(&target_path);
+
 
         if !task_payload.preconditions.is_empty() {
             let failed_preconds = crate::introspection::frame("verify_preconditions", async {
@@ -541,7 +542,7 @@ pub async fn handle_implement_task(
 
             let mut client = crate::llm::thinking_llm("implementer", schema::TaskType::Implement)
                 .tools(tools)
-                .system_prompt(&crate::grind::prompts::implementer_system_prompt(
+                .system_prompt(&crate::doer::prompts::implementer_system_prompt(
                     &target_path,
                 ))
                 .with_market_weight(0.8)
@@ -558,7 +559,7 @@ pub async fn handle_implement_task(
 
             let _out = client.ask::<String>(&impl_prompt).await?;
 
-            let sp = crate::grind::prompts::implementer_system_prompt(&target_path);
+            let sp = crate::doer::prompts::implementer_system_prompt(&target_path);
             if !task_payload.postconditions.is_empty() {
                 let failed_reasons = crate::introspection::frame("verify_postconditions", async {
                     crate::introspection::log("Verifying postconditions...");
@@ -618,7 +619,8 @@ pub async fn handle_implement_task(
 
             let mut session = crate::pre_review::session::ReviewSession::new(target_path.to_path_buf());
             let mut coordinator_client = crate::llm::fast_llm("review_coordinator", schema::TaskType::Review)
-                .system_prompt(crate::grind::prompts::review_team_selection_prompt())
+                .system_prompt(crate::doer::prompts::review_team_selection_prompt())
+
                 .with_market_weight(0.7)
                 .build()?;
 
@@ -676,7 +678,7 @@ pub async fn handle_implement_task(
                 .await?;
 
             let mut synthesis_client = crate::llm::fast_llm("review_synthesis", schema::TaskType::Review)
-                .system_prompt(&crate::grind::prompts::review_synthesis_prompt(
+                .system_prompt(&crate::doer::prompts::review_synthesis_prompt(
                     &target_path,
                 ))
                 .with_market_weight(0.6)
@@ -913,7 +915,7 @@ mod tests {
         let _td = &_tr.td;
         let _repo = &_tr.repo;
 
-        let identity = Identity::Grinder(DidOwner {
+        let identity = Identity::Doer(DidOwner {
             did: "mock1".into(),
             public_key_hex: "00".into(),
             private_key_hex: "00".into(),
@@ -973,7 +975,7 @@ mod tests {
         let nancy_dir = td.path().join(".nancy");
         tokio::fs::create_dir_all(&nancy_dir).await?;
 
-        let identity = Identity::Grinder(DidOwner {
+        let identity = Identity::Doer(DidOwner {
             did: "mock1".into(),
             public_key_hex: "00".into(),
             private_key_hex: "00".into(),
@@ -1062,7 +1064,7 @@ mod tests {
         }
         builder.commit();
 
-        let identity = Identity::Grinder(DidOwner {
+        let identity = Identity::Doer(DidOwner {
             did: "mock1".into(),
             public_key_hex: "00".into(),
             private_key_hex: "00".into(),
@@ -1143,7 +1145,7 @@ mod tests {
             .respond("Still forgot!")
             .commit();
 
-        let identity = Identity::Grinder(DidOwner {
+        let identity = Identity::Doer(DidOwner {
             did: "mock1".into(),
             public_key_hex: "00".into(),
             private_key_hex: "00".into(),
@@ -1236,7 +1238,7 @@ mod tests {
         }
         builder.commit();
 
-        let identity = Identity::Grinder(DidOwner {
+        let identity = Identity::Doer(DidOwner {
             did: "mock1".into(),
             public_key_hex: "00".into(),
             private_key_hex: "00".into(),
@@ -1360,7 +1362,7 @@ mod tests {
         tokio::process::Command::new("git").args(["worktree", "add", "-b", "nancy/tasks/work_success", worktree_path.to_str().unwrap(), "main"])
             .current_dir(temp_dir.path()).status().await?;
 
-        let id_obj = crate::schema::identity_config::Identity::Grinder(crate::schema::identity_config::DidOwner::generate());
+        let id_obj = crate::schema::identity_config::Identity::Doer(crate::schema::identity_config::DidOwner::generate());
         let payload = crate::schema::task::TaskPayload {
             description: "Test".into(),
             preconditions: vec!["Must be ready".into()],
@@ -1398,7 +1400,7 @@ mod tests {
         let tree = repo.find_tree(tree_id)?;
         repo.commit(Some("refs/heads/main"), &sig, &sig, "init main", &tree, &[])?;
 
-        let id_obj = crate::schema::identity_config::Identity::Grinder(crate::schema::identity_config::DidOwner::generate());
+        let id_obj = crate::schema::identity_config::Identity::Doer(crate::schema::identity_config::DidOwner::generate());
         let payload = crate::schema::task::TaskPayload {
             description: "Test".into(),
             preconditions: vec!["Must be ready".into()],
@@ -1448,7 +1450,7 @@ mod tests {
         tokio::process::Command::new("git").args(["worktree", "add", "-b", "nancy/tasks/work", worktree_path.to_str().unwrap(), "main"])
             .current_dir(temp_dir.path()).status().await?;
 
-        let id_obj = crate::schema::identity_config::Identity::Grinder(crate::schema::identity_config::DidOwner::generate());
+        let id_obj = crate::schema::identity_config::Identity::Doer(crate::schema::identity_config::DidOwner::generate());
         let payload = crate::schema::task::TaskPayload {
             description: "Test".into(),
             preconditions: vec!["Must be ready".into()],
@@ -1523,7 +1525,7 @@ mod tests {
         let wt_p_commit = wt_repo.find_commit(main_commit)?;
         wt_repo.commit(Some("HEAD"), &sig, &sig, "diverge work", &wt_tree, &[&wt_p_commit])?;
 
-        let id_obj = crate::schema::identity_config::Identity::Grinder(crate::schema::identity_config::DidOwner::generate());
+        let id_obj = crate::schema::identity_config::Identity::Doer(crate::schema::identity_config::DidOwner::generate());
         let payload = crate::schema::task::TaskPayload {
             description: "Test Non FF".into(),
             preconditions: vec![],

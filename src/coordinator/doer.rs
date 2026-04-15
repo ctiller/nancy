@@ -14,16 +14,16 @@
 
 use tokio::sync::mpsc::UnboundedReceiver;
 
-pub struct GrinderSyncEngine {
+pub struct DoerSyncEngine {
     pub force_sync_broadcast: bool,
-    pub target_sync_grinder: Option<String>,
+    pub target_sync_doer: Option<String>,
 }
 
-impl GrinderSyncEngine {
+impl DoerSyncEngine {
     pub fn new() -> Self {
         Self {
             force_sync_broadcast: false,
-            target_sync_grinder: None,
+            target_sync_doer: None,
         }
     }
 
@@ -37,10 +37,10 @@ impl GrinderSyncEngine {
         tokio::select! {
             _ = crate::commands::coordinator::SHUTDOWN_NOTIFY.notified() => {}
             Some(payload_with_tx) = rx_updates.recv() => {
-                tracing::info!("[Coordinator] AWAKENED: Grinder explicitly hit /updates-ready HTTP ping. Accelerating event processor...");
+                tracing::info!("[Coordinator] AWAKENED: Doer explicitly hit /updates-ready HTTP ping. Accelerating event processor...");
                 self.force_sync_broadcast = true;
-                self.target_sync_grinder = Some(payload_with_tx.0.grinder_did);
-                // Synchronize explicitly with the Grinder!
+                self.target_sync_doer = Some(payload_with_tx.0.doer_did);
+                // Synchronize with the Doer!
                 let _ = payload_with_tx.1.send(());
             }
             _ = tokio::time::sleep(std::time::Duration::from_secs(2)) => {
@@ -49,5 +49,6 @@ impl GrinderSyncEngine {
         }
     }
 }
+
 
 // DOCUMENTED_BY: [docs/adr/0018-modular-grinder-operations.md]

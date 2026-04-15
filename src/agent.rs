@@ -125,8 +125,8 @@ pub async fn run_agent<P: AsRef<Path>, Processor: AgentTaskProcessor>(
     };
 
     let (worker_did, id_obj) = match id_obj {
-        Identity::Grinder(ref owner) => {
-            if agent_type != "grinder" {
+        Identity::Doer(ref owner) => {
+            if agent_type != "doer" {
                 bail!("Expected {} identity context", agent_type);
             }
             (owner.did.clone(), id_obj)
@@ -142,12 +142,12 @@ pub async fn run_agent<P: AsRef<Path>, Processor: AgentTaskProcessor>(
             ref dreamer,
             ..
         } => {
-            if agent_type == "grinder" {
+            if agent_type == "doer" {
                 // To execute locally without docker limitations, use the default worker execution environment.
                 if let Some(w) = workers.first() {
-                    (w.did.clone(), Identity::Grinder(w.clone()))
+                    (w.did.clone(), Identity::Doer(w.clone()))
                 } else {
-                    bail!("No allocated Grinders in Coordinator context.");
+                    bail!("No allocated Doers in Coordinator context.");
                 }
             } else if agent_type == "dreamer" {
                 (dreamer.did.clone(), Identity::Dreamer(dreamer.clone()))
@@ -159,6 +159,7 @@ pub async fn run_agent<P: AsRef<Path>, Processor: AgentTaskProcessor>(
             }
         }
     };
+
 
     let coordinator_did = explicit_coordinator_did
         .unwrap_or_else(|| std::env::var("COORDINATOR_DID").unwrap_or_default());
@@ -405,13 +406,14 @@ pub async fn run_agent<P: AsRef<Path>, Processor: AgentTaskProcessor>(
             let socket_path = get_coordinator_socket_path(Some(&workdir));
             if socket_path.exists() {
                 let payload = crate::schema::ipc::UpdateReadyPayload {
-                    grinder_did: worker_did.clone(),
-                    completed_task_ids: crate::commands::grind::get_completed_tasks(
+                    doer_did: worker_did.clone(),
+                    completed_task_ids: crate::commands::doer::get_completed_tasks(
                         &repo,
                         &worker_did,
                     )
                     .await, // NOTE: generic usage applies safely as task payload bounds apply equally!
                 };
+
                 let client = get_coordinator_client(Some(&workdir));
                 tracing::debug!(
                     "[Agent {}] Sending /updates-ready block payload...",

@@ -24,7 +24,7 @@ pub struct DidOwner {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(tag = "type")]
 pub enum Identity {
-    Grinder(DidOwner),
+    Doer(DidOwner),
     Dreamer(DidOwner),
     Coordinator {
         did: DidOwner,
@@ -33,6 +33,7 @@ pub enum Identity {
         human: Option<DidOwner>,
     },
 }
+
 
 impl DidOwner {
     pub fn generate() -> Self {
@@ -103,11 +104,12 @@ impl Identity {
 
     pub fn get_did_owner(&self) -> &DidOwner {
         match self {
-            Identity::Grinder(owner) => owner,
+            Identity::Doer(owner) => owner,
             Identity::Dreamer(owner) => owner,
             Identity::Coordinator { did, .. } => did,
         }
     }
+
 }
 
 #[cfg(test)]

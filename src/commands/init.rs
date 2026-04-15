@@ -19,7 +19,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::fs::{self, OpenOptions};
 use tokio::io::AsyncWriteExt;
 
-pub async fn init<P: AsRef<Path>>(dir: P, grinders: usize) -> Result<()> {
+pub async fn init<P: AsRef<Path>>(dir: P, doers: usize) -> Result<()> {
     let dir = dir.as_ref();
     let repo = crate::git::AsyncRepository::discover(dir)
         .await
@@ -92,13 +92,13 @@ pub async fn init<P: AsRef<Path>>(dir: P, grinders: usize) -> Result<()> {
     use crate::schema::identity::IdentityPayload;
     use crate::schema::registry::EventPayload;
 
-    for i in 0..grinders {
+    for i in 0..doers {
         let worker_owner = crate::schema::identity_config::DidOwner::generate();
         let worker_did = worker_owner.did.clone();
 
         workers.push(worker_owner.clone());
 
-        println!("Provisioned grinder {} DID: {}", i + 1, worker_did);
+        println!("Provisioned doer {} DID: {}", i + 1, worker_did);
 
         worker_payloads.push(EventPayload::Identity(IdentityPayload {
             did: worker_did,
@@ -215,7 +215,7 @@ mod tests {
         assert_eq!(
             event_lines.len(),
             5,
-            "There should be exactly five event log entries (1 coordinator, 1 dreamer, 1 human, 2 grinders)"
+            "There should be exactly five event log entries (1 coordinator, 1 dreamer, 1 human, 2 doers)"
         );
 
         let event_json: Value = serde_json::from_str(event_lines[0])?;

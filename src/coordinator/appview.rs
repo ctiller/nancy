@@ -50,7 +50,7 @@ pub struct AppView {
 impl AppView {
     pub fn new() -> Self {
         if APPVIEW_BANNED.load(Ordering::SeqCst) {
-            panic!("FATAL: AppView instantiation is strictly banned in this process. Grinders must use IPC endpoints to discover tasks cleanly avoiding concurrent DAG reads.");
+            panic!("FATAL: AppView instantiation is strictly banned in this process. Doers must use IPC endpoints to discover tasks cleanly avoiding concurrent DAG reads.");
         }
 
         Self {
@@ -74,7 +74,7 @@ impl AppView {
     pub async fn hydrate(
         repo: &AsyncRepository,
         identity: &Identity,
-        restricted_grinder_did: Option<&str>,
+        restricted_doer_did: Option<&str>,
     ) -> Self {
         let mut appview = Self::new();
         let did = identity.get_did_owner().did.clone();
@@ -89,7 +89,7 @@ impl AppView {
             }
         }
 
-        // Dynamically aggregate all nancy/* branches directly from the underlying ledger to automatically capture all Grinders securely,
+        // Dynamically aggregate all nancy/* branches directly from the underlying ledger to automatically capture all Doers securely,
         // side-stepping strict Identity IPC routing mechanisms that standalone execution can miss.
         if let Ok(branches) = repo.branches(Some(git2::BranchType::Local)).await {
             let mut dynamic_dids = HashSet::new();
@@ -107,7 +107,8 @@ impl AppView {
                     continue;
                 }
 
-                if let Some(r_did) = restricted_grinder_did {
+                if let Some(r_did) = restricted_doer_did {
+
                     if branch_did != r_did {
                         continue;
                     }

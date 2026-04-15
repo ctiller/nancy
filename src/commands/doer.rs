@@ -20,24 +20,24 @@ use crate::schema::identity_config::Identity;
 use std::future::Future;
 use std::pin::Pin;
 
-pub async fn grind<P: AsRef<Path>>(
+pub async fn doer<P: AsRef<Path>>(
     dir: P,
     explicit_coordinator_did: Option<String>,
     identity_override: Option<Identity>,
 ) -> Result<()> {
     crate::agent::run_agent(
-        "grinder",
+        "doer",
         dir,
         explicit_coordinator_did,
         identity_override,
-        GrinderTaskProcessor {},
+        DoerTaskProcessor {},
     )
     .await
 }
 
-struct GrinderTaskProcessor;
+struct DoerTaskProcessor;
 
-impl crate::agent::AgentTaskProcessor for GrinderTaskProcessor {
+impl crate::agent::AgentTaskProcessor for DoerTaskProcessor {
     fn process<'a>(
         &'a mut self,
         repo: &'a crate::git::AsyncRepository,
@@ -74,7 +74,7 @@ impl crate::agent::AgentTaskProcessor for GrinderTaskProcessor {
                     );
                     let _ = global_writer.log_event(assign_evt);
 
-                    crate::grind::execute_task::execute(
+                    crate::doer::execute_task::execute(
                         repo,
                         id_obj,
                         &task_id,
@@ -102,7 +102,7 @@ impl crate::agent::AgentTaskProcessor for GrinderTaskProcessor {
 
                 if let Err(e) = res {
                     tracing::error!(
-                        "[Grinder] execute_task dramatically failed! Force-flushing partial trace ledger bounds before exit: {:?}",
+                        "[Doer] execute_task dramatically failed! Force-flushing partial trace ledger bounds before exit: {:?}",
                         e
                     );
                     let _ = global_writer.commit_batch().await;
@@ -143,8 +143,9 @@ pub async fn identify_assigned_task(
     let client = crate::agent::get_coordinator_client(Some(&root));
 
     let req_payload = crate::schema::ipc::RequestAssignmentPayload {
-        grinder_did: worker_did.to_string(),
+        doer_did: worker_did.to_string(),
     };
+
 
     let res = client
         .post("http://localhost/request-assignment")
@@ -207,9 +208,10 @@ mod tests {
         unsafe {
             std::env::remove_var("COORDINATOR_DID");
         }
-        let _ = grind(td.path(), None, None).await;
+        let _ = doer(td.path(), None, None).await;
         Ok(())
     }
+
 
     #[tokio::test]
     async fn test_grind_loops_gracefully() -> anyhow::Result<()> {
@@ -245,9 +247,10 @@ mod tests {
             crate::agent::SHUTDOWN_NOTIFY.notify_waiters();
         });
 
-        let _ = grind(td.path(), Some("mock_coord".into()), Some(identity)).await;
+        let _ = doer(td.path(), Some("mock_coord".into()), Some(identity)).await;
         Ok(())
     }
+
     #[tokio::test]
     async fn test_grind_socket_exists_coverage() -> anyhow::Result<()> {
         use tokio::fs;
@@ -300,10 +303,11 @@ mod tests {
             crate::agent::SHUTDOWN_NOTIFY.notify_waiters();
         });
 
-        let _ = grind(td.path(), Some("mock_coord".into()), Some(identity)).await;
+        let _ = doer(td.path(), Some("mock_coord".into()), Some(identity)).await;
         server.abort();
         Ok(())
     }
+
 }
 
 // DOCUMENTED_BY: [docs/adr/0004-modular-command-architecture.md]

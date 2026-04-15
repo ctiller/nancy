@@ -70,7 +70,7 @@ mod tests {
     async fn test_repo_drop_with_events() {
         let tr = TestRepo::new().await.unwrap();
 
-        let identity = Identity::Grinder(DidOwner {
+        let identity = Identity::Doer(DidOwner {
             did: "mock_test_repo".into(),
             public_key_hex: "00".into(),
             private_key_hex: "00".into(),
@@ -82,18 +82,19 @@ mod tests {
                 crate::schema::task::TaskRequestPayload {
                     requestor: "Alice".into(),
                     description: "Coverage verification".into(),
-postconditions: vec![],
-            },
+                    postconditions: vec![],
+                },
             ))
             .unwrap();
         writer.commit_batch().await.unwrap();
 
-        let identity_feat = Identity::Grinder(DidOwner {
+        let identity_feat = Identity::Doer(DidOwner {
             did: "features/mock".into(),
             public_key_hex: "00".into(),
             private_key_hex: "00".into(),
         });
         let writer_feat = Writer::new(&tr.async_repo, identity_feat).unwrap();
+
         writer_feat
             .log_event(EventPayload::TaskRequest(
                 crate::schema::task::TaskRequestPayload {

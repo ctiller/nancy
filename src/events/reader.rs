@@ -184,11 +184,12 @@ mod tests {
 
         let key = did_key::generate::<Ed25519KeyPair>(None);
         let did = key.fingerprint();
-        let identity = Identity::Grinder(DidOwner {
+        let identity = Identity::Doer(DidOwner {
             did: did.clone(),
             public_key_hex: hex::encode(key.public_key_bytes()),
             private_key_hex: hex::encode(key.private_key_bytes()),
         });
+
 
         let writer = Writer::new(&_tr.async_repo, identity)?;
 

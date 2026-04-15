@@ -8,7 +8,7 @@ We formally mandate a preference for utilizing established third-party dependenc
 Instead of writing native models (e.g. rolling our own K-Nearest Neighbor equations organically locally), we will explicitly pull in robust crates (such as `smartcore`). 
 
 ## Justification and Cost
-1. **Testing Costs**: Our system explicitly tracks 100% test coverage boundaries. Each custom algorithm demands deep permutation testing tightly coupled to our CI pipelines natively. Utilizing crates offloads regression testing to external communities.
+1. **Testing Costs**: Our system explicitly tracks 100% test coverage boundaries. Each custom algorithm demands deep permutation testing tightly coupled to our CI pipelines. Utilizing crates offloads regression testing to external communities.
 2. **Reliability**: Established crates capture extreme edge cases organically.
 3. **Execution Agility**: This structurally speeds up agent workflows.
 

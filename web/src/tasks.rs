@@ -147,10 +147,11 @@ pub fn tasks_view() -> Html {
                                 break;
                             }
                             let url = if let Some(lu) = last_update {
-                                format!("/api/grinders/{}/state?last_update={}", did, lu)
+                                format!("/api/doers/{}/state?last_update={}", did, lu)
                             } else {
-                                format!("/api/grinders/{}/state", did)
+                                format!("/api/doers/{}/state", did)
                             };
+
 
                             let mut req = gloo_net::http::Request::get(&url);
                             if let Some(sig) = &signal {

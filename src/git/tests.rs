@@ -120,7 +120,7 @@ async fn test_async_repository_coverage() -> anyhow::Result<()> {
     let blob_oid = repo.run_process(vec!["hash-object".into(), "-w".into(), "file.txt".into()], Some(repo_path.clone())).await?.trim().to_string();
     let _ = repo.read_blob(&blob_oid).await?;
     
-    let commit = repo.peel_to_commit("refs/heads/master").await?;
+    let commit = repo.peel_to_commit("refs/heads/main").await?;
     let tree_entries = repo.read_tree(&commit.tree_oid.0).await?;
     assert!(!tree_entries.is_empty());
     
@@ -138,7 +138,7 @@ async fn test_async_repository_coverage() -> anyhow::Result<()> {
     assert_eq!(fref.unwrap(), "nancy/tasks/task123");
     
     // Log & Revparse
-    let _ = repo.log("refs/heads/master", 10).await?;
+    let _ = repo.log("refs/heads/main", 10).await?;
     let _ = repo.revparse_single("HEAD").await?;
     
     // Introspection
@@ -155,13 +155,13 @@ async fn test_async_repository_coverage() -> anyhow::Result<()> {
     
     // Commit blob batch
     repo.commit_blob_batch(
-        "refs/heads/master",
+        "refs/heads/main",
         vec![("event1".to_string(), b"data".to_vec())],
         vec![]
     ).await?;
     
     // Remote interaction (will hit error paths safely representing full coverage of the Err propagation)
-    let _ = repo.push("origin", vec!["refs/heads/master".to_string()]).await;
+    let _ = repo.push("origin", vec!["refs/heads/main".to_string()]).await;
     let _ = repo.fetch("origin").await;
 
     // Trigger error explicitly

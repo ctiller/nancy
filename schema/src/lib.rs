@@ -74,7 +74,7 @@ pub struct SerializedFrame {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct GrinderStatus {
+pub struct DoerStatus {
     pub did: String,
     pub agent_type: String,
     pub is_online: bool,
@@ -87,10 +87,11 @@ pub struct GrinderStatus {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct GrindersResponse {
+pub struct DoersResponse {
     pub version: u64,
-    pub grinders: Vec<GrinderStatus>,
+    pub doers: Vec<DoerStatus>,
 }
+
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]

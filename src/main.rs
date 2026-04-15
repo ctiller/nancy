@@ -30,7 +30,7 @@ enum Commands {
     /// Add a new task to nancy
     AddTask(AddTaskArgs),
     /// Run the main agentic runloop
-    Grind,
+    Doer,
     /// Run the coordinator dispatch queue loop
     Coordinator(CoordinatorArgs),
     /// Evaluate a task request tailored to a yaml definition
@@ -115,7 +115,7 @@ pub struct DebugEvalArgs {
 #[derive(clap::Args, Debug)]
 pub struct InitArgs {
     #[arg(long, default_value_t = 6)]
-    pub grinders: usize,
+    pub doers: usize,
 }
 
 #[derive(clap::Args, Debug)]
@@ -137,7 +137,7 @@ pub struct AddTaskArgs {
 pub(crate) async fn execute_command(args: &Args, cwd: PathBuf) -> Result<()> {
     match &args.command {
         Commands::Init(init_args) => {
-            nancy::commands::init::init(cwd, init_args.grinders).await?;
+            nancy::commands::init::init(cwd, init_args.doers).await?;
         }
         Commands::AddTask(add_task_args) => {
             nancy::commands::add_task::add_task(
@@ -147,9 +147,10 @@ pub(crate) async fn execute_command(args: &Args, cwd: PathBuf) -> Result<()> {
             )
             .await?;
         }
-        Commands::Grind => {
-            nancy::commands::grind::grind(cwd, None, None).await?;
+        Commands::Doer => {
+            nancy::commands::doer::doer(cwd, None, None).await?;
         }
+
         Commands::Coordinator(coord_args) => {
             nancy::commands::coordinator::run(cwd, coord_args.port).await?;
         }
@@ -231,15 +232,16 @@ mod tests {
     #[test]
     fn test_cli_parsing() {
         assert!(Args::try_parse_from(["nancy", "init"]).is_ok());
-        let init_args = Args::try_parse_from(["nancy", "init", "--grinders", "10"]).unwrap();
+        let init_args = Args::try_parse_from(["nancy", "init", "--doers", "10"]).unwrap();
         if let Commands::Init(args) = init_args.command {
-            assert_eq!(args.grinders, 10);
+            assert_eq!(args.doers, 10);
         } else {
             panic!("Expected Init command");
         }
         assert!(Args::try_parse_from(["nancy", "add-task"]).is_err()); // Correctly bails without file/task payload constraints
-        assert!(Args::try_parse_from(["nancy", "grind"]).is_ok());
+        assert!(Args::try_parse_from(["nancy", "doer"]).is_ok());
         assert!(Args::try_parse_from(["nancy", "coordinator"]).is_ok());
+
         let coord_args = Args::try_parse_from(["nancy", "coordinator", "--port", "8080"]).unwrap();
         if let Commands::Coordinator(args) = coord_args.command {
             assert_eq!(args.port, 8080);
@@ -270,30 +272,31 @@ mod tests {
             }
         }
 
-        let grind_dir = td_path.clone();
+        let doer_dir = td_path.clone();
 
-        // Init identity so that coordinator/grind bounds don't blow up prior to spinning the loop!
+        // Init identity so that coordinator/doer bounds don't blow up prior to spinning the loop!
         let args_init = Args::try_parse_from(["nancy", "init"]).unwrap();
-        execute_command(&args_init, grind_dir.clone()).await?;
-        assert!(grind_dir.join(".nancy").exists());
+        execute_command(&args_init, doer_dir.clone()).await?;
+        assert!(doer_dir.join(".nancy").exists());
 
-        // Test long-running Grinder loop bounds triggering cleanly
-        let args_grind = Args::try_parse_from(["nancy", "grind"]).unwrap();
+        // Test long-running Doer loop bounds triggering cleanly
+        let args_grind = Args::try_parse_from(["nancy", "doer"]).unwrap();
         tokio::select! {
             _ = tokio::time::sleep(tokio::time::Duration::from_secs(2)) => {}
-            res = execute_command(&args_grind, grind_dir.clone()) => {
+            res = execute_command(&args_grind, doer_dir.clone()) => {
                 let _ = res;
             }
         }
 
         let args_coordinator = Args::try_parse_from(["nancy", "coordinator"]).unwrap();
-        let coord_dir = grind_dir.clone();
+        let coord_dir = doer_dir.clone();
         tokio::select! {
             _ = tokio::time::sleep(tokio::time::Duration::from_secs(2)) => {}
             res = execute_command(&args_coordinator, coord_dir) => {
                 let _ = res;
             }
         }
+
 
         // Give spawned coordinator 1000ms to gracefully crash on drop under llvm-cov
         tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
@@ -304,11 +307,12 @@ mod tests {
 
         // Test Cleanup
         let args_cleanup = Args::try_parse_from(["nancy", "cleanup"]).unwrap();
-        execute_command(&args_cleanup, grind_dir.clone()).await?;
+        execute_command(&args_cleanup, doer_dir.clone()).await?;
 
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
         // Ensure no stray files are magically created inside .nancy
-        assert!(!grind_dir.join(".nancy").exists());
+        assert!(!doer_dir.join(".nancy").exists());
+
 
         Ok(())
     }

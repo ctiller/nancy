@@ -128,8 +128,8 @@ pub async fn build_container_config(
     .trim()
     .to_string();
 
-    let cli_cmd = if agent_type == "grinder" {
-        "grind"
+    let cli_cmd = if agent_type == "doer" {
+        "doer"
     } else {
         "dreamer"
     };
@@ -214,12 +214,12 @@ impl DockerOrchestrator {
                 human,
                 ..
             } => (workers.clone(), dreamer.clone(), human.clone()),
-            _ => return Vec::new(), // Grinders don't launch docker containers
+            _ => return Vec::new(), // Doers don't launch docker containers
         };
 
         let mut agents_to_launch = Vec::new();
         for w in workers {
-            agents_to_launch.push((w.clone(), "grinder"));
+            agents_to_launch.push((w.clone(), "doer"));
         }
         agents_to_launch.push((dreamer, "dreamer"));
 
@@ -280,8 +280,8 @@ impl DockerOrchestrator {
                 break;
             }
 
-            let did = if container_name.starts_with("nancy-grinder-") {
-                container_name.replace("nancy-grinder-", "")
+            let did = if container_name.starts_with("nancy-doer-") {
+                container_name.replace("nancy-doer-", "")
             } else if container_name.starts_with("nancy-dreamer-") {
                 container_name.replace("nancy-dreamer-", "")
             } else {
@@ -433,7 +433,7 @@ impl DockerOrchestrator {
                 }
             }
 
-            tracing::info!("Deploying native Hot Grinder {}...", worker.did);
+            tracing::info!("Deploying Doer {}...", worker.did);
 
             let docker = self.docker.clone();
             let workdir = self.workdir.clone();
@@ -450,7 +450,7 @@ impl DockerOrchestrator {
                 fs::create_dir_all(&worker_socket_dir)
                     .await
                     .unwrap_or_default();
-                let _ = fs::remove_file(worker_socket_dir.join("grinder.sock")).await;
+                let _ = fs::remove_file(worker_socket_dir.join("doer.sock")).await;
 
                 let coordinator_socket_dir =
                     workdir.join(".nancy").join("sockets").join("coordinator");
@@ -458,7 +458,7 @@ impl DockerOrchestrator {
                     .await
                     .unwrap_or_default();
 
-                // Provision identity.json explicitly mapping the grinder subset into its context
+                // Provision identity.json explicitly mapping the doer subset into its context
                 let worker_nancy_dir = target_path.join(".nancy");
                 fs::create_dir_all(&worker_nancy_dir)
                     .await
@@ -466,8 +466,9 @@ impl DockerOrchestrator {
                 let worker_identity = if agent_type == "dreamer" {
                     Identity::Dreamer(worker.clone())
                 } else {
-                    Identity::Grinder(worker.clone())
+                    Identity::Doer(worker.clone())
                 };
+
                 let _ = fs::write(
                     worker_nancy_dir.join("identity.json"),
                     serde_json::to_string_pretty(&worker_identity).unwrap(),

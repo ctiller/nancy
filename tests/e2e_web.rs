@@ -23,17 +23,17 @@ mod common;
 #[sealed_test(env = [
     ("GEMINI_API_KEY", "mock")
 ])]
-async fn test_e2e_web_grinder_list() {
+async fn test_e2e_web_doer_list() {
     let tmp = TempDir::new().unwrap();
     std::env::set_current_dir(tmp.path()).unwrap();
 
     // 1. git init
     git2::Repository::init(tmp.path()).unwrap();
 
-    // 2. nancy init (provision 3 grinders)
+    // 2. nancy init (provision 3 doers)
     nancy::commands::init::init(tmp.path(), 3).await.unwrap();
 
-    // Explicit leptos bindings obsolete: Grinder endpoint migrated to pure Axum handling organically.
+    // Explicit leptos bindings obsolete: Doer endpoint migrated to pure Axum handling organically.
 
     // 3. start web server
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -65,7 +65,7 @@ async fn test_e2e_web_grinder_list() {
         .danger_accept_invalid_certs(true)
         .build()
         .unwrap();
-    let url = format!("https://127.0.0.1:{}/api/grinders", local_addr.port());
+    let url = format!("https://127.0.0.1:{}/api/doers", local_addr.port());
     println!("Requesting: {}", url);
 
     let res = client
@@ -82,14 +82,14 @@ async fn test_e2e_web_grinder_list() {
     }
     assert_eq!(status, reqwest::StatusCode::OK, "API returned non-200");
 
-    let parsed: schema::GrindersResponse =
-        serde_json::from_str(&text).expect("Failed to deserialize GrindersResponse");
-    let statuses = parsed.grinders;
+    let parsed: schema::DoersResponse =
+        serde_json::from_str(&text).expect("Failed to deserialize DoersResponse");
+    let statuses = parsed.doers;
 
     assert_eq!(
         statuses.len(),
         5,
-        "Expected 3 provisioned grinders + 1 dreamer + 1 coordinator from identity.json"
+        "Expected 3 provisioned doers + 1 dreamer + 1 coordinator from identity.json"
     );
     for s in statuses {
         if s.did == "coordinator" {
@@ -104,21 +104,21 @@ async fn test_e2e_web_grinder_list() {
 #[sealed_test(env = [
     ("GEMINI_API_KEY", "mock")
 ])]
-async fn test_e2e_web_grinders_online() {
+async fn test_e2e_web_doers_online() {
     let tmp = TempDir::new().unwrap();
     std::env::set_current_dir(tmp.path()).unwrap();
 
     // 1. git init
     let _repo = git2::Repository::init(tmp.path()).unwrap();
 
-    // 2. nancy init (provision 3 grinders)
+    // 2. nancy init (provision 3 doers)
     nancy::commands::init::init(tmp.path(), 3).await.unwrap();
 
     let identity_file = tmp.path().join(".nancy").join("identity.json");
     let _root_id: nancy::schema::identity_config::Identity =
         serde_json::from_str(&fs::read_to_string(&identity_file).unwrap()).unwrap();
 
-    // Secure authentic nancy executable mappings natively for tests running `DockerOrchestrator` organically
+    // Map nancy executable for tests running `DockerOrchestrator`
     unsafe {
         std::env::set_var("NANCY_E2E_EXECUTABLE", env!("CARGO_BIN_EXE_nancy"));
     }
@@ -140,9 +140,9 @@ async fn test_e2e_web_grinders_online() {
         .danger_accept_invalid_certs(true)
         .build()
         .unwrap();
-    let url = format!("https://127.0.0.1:{}/api/grinders", port);
+    let url = format!("https://127.0.0.1:{}/api/doers", port);
 
-    // 6. Poll reqwest agent list until 4 agents (3 grinders + 1 dreamer) are officially recorded ONLINE dynamically natively
+    // 6. Poll reqwest agent list until 4 agents (3 doers + 1 dreamer) are officially recorded ONLINE
     let mut online_count = 0;
     let mut attempts = 0;
     while online_count < 5 && attempts < 1000 {
@@ -157,9 +157,9 @@ async fn test_e2e_web_grinders_online() {
         assert_eq!(status, reqwest::StatusCode::OK, "API returned non-200");
 
         let text = res.text().await.unwrap();
-        let parsed: schema::GrindersResponse =
-            serde_json::from_str(&text).expect("Failed to deserialize GrindersResponse");
-        let statuses = parsed.grinders;
+        let parsed: schema::DoersResponse =
+            serde_json::from_str(&text).expect("Failed to deserialize DoersResponse");
+        let statuses = parsed.doers;
 
         online_count = statuses.iter().filter(|s| s.is_online).count();
         if online_count < 5 {
@@ -180,17 +180,17 @@ async fn test_e2e_web_grinders_online() {
 #[sealed_test(env = [
     ("GEMINI_API_KEY", "mock")
 ])]
-async fn test_e2e_web_add_remove_grinder() {
+async fn test_e2e_web_add_remove_doer() {
     let tmp = TempDir::new().unwrap();
     std::env::set_current_dir(tmp.path()).unwrap();
 
     // 1. git init
     let _repo = git2::Repository::init(tmp.path()).unwrap();
 
-    // 2. nancy init (provision 0 grinders)
+    // 2. nancy init (provision 0 doers)
     nancy::commands::init::init(tmp.path(), 0).await.unwrap();
 
-    // Secure authentic nancy executable mappings natively for tests running `DockerOrchestrator` organically
+    // Map nancy executable for tests running `DockerOrchestrator`
     unsafe {
         std::env::set_var("NANCY_E2E_EXECUTABLE", env!("CARGO_BIN_EXE_nancy"));
     }
@@ -214,34 +214,34 @@ async fn test_e2e_web_add_remove_grinder() {
         .unwrap();
     let base_url = format!("https://127.0.0.1:{}", port);
 
-    // 3. POST /api/add-grinder
+    // 3. POST /api/add-doer
     let add_res = client
-        .post(&format!("{}/api/add-grinder", base_url))
+        .post(&format!("{}/api/add-doer", base_url))
         .send()
         .await
-        .expect("Failed to POST add-grinder");
+        .expect("Failed to POST add-doer");
 
     assert_eq!(add_res.status(), reqwest::StatusCode::OK);
 
     let add_json: serde_json::Value = add_res.json().await.unwrap();
     let added_did = add_json["did"]
         .as_str()
-        .expect("Add Grinder response missing did")
+        .expect("Add Doer response missing did")
         .to_string();
 
-    // 4. Poll /api/grinders until the target is online
+    // 4. Poll /api/doers until the target is online
     let mut online = false;
     let mut attempts = 0;
     while !online && attempts < 1000 {
         let res = client
-            .get(&format!("{}/api/grinders", base_url))
+            .get(&format!("{}/api/doers", base_url))
             .header("Accept", "application/json")
             .send()
             .await
             .unwrap();
 
-        let parsed: schema::GrindersResponse = res.json().await.unwrap();
-        let statuses = parsed.grinders;
+        let parsed: schema::DoersResponse = res.json().await.unwrap();
+        let statuses = parsed.doers;
         if let Some(target) = statuses.iter().find(|s| s.did == added_did) {
             online = target.is_online;
         }
@@ -254,35 +254,35 @@ async fn test_e2e_web_add_remove_grinder() {
 
     assert!(
         online,
-        "Failed to observe newly added Grinder {} as ONLINE before timeout",
+        "Failed to observe newly added Doer {} as ONLINE before timeout",
         added_did
     );
 
-    // 5. POST /api/remove-grinder
+    // 5. POST /api/remove-doer
     let remove_payload = serde_json::json!({ "did": added_did });
     let remove_res = client
-        .post(&format!("{}/api/remove-grinder", base_url))
+        .post(&format!("{}/api/remove-doer", base_url))
         .header("Content-Type", "application/json")
         .json(&remove_payload)
         .send()
         .await
-        .expect("Failed to POST remove-grinder");
+        .expect("Failed to POST remove-doer");
 
     assert_eq!(remove_res.status(), reqwest::StatusCode::OK);
 
-    // 6. Poll /api/grinders until the target is gone
+    // 6. Poll /api/doers until the target is gone
     let mut is_gone = false;
     attempts = 0;
     while !is_gone && attempts < 200 {
         let res = client
-            .get(&format!("{}/api/grinders", base_url))
+            .get(&format!("{}/api/doers", base_url))
             .header("Accept", "application/json")
             .send()
             .await
             .unwrap();
 
-        let parsed: schema::GrindersResponse = res.json().await.unwrap();
-        let statuses = parsed.grinders;
+        let parsed: schema::DoersResponse = res.json().await.unwrap();
+        let statuses = parsed.doers;
         is_gone = !statuses.iter().any(|s| s.did == added_did);
 
         if !is_gone {
@@ -293,7 +293,7 @@ async fn test_e2e_web_add_remove_grinder() {
 
     assert!(
         is_gone,
-        "Failed to observe Grinder {} removal before timeout",
+        "Failed to observe Doer {} removal before timeout",
         added_did
     );
 }
@@ -311,8 +311,8 @@ async fn test_e2e_web_tasks_topology() {
 
     let (mock_port, test_queue) = common::mock_gemini::spawn_mock_server().await;
 
-    // We expect the Coordinator to query the orchestrator, and the Grinder to resolve the Introspection Plan organically natively.
-    // For a generic generic "Test Topology Request", let's mock the grinder LLM calls!
+    // We expect the Coordinator to query the orchestrator, and the Doer to resolve the Introspection Plan.
+    // For a generic generic "Test Topology Request", let's mock the doer LLM calls!
     common::mock_gemini::push_tool_call_response(
         &test_queue,
         "report_completed_task",
@@ -347,7 +347,7 @@ async fn test_e2e_web_tasks_topology() {
         .build()
         .unwrap();
 
-    // Post authentic task payload securely resolving orchestrator loops natively!
+    // Post task payload.
     let task_payload =
         serde_json::json!({ "requestor": "tester", "description": "Test Topology Request" });
     let post_res = client
@@ -436,7 +436,7 @@ async fn test_e2e_web_incident_logs() {
         .unwrap();
     writer.commit_batch().await.unwrap();
 
-    // Secure authentic nancy executable mappings natively for tests running `DockerOrchestrator` organically
+    // Map nancy executable for tests running `DockerOrchestrator`
     unsafe {
         std::env::set_var("NANCY_E2E_EXECUTABLE", env!("CARGO_BIN_EXE_nancy"));
     }
@@ -496,7 +496,7 @@ async fn test_e2e_web_tasks_evaluations() {
 
     let (mock_port, test_queue) = common::mock_gemini::spawn_mock_server().await;
 
-    // Manually log an Ask event to verify Dreamer evaluation plumbing independently of Grinder tool-call timing
+    // Manually log an Ask event to verify Dreamer evaluation plumbing independently of Doer tool-call timing
     {
         let id_obj = nancy::schema::identity_config::Identity::load(tmp.path())
             .await
@@ -522,12 +522,12 @@ async fn test_e2e_web_tasks_evaluations() {
             count += 1;
         }
         println!(
-            "TEST SANITY: coordinator has {} events natively logged BEFORE boot.",
+            "TEST SANITY: coordinator has {} events logged BEFORE boot.",
             count
         );
     }
 
-    // Provide plenty of responses for both grinder follow-ups and dreamer evaluations
+    // Provide plenty of responses for both doer follow-ups and dreamer evaluations
     for _ in 0..50 {
         common::mock_gemini::push_text_response(&test_queue, "95").await;
     }
@@ -612,7 +612,7 @@ async fn test_e2e_web_tasks_evaluations() {
 
     assert!(
         found,
-        "Failed to observe Test TaskEvaluation in evaluations response natively dynamically before timeout: Final response was {:?}",
+        "Failed to observe Test TaskEvaluation in evaluations response before timeout: Final response was {:?}",
         client.get(&url).send().await.unwrap().text().await.unwrap()
     );
 }
@@ -621,7 +621,7 @@ async fn test_e2e_web_tasks_evaluations() {
 #[sealed_test(env = [
     ("GEMINI_API_KEY", "mock")
 ])]
-async fn test_e2e_web_human_pending_standalone_grinder_hydration() {
+async fn test_e2e_web_human_pending_standalone_doer_hydration() {
     let tmp = TempDir::new().unwrap();
     std::env::set_current_dir(tmp.path()).unwrap();
 
@@ -631,14 +631,14 @@ async fn test_e2e_web_human_pending_standalone_grinder_hydration() {
         .unwrap();
     nancy::commands::init::init(tmp.path(), 0).await.unwrap();
 
-    // Simulate a Standalone Grinder natively writing to its own DID branch securely!
-    let standalone_identity = nancy::schema::identity_config::Identity::Grinder(
+    // Simulate a Standalone Doer writing to its own DID branch.
+    let standalone_identity = nancy::schema::identity_config::Identity::Doer(
         nancy::schema::identity_config::DidOwner::generate(),
     );
 
-    let grinder_writer =
+    let doer_writer =
         nancy::events::writer::Writer::new(&async_repo, standalone_identity).unwrap();
-    grinder_writer
+    doer_writer
         .log_event(nancy::schema::registry::EventPayload::ReviewPlan(
             nancy::schema::task::ReviewPlanPayload {
                 plan_ref: "standalone_plan_xyz123".to_string(),
@@ -659,7 +659,7 @@ async fn test_e2e_web_human_pending_standalone_grinder_hydration() {
             },
         ))
         .unwrap();
-    grinder_writer.commit_batch().await.unwrap();
+    doer_writer.commit_batch().await.unwrap();
 
     // Boot the Coordinator!
     let mut coord = nancy::commands::coordinator::Coordinator::new(tmp.path())
@@ -697,7 +697,7 @@ async fn test_e2e_web_human_pending_standalone_grinder_hydration() {
     assert_eq!(
         plan_reviews.len(),
         1,
-        "AppView Hydration missed the standalone grinder's Git branch!"
+        "AppView Hydration missed the standalone doer's Git branch!"
     );
     let payload = &plan_reviews[0];
     assert_eq!(payload["plan_ref"], "standalone_plan_xyz123");
@@ -748,7 +748,7 @@ async fn test_e2e_web_market_state() {
 
     assert_eq!(res.status(), reqwest::StatusCode::OK);
 
-    // Spot Market should have active quotas hydrated organically natively.
+    // Spot Market should have active quotas hydrated.
     let market_state: serde_json::Value = res.json().await.unwrap();
     let per_model_stats = market_state["per_model_stats"]
         .as_array()

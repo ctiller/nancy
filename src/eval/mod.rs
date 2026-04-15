@@ -170,17 +170,18 @@ impl EvalRunner {
 
         let _bg_dir = repo_path.to_path_buf();
         let _explicit_coord = coord.clone();
-        let _explicit_grinder = if let crate::schema::identity_config::Identity::Coordinator {
+        let _explicit_doer = if let crate::schema::identity_config::Identity::Coordinator {
             workers,
             ..
         } = &id_obj
         {
             workers
                 .first()
-                .map(|w| crate::schema::identity_config::Identity::Grinder(w.clone()))
+                .map(|w| crate::schema::identity_config::Identity::Doer(w.clone()))
         } else {
             None
         };
+
         Ok(Self {
             temp_dir,
             repo,

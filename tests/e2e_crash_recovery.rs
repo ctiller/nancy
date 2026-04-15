@@ -31,7 +31,7 @@ async fn test_e2e_crash_recovery() {
         .await
         .unwrap();
 
-    // 2. nancy init (provision 1 grinder)
+    // 2. nancy init (provision 1 doer)
     nancy::commands::init::init(tmp.path(), 1).await.unwrap();
 
     let identity_file = tmp.path().join(".nancy").join("identity.json");
@@ -39,7 +39,7 @@ async fn test_e2e_crash_recovery() {
         serde_json::from_str(&fs::read_to_string(&identity_file).unwrap()).unwrap();
     let root_did = root_id.get_did_owner().did.clone();
 
-    // Secure authentic nancy executable mappings natively for tests running `DockerOrchestrator` organically
+    // Map nancy executable for tests running `DockerOrchestrator`
     unsafe {
         std::env::set_var("NANCY_E2E_EXECUTABLE", env!("CARGO_BIN_EXE_nancy"));
     }
@@ -56,16 +56,16 @@ async fn test_e2e_crash_recovery() {
     // Acquire the dynamic local port published via the socket bind callback
     let port = rx.await.expect("Coordinator boot dropped callback!");
 
-    // Wait for HTTPS asynchronous socket rebinding to finish dynamically natively
+    // Wait for HTTPS asynchronous socket rebinding to finish
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
     let client = reqwest::Client::builder()
         .danger_accept_invalid_certs(true)
         .build()
         .unwrap();
-    let url = format!("https://127.0.0.1:{}/api/grinders", port);
+    let url = format!("https://127.0.0.1:{}/api/doers", port);
 
-    // Wait for the single grinder to come online natively
+    // Wait for the single doer to come online
     let mut target_grinder_did = String::new();
     let mut attempts = 0;
     while target_grinder_did.is_empty() && attempts < 200 {
@@ -76,12 +76,12 @@ async fn test_e2e_crash_recovery() {
             .await
             .unwrap();
         let text = res.text().await.unwrap();
-        let parsed: schema::GrindersResponse = serde_json::from_str(&text).unwrap();
+        let parsed: schema::DoersResponse = serde_json::from_str(&text).unwrap();
 
         if let Some(target) = parsed
-            .grinders
+            .doers
             .into_iter()
-            .find(|s| s.is_online && s.agent_type == "grinder")
+            .find(|s| s.is_online && s.agent_type == "doer")
         {
             target_grinder_did = target.did;
         } else {
@@ -101,7 +101,7 @@ async fn test_e2e_crash_recovery() {
         .join(".nancy")
         .join("sockets")
         .join(&target_grinder_did)
-        .join("grinder.sock");
+        .join("doer.sock");
 
     let uds_client = reqwest::Client::builder()
         .unix_socket(grinder_socket_path)
@@ -138,7 +138,7 @@ async fn test_e2e_crash_recovery() {
         "Failed to capture AgentCrashReport payload dynamically!"
     );
 
-    // Verify the log was natively physically attached into an incidents/ tree
+    // Verify the log was attached to an incidents/ tree
     let branch_name = format!("refs/heads/nancy/{}", root_did.replace(":", "_"));
     let latest_commit = repo
         .find_reference(&branch_name)
@@ -178,10 +178,10 @@ async fn test_e2e_crash_recovery() {
             .await
             .unwrap();
         let text = res.text().await.unwrap();
-        let parsed: schema::GrindersResponse = serde_json::from_str(&text).unwrap();
+        let parsed: schema::DoersResponse = serde_json::from_str(&text).unwrap();
 
         if let Some(target) = parsed
-            .grinders
+            .doers
             .into_iter()
             .find(|s| s.did == target_grinder_did)
         {

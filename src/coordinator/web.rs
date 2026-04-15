@@ -91,7 +91,7 @@ async fn fs_asset_handler(
     }
 }
 
-async fn proxy_grinder_state(
+async fn proxy_doer_state(
     axum::extract::Path(did): axum::extract::Path<String>,
     axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
 ) -> impl IntoResponse {
@@ -101,11 +101,11 @@ async fn proxy_grinder_state(
         .join("sockets")
         .join(&did)
         .join("coordinator.sock");
-    let socket_path_grinder = root
+    let socket_path_doer = root
         .join(".nancy")
         .join("sockets")
         .join(&did)
-        .join("grinder.sock");
+        .join("doer.sock");
     let socket_path_dreamer = root
         .join(".nancy")
         .join("sockets")
@@ -113,16 +113,17 @@ async fn proxy_grinder_state(
         .join("dreamer.sock");
     let socket_path = if socket_path_coordinator.exists() {
         socket_path_coordinator
-    } else if socket_path_grinder.exists() {
-        socket_path_grinder
+    } else if socket_path_doer.exists() {
+        socket_path_doer
     } else {
         socket_path_dreamer
     };
 
     if !socket_path.exists() {
         tracing::debug!("Proxy error: UDS socket not found at {:?}", socket_path);
-        return (StatusCode::NO_CONTENT, "Grinder socket not found").into_response();
+        return (StatusCode::NO_CONTENT, "Doer socket not found").into_response();
     }
+
 
     if let Ok(client) = reqwest::Client::builder()
         .unix_socket(socket_path)
@@ -141,7 +142,7 @@ async fn proxy_grinder_state(
                 if let Ok(data) = resp.bytes().await {
                     if status != 200 {
                         tracing::debug!(
-                            "Proxy error: grinder backend returned {} with body {:?}",
+                            "Proxy error: doer backend returned {} with body {:?}",
                             status,
                             data
                         );
@@ -149,7 +150,7 @@ async fn proxy_grinder_state(
                     }
                     return ([(CONTENT_TYPE, "application/json")], data).into_response();
                 } else {
-                    tracing::debug!("Proxy error: failed to read bytes from grinder backend");
+                    tracing::debug!("Proxy error: failed to read bytes from doer backend");
                 }
             }
             Err(e) => {
@@ -160,14 +161,15 @@ async fn proxy_grinder_state(
         tracing::debug!("Proxy error: failed to build reqwest client with unix socket");
     }
 
-    (StatusCode::BAD_GATEWAY, "Failed to pull from grinder").into_response()
+    (StatusCode::BAD_GATEWAY, "Failed to pull from doer").into_response()
 }
 
-async fn get_api_grinders(
+async fn get_api_doers(
     axum::extract::Extension(state): axum::extract::Extension<crate::coordinator::ipc::IpcState>,
     axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
 ) -> impl IntoResponse {
     let mut rx = state.tx_ready.subscribe();
+
 
     if let Some(target_version) = params
         .get("last_version")
@@ -198,7 +200,7 @@ async fn get_api_grinders(
         did: _coord_did, workers, dreamer, ..
     } = &identity
     {
-        statuses.push(schema::GrinderStatus {
+        statuses.push(schema::DoerStatus {
             did: "coordinator".to_string(),
             agent_type: "coordinator".to_string(),
             is_online: true,
@@ -209,7 +211,7 @@ async fn get_api_grinders(
 
         let mut agents = vec![];
         for w in workers {
-            agents.push((w, "grinder"));
+            agents.push((w, "doer"));
         }
         agents.push((dreamer, "dreamer"));
 
@@ -223,7 +225,7 @@ async fn get_api_grinders(
                 })
                 .unwrap_or((None, None, None));
 
-            statuses.push(schema::GrinderStatus {
+            statuses.push(schema::DoerStatus {
                 did: worker.did.clone(),
                 agent_type: agent_type.to_string(),
                 is_online: false,
@@ -234,6 +236,7 @@ async fn get_api_grinders(
         }
     }
 
+
     let sockets_dir = root.join(".nancy").join("sockets");
     if let Ok(mut entries) = tokio::fs::read_dir(&sockets_dir).await {
         while let Ok(Some(entry)) = entries.next_entry().await {
@@ -241,20 +244,21 @@ async fn get_api_grinders(
             if meta.map(|m| m.is_dir()).unwrap_or(false) {
                 let did = entry.file_name().to_string_lossy().to_string();
                 if did != "coordinator" {
-                    let is_grinder = tokio::fs::metadata(entry.path().join("grinder.sock"))
+                    let is_doer = tokio::fs::metadata(entry.path().join("doer.sock"))
                         .await
                         .is_ok();
                     let is_dreamer = tokio::fs::metadata(entry.path().join("dreamer.sock"))
                         .await
                         .is_ok();
-                    if is_grinder || is_dreamer {
+                    if is_doer || is_dreamer {
                         if let Some(existing) = statuses.iter_mut().find(|s| s.did == did) {
                             existing.is_online = true;
                             existing.agent_type = if is_dreamer {
                                 "dreamer".to_string()
                             } else {
-                                "grinder".to_string()
+                                "doer".to_string()
                             };
+
                         } else {
                             let (next_restart_at_unix, failures, log_ref) = appview
                                 .as_ref()
@@ -269,12 +273,12 @@ async fn get_api_grinders(
                                 })
                                 .unwrap_or((None, None, None));
 
-                            statuses.push(schema::GrinderStatus {
+                            statuses.push(schema::DoerStatus {
                                 did: did.to_string(),
                                 agent_type: if is_dreamer {
                                     "dreamer".to_string()
                                 } else {
-                                    "grinder".to_string()
+                                    "doer".to_string()
                                 },
                                 is_online: true,
                                 next_restart_at_unix,
@@ -288,10 +292,11 @@ async fn get_api_grinders(
         }
     }
 
-    axum::Json(schema::GrindersResponse {
+    axum::Json(schema::DoersResponse {
         version,
-        grinders: statuses,
+        doers: statuses,
     })
+
 }
 
 async fn get_api_incident_log(
@@ -672,7 +677,7 @@ pub fn spawn_web_server(
     );
 
     let web_app = Router::new()
-        .route("/api/grinders", get(get_api_grinders))
+        .route("/api/doers", get(get_api_doers))
         .route("/api/tasks/topology", get(get_api_tasks_topology))
         .route("/api/tasks/evaluations", get(get_api_tasks_evaluations))
         .route("/api/repo/tree", get(api_get_repo_tree))
@@ -681,15 +686,16 @@ pub fn spawn_web_server(
         .route("/api/tasks", post(api_submit_task))
         .route("/api/fs/{*path}", get(fs_asset_handler))
         .route("/api/incidents/{log_ref}", get(get_api_incident_log))
-        .route("/api/grinders/{did}/state", get(proxy_grinder_state))
+        .route("/api/doers/{did}/state", get(proxy_doer_state))
         .route(
-            "/api/add-grinder",
-            post(crate::coordinator::ipc::add_grinder_handler),
+            "/api/add-doer",
+            post(crate::coordinator::ipc::add_doer_handler),
         )
         .route(
-            "/api/remove-grinder",
-            post(crate::coordinator::ipc::remove_grinder_handler),
+            "/api/remove-doer",
+            post(crate::coordinator::ipc::remove_doer_handler),
         )
+
         .route("/api/human/pending", get(api_human_pending))
         .route("/api/human/action", post(api_human_action))
         .route("/api/market/state", get(api_get_market_state))
@@ -877,12 +883,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_proxy_grinder_state_missing() {
+    async fn test_proxy_doer_state_missing() {
         let path = axum::extract::Path("missing_did".to_string());
         let q = axum::extract::Query(std::collections::HashMap::new());
-        let resp = proxy_grinder_state(path, q).await.into_response();
+        let resp = proxy_doer_state(path, q).await.into_response();
         assert_eq!(resp.status(), StatusCode::NO_CONTENT);
     }
+
 
     #[tokio::test]
     #[sealed_test]

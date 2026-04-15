@@ -29,7 +29,7 @@ use nancy::schema::task::{TaskAction, TaskPayload};
 #[sealed_test(env = [
     ("GEMINI_API_KEY", "mock")
 ])]
-async fn test_grinder_pull_assignment_over_ipc() -> Result<()> {
+async fn test_doer_pull_assignment_over_ipc() -> Result<()> {
     // -------------------------------------------------------------------------
     // Phase 1: Context & Identities Setup
     // -------------------------------------------------------------------------
@@ -66,9 +66,8 @@ async fn test_grinder_pull_assignment_over_ipc() -> Result<()> {
     let writer = Writer::new(&async_repo, coord_identity)?;
 
     // -------------------------------------------------------------------------
-    // Phase 2: Inject Native TaskPayload
+    // Phase 2: Inject TaskPayload
     // -------------------------------------------------------------------------
-    // We intentionally inject a Task directly into the DAG so we bypass the TaskRequest resolution time. 
     let test_task_id = "test_target_pull_task".to_string();
     let task_payload = TaskPayload {
         description: "Execute me via Pull IPC".to_string(),
@@ -83,15 +82,13 @@ async fn test_grinder_pull_assignment_over_ipc() -> Result<()> {
     writer.commit_batch().await?;
 
     // -------------------------------------------------------------------------
-    // Phase 3: Bootstrap Coordinator Native HTTP/IPC
+    // Phase 3: Bootstrap Coordinator HTTP/IPC
     // -------------------------------------------------------------------------
     let mut coord = Coordinator::new(temp_dir.path()).await?;
     
-    // Spawn Coordinator in background gracefully resolving loop iterations 
     let (tx_port, rx_port) = tokio::sync::oneshot::channel();
     let bg_coord = tokio::spawn(async move {
         coord.run_until(0, Some(tx_port), |appview| {
-            // Check AppView natively inside loop until Assignment successfully maps locally via Pull!
             let has_active_agent = appview.tasks.iter().any(|(id, _)| {
                 appview.assignments.get(id).is_some()
             });
@@ -99,17 +96,15 @@ async fn test_grinder_pull_assignment_over_ipc() -> Result<()> {
         }).await.unwrap();
     });
 
-    // Wait until coordinator web/IPC servers successfully bind securely
     let _ = rx_port.await.unwrap();
 
     // -------------------------------------------------------------------------
-    // Phase 4: Execute Grinder IPC Extraction Pattern directly
+    // Phase 4: Execute Doer IPC Extraction Pattern directly
     // -------------------------------------------------------------------------
-    // Mimics logic inside `src/commands/grind.rs` to fetch task payload sequentially via UDS socket!
     std::env::set_current_dir(temp_dir.path())?;
 
-    let result = nancy::commands::grind::identify_assigned_task(&async_repo, &worker_owner.did, &coord_owner.did).await;
-    assert!(result.is_some(), "Grinder Pull IPC request structurally failed safely to claim open assignment over socket.");
+    let result = nancy::commands::doer::identify_assigned_task(&async_repo, &worker_owner.did, &coord_owner.did).await;
+    assert!(result.is_some(), "Doer Pull IPC request failed");
     
     let (task_id, _payload) = result.unwrap();
     assert_eq!(task_id, test_task_id, "Mismatch in pulled execution task ID");
@@ -117,9 +112,8 @@ async fn test_grinder_pull_assignment_over_ipc() -> Result<()> {
     // -------------------------------------------------------------------------
     // Phase 5: Ensure UI Mapping DAG Persistence Flow behaves sequentially correct
     // -------------------------------------------------------------------------
-    let worker_identity = Identity::Grinder(worker_owner.clone());
+    let worker_identity = Identity::Doer(worker_owner.clone());
     let worker_writer = Writer::new(&async_repo, worker_identity)?;
-    // Simulates the DAG formal bounds that we recently restored organically allowing Coordinator AppView rendering seamlessly!
     let assign_evt = nancy::schema::registry::EventPayload::CoordinatorAssignment(
         nancy::schema::task::CoordinatorAssignmentPayload {
             task_ref: test_task_id.clone(),
@@ -129,10 +123,7 @@ async fn test_grinder_pull_assignment_over_ipc() -> Result<()> {
     worker_writer.log_event(assign_evt)?;
     worker_writer.commit_batch().await?;
 
-    // The background coordinator loop condition will evaluate true and exit cleanly natively resolving the loop successfully.
     let _ = tokio::time::timeout(std::time::Duration::from_secs(5), bg_coord).await?;
 
     Ok(())
 }
-
-// DOCUMENTED_BY: [docs/adr/0068-execute-task-test-module-migration.md]

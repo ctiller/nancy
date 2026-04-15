@@ -19,8 +19,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::fs;
 
 use crate::coordinator::appview::AppView;
-use crate::coordinator::grinder::GrinderSyncEngine;
+use crate::coordinator::doer::DoerSyncEngine;
 use crate::coordinator::ipc::{IpcState, spawn_ipc_server};
+
 use crate::coordinator::web::spawn_web_server;
 use crate::coordinator::workflow::process_app_view_events;
 use crate::schema::identity_config::Identity;
@@ -138,17 +139,16 @@ impl Coordinator {
             Ok(orch) => Some(orch),
             Err(e) => {
                 tracing::warn!(
-                    "Docker daemon unavailable! Coordinator will register assignments but Grinders will NOT be provisioned: {}",
+                    "Docker daemon unavailable! Coordinator will register assignments but Doers will NOT be provisioned: {}",
                     e
                 );
                 None
             }
         };
-        let mut sync_engine = GrinderSyncEngine::new();
+        let mut sync_engine = DoerSyncEngine::new();
 
         while !condition(&AppView::new()) && !SHUTDOWN.load(Ordering::SeqCst) {
             let active_identity = { shared_identity.read().await.clone() };
-            // Ensure git resource descriptors are dropped each loop to avoid OS handle exhaustion.
             let active_repo = crate::git::AsyncRepository::discover(&self.workdir).await?;
             let git_ctx = crate::introspection::IntrospectionContext {
                 current_frame: tree_root.git_root.clone(),
@@ -159,10 +159,11 @@ impl Coordinator {
             let appview = AppView::hydrate(
                 &active_repo,
                 &active_identity,
-                sync_engine.target_sync_grinder.as_deref(),
+                sync_engine.target_sync_doer.as_deref(),
             )
             .await;
-            sync_engine.target_sync_grinder = None;
+            sync_engine.target_sync_doer = None;
+
 
             // Test loop condition against synced view
             if condition(&appview) {
@@ -204,10 +205,11 @@ impl Coordinator {
 
             if logged_any {
                 tracing::debug!(
-                    "[Coordinator] Successfully processed and committed Grinder events. Broadcasting tx_ready to unblock..."
+                    "[Coordinator] Successfully processed and committed Doer events. Broadcasting tx_ready to unblock..."
                 );
                 shared_tx_ready.send_modify(|val| *val += 1); // increment state boundary safely
             } else if sync_engine.force_sync_broadcast {
+
                 shared_tx_ready.send_modify(|val| *val += 1); // increment state boundary cleanly
             } else {
                 sync_engine.wait_for_events(&mut rx_updates).await;

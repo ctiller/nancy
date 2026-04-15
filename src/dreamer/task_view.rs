@@ -257,9 +257,10 @@ mod tests {
         if let Identity::Coordinator { workers, .. } = &id_obj {
             let writer = crate::events::writer::Writer::new(
                 &async_repo,
-                Identity::Grinder(workers[0].clone()),
+                Identity::Doer(workers[0].clone()),
             )
             .unwrap();
+
             writer
                 .log_event(crate::schema::registry::EventPayload::Ask(
                     crate::schema::task::AskPayload {

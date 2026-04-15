@@ -207,7 +207,8 @@ mod tests {
         {}: [none]
         */
         "#, "DOCUMENTED_BY", "IMPLEMENTED_BY");
-        let data = extract_tags(content);
+        let data = extract_tags(&content);
+
         assert_eq!(data.documented_by, vec!["foo/bar.md", "baz.md"]);
         assert_eq!(data.implemented_by, vec!["none"]);
     }

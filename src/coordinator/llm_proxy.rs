@@ -278,8 +278,9 @@ pub async fn proxy_handler(
                         }
                     }
                 } else {
-                    tracing::error!("Corrupted JSON seamlessly mitigated internally within SSE bounds: {}", data);
+                    tracing::error!("Mitigated corrupted JSON chunk in SSE stream: {}", data);
                 }
+
             }
         }
 

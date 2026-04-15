@@ -12,12 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use schema::{GrinderStatus, GrindersResponse, SerializedElement, SerializedFrame};
+use schema::{DoerStatus, DoersResponse, SerializedElement, SerializedFrame};
 use yew::prelude::*;
 
 #[function_component(AgentsView)]
 pub fn agents_view() -> Html {
-    let list = use_state(|| None::<Vec<GrinderStatus>>);
+    let list = use_state(|| None::<Vec<DoerStatus>>);
     let reload_trigger = use_state(|| 0);
 
     {
@@ -36,9 +36,9 @@ pub fn agents_view() -> Html {
                         break;
                     }
                     let url = if let Some(lv) = last_version {
-                        format!("/api/grinders?last_version={}", lv)
+                        format!("/api/doers?last_version={}", lv)
                     } else {
-                        "/api/grinders".to_string()
+                        "/api/doers".to_string()
                     };
 
                     let mut req = gloo_net::http::Request::get(&url);
@@ -51,15 +51,15 @@ pub fn agents_view() -> Html {
                             break;
                         }
                         if resp.ok() {
-                            let parse_res = resp.json::<GrindersResponse>().await;
+                            let parse_res = resp.json::<DoersResponse>().await;
                             if let Ok(data) = parse_res {
                                 if Some(data.version) != last_version {
                                     last_version = Some(data.version);
-                                    list.set(Some(data.grinders));
+                                    list.set(Some(data.doers));
                                 }
                             } else if let Err(e) = parse_res {
                                 web_sys::console::error_1(
-                                    &format!("Failed to parse GrindersResponse: {:?}", e).into(),
+                                    &format!("Failed to parse DoersResponse: {:?}", e).into(),
                                 );
                             }
                         } else {
@@ -87,12 +87,12 @@ pub fn agents_view() -> Html {
         });
     }
 
-    let on_add_grinder = {
+    let on_add_doer = {
         let reload_trigger = reload_trigger.clone();
         Callback::from(move |_| {
             let reload_trigger = reload_trigger.clone();
             wasm_bindgen_futures::spawn_local(async move {
-                let _ = gloo_net::http::Request::post("/api/add-grinder")
+                let _ = gloo_net::http::Request::post("/api/add-doer")
                     .send()
                     .await;
                 reload_trigger.set(*reload_trigger + 1);
@@ -103,19 +103,19 @@ pub fn agents_view() -> Html {
     html! {
         <div class="glass-panel" style="padding: 20px;">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
-                <h2 style="margin: 0;">{"Active Grinders"}</h2>
+                <h2 style="margin: 0;">{"Active Doers"}</h2>
                 <button
                     class="btn"
                     style="background: rgba(0, 200, 255, 0.2); border: 1px solid var(--accent-cyan); color: var(--accent-cyan); padding: 6px 12px; border-radius: 4px; cursor: pointer; font-family: monospace; font-size: 0.9rem;"
-                    onclick={on_add_grinder}
+                    onclick={on_add_doer}
                 >
-                    {"+ Add Grinder"}
+                    {"+ Add Doer"}
                 </button>
             </div>
             <div style="display: flex; flex-direction: column; gap: 16px;">
                 if let Some(items) = &*list {
                     if items.is_empty() {
-                        <div class="text-muted">{"No active grinders found."}</div>
+                        <div class="text-muted">{"No active doers found."}</div>
                     } else {
                         { for items.iter().map(|status| {
                             let key = format!("{}_{}_{}", status.did, status.is_online, status.failures.unwrap_or(0));
@@ -130,9 +130,10 @@ pub fn agents_view() -> Html {
     }
 }
 
+
 #[derive(Properties, PartialEq)]
 struct AgentCardProps {
-    status: GrinderStatus,
+    status: DoerStatus,
     reload_trigger: UseStateHandle<u32>,
 }
 
@@ -180,10 +181,11 @@ fn agent_card(props: &AgentCardProps) -> Html {
                         break;
                     }
                     let url = if let Some(lu) = last_update {
-                        format!("/api/grinders/{}/state?last_update={}", did, lu)
+                        format!("/api/doers/{}/state?last_update={}", did, lu)
                     } else {
-                        format!("/api/grinders/{}/state", did)
+                        format!("/api/doers/{}/state", did)
                     };
+
 
                     let mut req = gloo_net::http::Request::get(&url);
                     if let Some(sig) = &signal {
@@ -259,7 +261,7 @@ fn agent_card(props: &AgentCardProps) -> Html {
             let did = did.clone();
             let reload_trigger = reload_trigger.clone();
             wasm_bindgen_futures::spawn_local(async move {
-                let _ = gloo_net::http::Request::post("/api/remove-grinder")
+                let _ = gloo_net::http::Request::post("/api/remove-doer")
                     .json(&serde_json::json!({"did": did}))
                     .unwrap()
                     .send()
@@ -268,6 +270,7 @@ fn agent_card(props: &AgentCardProps) -> Html {
             });
         })
     };
+
 
     let online_val = *is_online;
     let style = format!(

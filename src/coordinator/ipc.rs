@@ -39,14 +39,14 @@ pub struct IpcState {
 }
 
 #[derive(serde::Deserialize)]
-pub struct RemoveGrinderPayload {
+pub struct RemoveDoerPayload {
     pub did: String,
 }
 
-pub async fn add_grinder_handler(
+pub async fn add_doer_handler(
     Extension(state): Extension<IpcState>,
 ) -> axum::Json<serde_json::Value> {
-    tracing::info!("[Coordinator Web API] Processing /api/add-grinder securely...");
+    tracing::info!("[Coordinator Web API] Processing /api/add-doer securely...");
     let root = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
 
     let mut identity = state.shared_identity.write().await;
@@ -62,12 +62,12 @@ pub async fn add_grinder_handler(
     axum::Json(serde_json::json!({"status": "error"}))
 }
 
-pub async fn remove_grinder_handler(
+pub async fn remove_doer_handler(
     Extension(state): Extension<IpcState>,
-    axum::Json(payload): axum::Json<RemoveGrinderPayload>,
+    axum::Json(payload): axum::Json<RemoveDoerPayload>,
 ) -> axum::Json<serde_json::Value> {
     tracing::info!(
-        "[Coordinator Web API] Processing /api/remove-grinder for {}",
+        "[Coordinator Web API] Processing /api/remove-doer for {}",
         payload.did
     );
     let root = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
@@ -75,7 +75,7 @@ pub async fn remove_grinder_handler(
         .join(".nancy")
         .join("sockets")
         .join(&payload.did)
-        .join("grinder.sock");
+        .join("doer.sock");
 
     if sock_path.exists() {
         if let Ok(client) = reqwest::Client::builder()
@@ -113,7 +113,7 @@ pub async fn ready_for_poll_handler(
     axum::Json(payload): axum::Json<crate::schema::ipc::ReadyForPollPayload>,
 ) -> axum::Json<crate::schema::ipc::ReadyForPollResponse> {
     tracing::debug!(
-        "[Coordinator API] Grinder hit /ready-for-poll (last_state: {}). Subscribing...",
+        "[Coordinator API] Doer hit /ready-for-poll (last_state: {}). Subscribing...",
         payload.last_state_id
     );
     let mut rx = state.tx_ready.subscribe();
@@ -161,10 +161,10 @@ pub async fn request_assignment_handler(
     State(state): State<IpcState>,
     axum::Json(payload): axum::Json<crate::schema::ipc::RequestAssignmentPayload>,
 ) -> axum::response::Response {
-    tracing::debug!("[Coordinator API] Grinder {} hitting /request-assignment", payload.grinder_did);
+    tracing::debug!("[Coordinator API] Doer {} hitting /request-assignment", payload.doer_did);
 
     let mut assignments = state.active_assignments.lock().await;
-    assignments.retain(|_, v| v != &payload.grinder_did);
+    assignments.retain(|_, v| v != &payload.doer_did);
 
     let root = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     let repo = match crate::git::AsyncRepository::discover(&root).await {
@@ -181,7 +181,7 @@ pub async fn request_assignment_handler(
 
     for task_id in ready_tasks {
         if !assignments.contains_key(&task_id) {
-            assignments.insert(task_id.clone(), payload.grinder_did.clone());
+            assignments.insert(task_id.clone(), payload.doer_did.clone());
             crate::coordinator::git::ensure_task_branch(&repo, &appview, &task_id).await;
             return axum::response::IntoResponse::into_response(axum::Json(crate::schema::ipc::RequestAssignmentResponse {
                 task_id,
@@ -191,6 +191,7 @@ pub async fn request_assignment_handler(
 
     axum::response::IntoResponse::into_response(axum::http::StatusCode::NO_CONTENT)
 }
+
 
 pub async fn task_priority_handler(
     axum::extract::Path(task_id): axum::extract::Path<String>,
@@ -344,9 +345,10 @@ mod tests {
 
             // Test updates_ready
             let update_payload = crate::schema::ipc::UpdateReadyPayload {
-                grinder_did: "g1".to_string(),
+                doer_did: "g1".to_string(),
                 completed_task_ids: vec!["t1".to_string()],
             };
+
             let res = client
                 .post(&format!("{}/updates-ready", base_url))
                 .json(&update_payload);

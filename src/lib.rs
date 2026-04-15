@@ -21,7 +21,8 @@ pub mod dreamer;
 pub mod eval;
 pub mod events;
 pub mod git;
-pub mod grind;
+pub mod doer;
+
 pub mod introspection;
 pub mod llm;
 pub mod personas;

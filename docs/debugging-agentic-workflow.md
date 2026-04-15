@@ -1,6 +1,6 @@
 # Debugging Guide: Nancy Agentic Workflow
 
-Debugging distributed agentic pipelines in Nancy requires understanding the interactions between the Coordinator, Grinder workers, the Git native storage, and the LLM runtime.
+Debugging distributed agentic pipelines in Nancy requires understanding the interactions between the Coordinator, Doer workers, the Git native storage, and the LLM runtime.
 
 This guide outlines common patterns, configuration flags, and methodologies to effectively troubleshoot issues in Nancy's orchestrator and executor components.
 
@@ -51,16 +51,16 @@ async fn test_agentic_workflow() {
 
 Task executions (Plan, Implement, Review) are orchestrated through sandboxed Git worktrees (e.g. `path/to/repo/worktrees/<task_ref>`).
 - Look under `<bare_repo_dir>/worktrees` if an agent appears to have generated malicious or incorrect changes. This acts as an immediate snapshot of the agent's work surface before a merge.
-- **Failures:** If a Grinder panic or abrupt crash occurs during action dispatch, the worktree might *not* be successfully removed. If you encounter git lock/branch checkout issues subsequently, manually run `git worktree remove -f <target_path>` and evaluate `execute_task.rs` logic to ensure cleanup logic encapsulates panicked tasks.
+- **Failures:** If a Doer panic or abrupt crash occurs during action dispatch, the worktree might *not* be successfully removed. If you encounter git lock/branch checkout issues subsequently, manually run `git worktree remove -f <target_path>` and evaluate `execute_task.rs` logic to ensure cleanup logic encapsulates panicked tasks.
 
 ## 5. Synchronous UDS Polling & IPC "Hangs"
 
-Grinder nodes report status to the Coordinator via local Unix Domain Sockets (UDS) on the `/updates-ready` HTTP endpoint.
+Doer nodes report status to the Coordinator via local Unix Domain Sockets (UDS) on the `/updates-ready` HTTP endpoint.
 
-**Debugging "Hung" Grinders:**
-- By design (ADR 0032), the `/updates-ready` endpoint acts synchronously and **will block** the Grinder node until the Coordinator's event loop fully processes the new data and emits a `tx_ready` signal.
-- If Grinders appear permanently stalled after executing tasks, it indicates the Coordinator's primary event loop has either crashed or failed to consume the Grinder's events. 
-- **Tracing IPC Deadlocks:** The Coordinator leverages native `eprintln!` trace logging across its event loop and API handler scopes (tagged as `[Coordinator]` and `[Coordinator API]`). If test timeouts occur, strictly review the console output for these prefixes to establish whether Grinders failed to broadcast `updates-ready` or if the Coordinator logic neglected to transmit the requisite unblock signal payload.
+**Debugging "Hung" Doers:**
+- By design (ADR 0032), the `/updates-ready` endpoint acts synchronously and **will block** the Doer node until the Coordinator's event loop fully processes the new data and emits a `tx_ready` signal.
+- If Doers appear permanently stalled after executing tasks, it indicates the Coordinator's primary event loop has either crashed or failed to consume the Doer's events. 
+- **Tracing IPC Deadlocks:** The Coordinator leverages native `eprintln!` trace logging across its event loop and API handler scopes (tagged as `[Coordinator]` and `[Coordinator API]`). If test timeouts occur, strictly review the console output for these prefixes to establish whether Doers failed to broadcast `updates-ready` or if the Coordinator logic neglected to transmit the requisite unblock signal payload.
 
 ## 6. Review / Consensus Quorum Validations
 

@@ -15,7 +15,8 @@
 pub mod appview;
 pub mod docker;
 pub mod git;
-pub mod grinder;
+pub mod doer;
+
 pub mod ipc;
 pub mod llm_proxy;
 pub mod market;

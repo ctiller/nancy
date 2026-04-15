@@ -365,11 +365,12 @@ mod tests {
                             .to_string(),
                 };
 
-                // Using Grinder namespace wrapper to allow writer instantiation since Human variant doesn't independently exist
+                // Using Doer namespace wrapper to allow writer instantiation since Human variant doesn't independently exist
                 if let Ok(writer) = crate::events::writer::Writer::new(
                     &r,
-                    crate::schema::identity_config::Identity::Grinder(test_human),
+                    crate::schema::identity_config::Identity::Doer(test_human),
                 ) {
+
                     // Iterate and pick up the item_ref organically to respond correctly
                     let _reader = crate::events::reader::Reader::new(
                         &r,
@@ -459,8 +460,9 @@ mod tests {
 
                 if let Ok(writer) = crate::events::writer::Writer::new(
                     &r,
-                    crate::schema::identity_config::Identity::Grinder(test_human.clone()),
+                    crate::schema::identity_config::Identity::Doer(test_human.clone()),
                 ) {
+
                     let _ = writer.log_event(crate::schema::registry::EventPayload::Seen(
                         crate::schema::task::SeenPayload {
                             item_ref: item_ref_clone.clone(),
