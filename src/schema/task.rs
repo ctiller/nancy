@@ -158,3 +158,5 @@ pub struct TaskSpendPayload {
     pub task_ref: String,
     pub cost_nanocents: schema::NanoCent,
 }
+
+// DOCUMENTED_BY: [docs/adr/0005-schema-registry.md]

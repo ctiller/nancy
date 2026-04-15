@@ -239,3 +239,5 @@ mod tests {
         Ok(())
     }
 }
+
+// DOCUMENTED_BY: [docs/adr/0006-events-library.md]

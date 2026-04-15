@@ -411,3 +411,5 @@ async fn test_worktree_extermination_and_ledger_consistency() -> Result<()> {
     // Property 20: Feature Parity against ADR 0030 limits. The exact mappings defined in ADR 0030 trace the entire DAG correctly via `Coordinator::evaluate_review_completion` explicitly terminating.
     Ok(())
 }
+
+// DOCUMENTED_BY: [docs/adr/0068-execute-task-test-module-migration.md]

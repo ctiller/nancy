@@ -244,3 +244,5 @@ pub async fn run<P: AsRef<Path>>(dir: P, port: u16) -> Result<()> {
     let mut coord = Coordinator::new(dir).await?;
     coord.run_until(port, None, |_| false).await
 }
+
+// DOCUMENTED_BY: [docs/adr/0004-modular-command-architecture.md]

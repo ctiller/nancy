@@ -19,3 +19,5 @@ We enforce a strict boundaries principle where the Leptos web frontend is purely
 - The `.nancy/` folder and `repo/` logic queries remain strictly bound to native Rust logic, rendering them incredibly fast natively.
 - `web/src/` bindings strictly ingest JSON primitives (`TopologyNode`, `GrinderStatus` interfaces) seamlessly bypassing complex data manipulations.
 - Any future complex data filtering, search logic, orchestrator DAG modeling, or ledger history decoding mandates an upstream backend HTTP route rather than pushing WASM logic.
+
+<!-- IMPLEMENTED_BY: [src/coordinator/web.rs, web/src/repo.rs] -->

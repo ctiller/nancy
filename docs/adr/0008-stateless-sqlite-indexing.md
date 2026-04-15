@@ -19,3 +19,5 @@ The database lives as a hidden `.nancy/index.sqlite` utility file.
 - **Positive:** We maintain hyperfast index retrievals inside a fundamentally ephemeral CLI process workflow.
 - **Positive:** SQLite embedded eliminates dependencies outside the Rust CLI ecosystem allowing zero-friction configuration handling.
 - **Negative:** We introduce mild redundant persistence layer complexities bridging git log structures mapping backwards onto active DB state projections.
+
+<!-- IMPLEMENTED_BY: [src/events/index.rs] -->

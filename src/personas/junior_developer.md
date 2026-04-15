@@ -17,3 +17,5 @@ Examples of BAD things you must question:
 - Unexplained jargon or assumptions about prior tribal knowledge.
 
 
+
+<!-- DOCUMENTED_BY: [docs/adr/0028-agentic-perona-registry.md] -->

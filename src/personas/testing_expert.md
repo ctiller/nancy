@@ -17,3 +17,5 @@ Examples of BAD things you must reject:
 - Writing 100 mock tests that don't actually verify integration cleanly.
 
 
+
+<!-- DOCUMENTED_BY: [docs/adr/0028-agentic-perona-registry.md] -->

@@ -21,3 +21,5 @@ pub mod llm_proxy;
 pub mod market;
 pub mod web;
 pub mod workflow;
+
+// DOCUMENTED_BY: [docs/adr/0030-unified-task-dag-orchestration.md]

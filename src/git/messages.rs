@@ -124,3 +124,5 @@ pub enum GitRequest {
         resp: oneshot::Sender<anyhow::Result<()>>,
     },
 }
+
+// DOCUMENTED_BY: [docs/adr/0065-async-git-actor.md]

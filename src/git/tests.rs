@@ -170,3 +170,5 @@ async fn test_async_repository_coverage() -> anyhow::Result<()> {
 
     Ok(())
 }
+
+// DOCUMENTED_BY: [docs/adr/0065-async-git-actor.md]

@@ -65,3 +65,5 @@ mod tests {
         assert!(decl["parameters"].is_object());
     }
 }
+
+// DOCUMENTED_BY: [docs/adr/0020-llm-tool-bindings.md]

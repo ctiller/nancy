@@ -17,3 +17,5 @@ We decided to decouple these workflows into a dedicated internal library namespa
 - **Positive:** All complex interactions with the `git2` C-bindings wrapper over the object store are completely boxed.
 - **Positive:** `nancy` effectively behaves via standard domain-driven behavior, letting CLI operations execute raw business intent (e.g. `logger.log_event(Type)`).
 - **Negative:** Increased initial library structuring and bootstrapping overhead.
+
+<!-- IMPLEMENTED_BY: [src/events/mod.rs, src/events/reader.rs, src/events/writer.rs] -->

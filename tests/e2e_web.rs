@@ -758,3 +758,5 @@ async fn test_e2e_web_market_state() {
         "Spot Market should have initially hydrated limits recorded defensively"
     );
 }
+
+// DOCUMENTED_BY: [docs/adr/0068-execute-task-test-module-migration.md]

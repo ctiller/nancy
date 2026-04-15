@@ -20,3 +20,5 @@ We have completely transitioned the task distribution mechanism from push-to-led
 - Event generation footprint reduced exponentially via the deprecation of mapping operations out-of-band cleanly inherently.
 - Mock interactions in testing environments natively transition from creating fake `CoordinatorAssignmentPayload` structs towards simulating real explicit UDS locks natively or dropping boundaries appropriately safely explicitly.
 - The `AppView` `tasks_assigned` boundary no longer artificially relies on pushed payloads natively indexing gracefully dynamically.
+
+<!-- IMPLEMENTED_BY: [src/coordinator/ipc.rs] -->

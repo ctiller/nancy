@@ -40,3 +40,5 @@ pub fn unban_llm() {
 pub fn is_llm_banned() -> bool {
     LLM_BANNED.load(Ordering::SeqCst)
 }
+
+// DOCUMENTED_BY: [docs/adr/0019-llm-builder-architecture.md]

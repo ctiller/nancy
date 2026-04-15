@@ -20,3 +20,5 @@ pub struct IdentityPayload {
     pub public_key_hex: String,
     pub timestamp: u64,
 }
+
+// DOCUMENTED_BY: [docs/adr/0005-schema-registry.md]

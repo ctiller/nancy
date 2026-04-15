@@ -107,3 +107,5 @@ mod tests {
         .await;
     }
 }
+
+// DOCUMENTED_BY: [docs/adr/0004-modular-command-architecture.md]

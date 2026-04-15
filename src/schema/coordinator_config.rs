@@ -50,3 +50,5 @@ impl CoordinatorConfig {
         Ok(config)
     }
 }
+
+// DOCUMENTED_BY: [docs/adr/0005-schema-registry.md]

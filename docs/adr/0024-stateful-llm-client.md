@@ -16,3 +16,5 @@ client.ask("some prompt").await?;
 - **Cleaner Grinding Cycles**: Core task loops like `PlanTask` merely hold an immutable `LlmClient` and execute mutable `ask(prompt)` bounds sequentially preserving internal session history safely.
 - **Fail-Fasts During Instantiation**: Any environmental exceptions (like missing `GEMINI_API_KEY`) throw directly at the `.build()?` construction boundary rather than downstream asynchronously across loop boundaries.
 - **Simpler Unit Coverage**: Tests no longer need to mock backend interactions redundantly through sub-structures and can initialize instances cleanly testing logic directly against erroring bounds out of the box.
+
+<!-- IMPLEMENTED_BY: [src/llm/client.rs] -->

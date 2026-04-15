@@ -71,3 +71,5 @@ pub enum EventPayload {
     #[serde(rename = "task_spend")]
     TaskSpend(crate::schema::task::TaskSpendPayload),
 }
+
+// DOCUMENTED_BY: [docs/adr/0005-schema-registry.md]

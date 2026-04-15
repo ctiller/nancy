@@ -17,3 +17,5 @@ Examples of BAD things you must reject:
 - Making the user continuously provide redundant state or configuration.
 
 
+
+<!-- DOCUMENTED_BY: [docs/adr/0028-agentic-perona-registry.md] -->

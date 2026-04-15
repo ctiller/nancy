@@ -1029,3 +1029,5 @@ mod tests {
         assert!(predicted_tokens > 0.0);
     }
 }
+
+// DOCUMENTED_BY: [docs/adr/0057-token-arbitration-spot-market.md]

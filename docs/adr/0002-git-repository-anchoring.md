@@ -20,3 +20,5 @@ We will anchor `nancy`'s state generation directly into the local `git` reposito
 - **Positive:** Context is automatically scoped to a specific project.
 - **Positive:** The tool immediately halts with a meaningful error if run outside of a valid checkout or within a bare repository.
 - **Negative:** Users working on non-git projects will not be able to use `nancy` without first using `git init`.
+
+<!-- IMPLEMENTED_BY: [src/coordinator/git.rs] -->

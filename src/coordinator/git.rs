@@ -34,3 +34,5 @@ pub async fn ensure_task_branch(repo: &AsyncRepository, appview: &AppView, task_
             .await;
     }
 }
+
+// DOCUMENTED_BY: [docs/adr/0002-git-repository-anchoring.md]

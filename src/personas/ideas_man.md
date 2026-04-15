@@ -15,3 +15,5 @@ Examples of BAD things to critique:
 - Boring, derivative, or purely boilerplate solutions.
 - Failure to utilize modern tools or conceptual frameworks.
 - Stiff, rigid architectures that lack dynamic flexibility.
+
+<!-- DOCUMENTED_BY: [docs/adr/0028-agentic-perona-registry.md] -->

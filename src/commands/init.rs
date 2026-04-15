@@ -286,3 +286,5 @@ mod tests {
         assert!(result.is_err());
     }
 }
+
+// DOCUMENTED_BY: [docs/adr/0004-modular-command-architecture.md]

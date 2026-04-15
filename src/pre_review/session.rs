@@ -501,3 +501,5 @@ mod tests {
         assert!(bounded.contains(&"The Pedant".to_string()));
     }
 }
+
+// DOCUMENTED_BY: [docs/adr/0029-pre-review-system-architecture.md]

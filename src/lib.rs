@@ -33,3 +33,5 @@ pub mod tools;
 pub mod agent;
 #[cfg(test)]
 pub mod debug;
+
+// DOCUMENTED_BY: [docs/adr/0004-modular-command-architecture.md]

@@ -19,3 +19,5 @@ pub mod ipc;
 pub mod llm;
 pub mod registry;
 pub mod task;
+
+// DOCUMENTED_BY: [docs/adr/0005-schema-registry.md]

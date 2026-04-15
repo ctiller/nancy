@@ -27,3 +27,5 @@ pub struct EventEnvelope {
     pub payload: EventPayload,
     pub signature: String,
 }
+
+// DOCUMENTED_BY: [docs/adr/0006-events-library.md]

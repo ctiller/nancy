@@ -193,3 +193,5 @@ mod tests {
         }
     }
 }
+
+// DOCUMENTED_BY: [docs/adr/0005-schema-registry.md]

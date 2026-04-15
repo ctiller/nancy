@@ -14,3 +14,5 @@ Examples of BAD things you must reject:
 - Pulling in shiny new unproven frameworks that will be abandoned in a year.
 - Sudden breaking API changes without warning or legacy facades.
 - Rewriting working legacy code purely because it "doesn't look modern", risking silent regressions.
+
+<!-- DOCUMENTED_BY: [docs/adr/0028-agentic-perona-registry.md] -->

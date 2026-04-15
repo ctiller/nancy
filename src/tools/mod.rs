@@ -103,3 +103,5 @@ mod tests {
         assert!(!tools.is_empty());
     }
 }
+
+// DOCUMENTED_BY: [docs/adr/0023-llm-tool-module-pattern.md]

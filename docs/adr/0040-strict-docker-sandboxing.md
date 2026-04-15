@@ -23,3 +23,5 @@ All evaluations (`nancy eval`) seamlessly bind the Docker daemon cleanly enforci
 - Execution speed within integration test pipelines (`cargo test`) might linearly increase in delay depending heavily on iterative base-image pulls tracking organically cleanly natively.
 - CI pipelines processing tests strictly require mocked `DOCKER_HOST` proxies implicitly if evaluating cleanly across restricted unprivileged workflows.
 - `AppView` assignments are physically enforced, preventing arbitrary host destruction generated physically autonomously safely wrapping context limitations precisely safely executing.
+
+<!-- IMPLEMENTED_BY: [src/coordinator/docker.rs] -->

@@ -17,3 +17,5 @@ Examples of BAD things you must reject:
 - Premature optimization in cold paths that sacrifices readability for zero gain.
 
 
+
+<!-- DOCUMENTED_BY: [docs/adr/0028-agentic-perona-registry.md] -->

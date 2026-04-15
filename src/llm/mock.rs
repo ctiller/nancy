@@ -102,3 +102,5 @@ pub mod builder {
         }
     }
 }
+
+// DOCUMENTED_BY: [docs/adr/0026-eval-runner-architecture.md]

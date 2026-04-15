@@ -19,3 +19,5 @@ We actively bounded all LLM manipulation capabilities (with the sole exception o
 - **Positive:** Context truncation algorithms securely preserve internal token bounds completely mathematically saving agent layouts inherently.
 - **Positive:** Identical Cross-Platform layouts inherited inherently.
 - **Negative:** Hardcodes our supported bindings functionally rendering unsupported custom CLI layouts explicitly reliant heavily on `run_command` isolated.
+
+<!-- IMPLEMENTED_BY: [src/tools/execution.rs, src/tools/filesystem.rs, src/tools/investigate.rs] -->
