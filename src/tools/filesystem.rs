@@ -1124,3 +1124,5 @@ mod tests {
         assert!(entries.next().is_none());
     }
 }
+
+// DOCUMENTED_BY: [docs/adr/0022-native-grinder-tool-boundaries.md]

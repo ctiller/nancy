@@ -474,3 +474,5 @@ mod tests {
         ask.cancel().await;
     }
 }
+
+// DOCUMENTED_BY: [docs/adr/0022-native-grinder-tool-boundaries.md]

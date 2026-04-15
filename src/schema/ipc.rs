@@ -53,3 +53,5 @@ pub struct LlmStreamChunk {
     #[serde(default)]
     pub cached_tokens: u64,
 }
+
+// DOCUMENTED_BY: [docs/adr/0005-schema-registry.md]

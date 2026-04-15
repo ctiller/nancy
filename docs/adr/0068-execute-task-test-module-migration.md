@@ -15,3 +15,5 @@ The orchestrator's task implementation evaluation loops (such as `handle_impleme
 - Testing module-level dependencies explicitly protects `MockChatBuilder` limits preventing shared test pollution.
 - Expanding module workflows can securely adopt universal JSON testing patterns without breaking unpredictable node cycles dynamically.
 - Existing integrations evaluating complex Git branching natively continue organically scaling gracefully.
+
+<!-- IMPLEMENTED_BY: [tests/e2e_crash_recovery.rs, tests/e2e_web.rs, tests/grind_pull_e2e.rs, tests/unified_dag_e2e.rs] -->

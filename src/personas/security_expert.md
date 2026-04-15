@@ -17,3 +17,5 @@ Examples of BAD things you must reject:
 - Hardcoded secrets, token leakage in logs, or unbounded payload sizes leading to DoS.
 
 
+
+<!-- DOCUMENTED_BY: [docs/adr/0028-agentic-perona-registry.md] -->

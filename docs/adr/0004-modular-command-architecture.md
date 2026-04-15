@@ -18,3 +18,5 @@ We will extract logic into individual bounded contexts managed under a `src/comm
 
 - **Positive:** Cleaner pull requests, minimized merge conflicts, and well-defined testing boundaries for each command layer.
 - **Negative:** Slightly more boilerplate overhead with the implementation of `mod.rs` and routing functions.
+
+<!-- IMPLEMENTED_BY: [src/lib.rs, src/commands/add_task.rs, src/commands/cleanup.rs, src/commands/coordinator.rs, src/commands/dreamer.rs, src/commands/eval.rs, src/commands/grind.rs, src/commands/init.rs, src/commands/mod.rs] -->

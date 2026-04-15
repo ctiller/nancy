@@ -19,3 +19,5 @@ We implemented a strict separation of concerns. Grinders are now restricted to i
 - Grinders are entirely disjointed from the holistic `AppView` DAG processing overhead.
 - Silent architectural faults related to decentralized event visibility are eliminated because assigned tasks reliably point to exact underlying `LocalIndex` DID paths.
 - If future codebase modifications attempt to instantiate `AppView` within execution bounds, automated unit test suites and deployed processes will crash immediately, definitively highlighting the logic violation.
+
+<!-- IMPLEMENTED_BY: [src/coordinator/appview.rs] -->

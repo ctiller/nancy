@@ -183,3 +183,5 @@ async fn test_e2e_crash_recovery() {
         "Failed to observe grinder come back online after its dynamic randomized exponential backoff."
     );
 }
+
+// DOCUMENTED_BY: [docs/adr/0068-execute-task-test-module-migration.md]

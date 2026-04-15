@@ -13,3 +13,5 @@ We've established a generic `LlmBuilder<T>` pattern.
 ## Consequences
 - Requires explicitly decorating structural task primitives with `#[derive(JsonSchema)]` via the `schemars` macro interface to participate in strictly typed Gemini interactions.
 - Ensures robust type-safety parsing JSON inference without fragile boilerplate while cleanly delineating Fast/Thinking architectures implicitly avoiding cognitive overhead across grinder endpoints.
+
+<!-- IMPLEMENTED_BY: [src/llm/api.rs, src/llm/builder.rs, src/llm/mod.rs] -->

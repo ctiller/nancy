@@ -323,3 +323,5 @@ mod tests {
         assert!(matches!(thinking.kind, Kind::Fast)); // in tests, it defaults to Fast
     }
 }
+
+// DOCUMENTED_BY: [docs/adr/0019-llm-builder-architecture.md]

@@ -14,3 +14,5 @@ We implemented a **Spot Market Arbitration Engine** within the central Coordinat
 - Agents MUST dynamically evaluate constraints and explicitly request Spot leases before querying Gemini models. 
 - LLM Token requests block until their specific priority bids have been granted from the central coordinator natively. 
 - The Coordinator dynamically maps a `/api/market/task-priority/:task_id` endpoints ensuring Grinders do not waste IO redundantly hydrating the DAG for prioritization natively.
+
+<!-- IMPLEMENTED_BY: [src/coordinator/market.rs] -->

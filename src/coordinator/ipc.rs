@@ -412,3 +412,5 @@ mod tests {
         })
     }
 }
+
+// DOCUMENTED_BY: [docs/adr/0075-pull-based-task-assignments-via-uds-ipc.md]

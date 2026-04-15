@@ -577,3 +577,5 @@ impl Drop for DockerOrchestrator {
         }
     }
 }
+
+// DOCUMENTED_BY: [docs/adr/0040-strict-docker-sandboxing.md]

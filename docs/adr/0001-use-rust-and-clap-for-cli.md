@@ -17,3 +17,5 @@ We will use Rust as the primary programming language for `nancy`. For argument p
 - **Positive:** Rust gives us memory safety, fast execution times, and simple single-binary distribution. 
 - **Positive:** `clap` is an industry standard in the Rust ecosystem for CLI parsing, making it extremely easy to generate help menus and cleanly structure varying subcommands asynchronously.
 - **Negative:** Increased initial binary size compared to a C equivalent, though acceptable for developer tooling.
+
+<!-- IMPLEMENTED_BY: [src/main.rs] -->

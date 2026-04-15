@@ -17,3 +17,5 @@ Examples of BAD things you must reject:
 - Over-engineering simple problems using complex distributed patterns unnecessarily.
 
 
+
+<!-- DOCUMENTED_BY: [docs/adr/0028-agentic-perona-registry.md] -->

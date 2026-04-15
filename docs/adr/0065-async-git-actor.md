@@ -27,3 +27,5 @@ We establish a new internal `src/git` library that operates using an **Actor Mod
 - Stricter compile-time and runtime guarantees, as thread bounds ensure `git2` handle integrity.
 - Increased initial implementation depth because every `git2` operation must first be manifested as an enum message and explicitly handled by the central `GitActor`.
 - Complete elimination of filesystem data race conditions that previously emerged when utilizing `tokio::process::Command::new("git")` concurrently.
+
+<!-- IMPLEMENTED_BY: [src/git/actor.rs, src/git/messages.rs, src/git/mod.rs, src/git/repository.rs, src/git/tests.rs, src/git/types.rs] -->

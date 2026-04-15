@@ -14,3 +14,5 @@ Furthermore, all native debug utilities MUST:
 - **Deprecation of Ephemeral Scratch Scripts:** Standalone Rust binaries in `.scratch/` should only be used temporarily. If they provide continued value for state introspection, they must be converted into a `nancy debug` subcommand.
 - **Maintenance Burden:** By binding these utilities into the `nancy` CLI, they become subject to standard CI/CD compilation and test checks. While this slightly increases maintenance overhead, it guarantees that when a developer reaches for a debug tool during an outage or complex failure, the tool is guaranteed to execute correctly.
 - **Native Test Equivalency:** Diagnostic tests designed around these commands can often serve a dual purpose as targeted E2E integration validations (e.g., ensuring `TaskManager` properly syncs indices prior to lookups).
+
+<!-- IMPLEMENTED_BY: [src/commands/debug_tasks.rs] -->

@@ -18,3 +18,5 @@ We implemented a generalized LLM streaming mechanism nested dynamically inside t
 - Every independent execution agent (planners, reviewers, grinders, etc.) inherently gains structured reasoning SSE streaming without rewriting downstream consumer syntax globally.
 - The `introspection` context handles massive token throughput effortlessly locally without creating redundant structural log states dynamically.
 - `EventPayload::LlmThought` strictly bounds historical database context size natively, preserving testing suite execution determinism organically cleanly avoiding trace DAG serialization limits efficiently.
+
+<!-- IMPLEMENTED_BY: [web/src/logs.rs] -->

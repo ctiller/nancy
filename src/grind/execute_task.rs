@@ -1530,3 +1530,5 @@ mod tests {
         Ok(())
     }
 }
+
+// DOCUMENTED_BY: [docs/adr/0030-unified-task-dag-orchestration.md]

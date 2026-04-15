@@ -46,3 +46,5 @@ Task executions enforce complete node isolation across mapped Git Worktree branc
 - The Coordinator and Grinder codepaths become structurally agnostic to the business logic phase, simplifying scale operations and logic decoupling.
 - Deep, deterministic integration with Git worktree lifecycle cleanly isolates active model boundaries escaping corruption vulnerabilities or workspace contamination.
 - Explicit JSON storage mapping of review states directly bypasses massive JSON event log bloat while preserving infinite context iterations automatically tracked linearly mapped onto commit sequences.
+
+<!-- IMPLEMENTED_BY: [src/agent.rs, src/coordinator/mod.rs, src/coordinator/workflow.rs, src/grind/execute_task.rs, web/src/tasks.rs, src/web/site/index.html] -->

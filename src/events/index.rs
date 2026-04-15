@@ -137,3 +137,5 @@ mod tests {
         Ok(())
     }
 }
+
+// DOCUMENTED_BY: [docs/adr/0008-stateless-sqlite-indexing.md]

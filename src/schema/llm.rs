@@ -37,3 +37,5 @@ pub struct LlmThoughtPayload {
     pub timestamp: u64,
     pub thought_content: String,
 }
+
+// DOCUMENTED_BY: [docs/adr/0005-schema-registry.md]

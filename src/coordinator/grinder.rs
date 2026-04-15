@@ -35,3 +35,5 @@ impl GrinderSyncEngine {
         }
     }
 }
+
+// DOCUMENTED_BY: [docs/adr/0018-modular-grinder-operations.md]

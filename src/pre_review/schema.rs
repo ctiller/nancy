@@ -79,3 +79,5 @@ mod tests {
         assert_eq!(json, "\"changes_required\"");
     }
 }
+
+// DOCUMENTED_BY: [docs/adr/0005-schema-registry.md]

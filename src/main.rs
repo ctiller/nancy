@@ -35,12 +35,36 @@ enum Commands {
         #[command(subcommand)]
         command: DebugCommands,
     },
+    /// Validate codebase links and tags
+    Xlink {
+        #[command(subcommand)]
+        command: XlinkCommands,
+    },
 }
 
 #[derive(Subcommand, Debug)]
 enum DebugCommands {
     /// Debug tasks assignments
     Tasks(DebugTasksArgs),
+}
+
+#[derive(Subcommand, Debug)]
+pub enum XlinkCommands {
+    /// Audit the repository confirming that every file matches its intended bidirectionally linked specification
+    Audit(XlinkAuditArgs),
+    /// Appends the target implemented_by logic organically 
+    AddImplementedBy(XlinkAddArgs),
+    /// Appends the target documented_by logic organically
+    AddDocumentedBy(XlinkAddArgs),
+}
+
+#[derive(clap::Args, Debug)]
+pub struct XlinkAuditArgs {}
+
+#[derive(clap::Args, Debug)]
+pub struct XlinkAddArgs {
+    pub source: PathBuf,
+    pub target: PathBuf,
 }
 
 #[derive(clap::Args, Debug)]
@@ -102,6 +126,17 @@ pub(crate) async fn execute_command(args: &Args, cwd: PathBuf) -> Result<()> {
         Commands::Debug { command } => match command {
             DebugCommands::Tasks(args) => {
                 nancy::commands::debug_tasks::debug_tasks(cwd, args.coord_did.clone()).await?;
+            }
+        },
+        Commands::Xlink { command } => match command {
+            XlinkCommands::Audit(_args) => {
+                nancy::commands::xlink::audit::run(cwd).await?;
+            }
+            XlinkCommands::AddImplementedBy(args) => {
+                nancy::commands::xlink::add::run_add_implemented_by(cwd, args.source.clone(), args.target.clone()).await?;
+            }
+            XlinkCommands::AddDocumentedBy(args) => {
+                nancy::commands::xlink::add::run_add_documented_by(cwd, args.source.clone(), args.target.clone()).await?;
             }
         },
     }
@@ -225,3 +260,5 @@ mod tests {
         Ok(())
     }
 }
+
+// DOCUMENTED_BY: [docs/adr/0001-use-rust-and-clap-for-cli.md]

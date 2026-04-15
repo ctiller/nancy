@@ -143,3 +143,5 @@ pub struct ModeratorSynthesizerSystemPromptTemplate<'a> {
     pub tdd_guidelines: &'a str,
     pub task_guidelines: &'a str,
 }
+
+// DOCUMENTED_BY: [docs/adr/0036-explicit-persona-role-requirements.md]

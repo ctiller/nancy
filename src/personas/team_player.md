@@ -18,3 +18,5 @@ Examples of BAD things you must reject:
 - Dismissive attitudes or shutting down teammates without carefully considering their perspective.
 - "My way or the highway" architectural mandates that ignore valid concerns.
 - Isolating changes or silos that exclude relevant stakeholders from the decision-making process.
+
+<!-- DOCUMENTED_BY: [docs/adr/0028-agentic-perona-registry.md] -->

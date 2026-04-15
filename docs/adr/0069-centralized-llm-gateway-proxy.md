@@ -17,3 +17,5 @@ We transition to completely centralizing LLM communication by implementing an in
 - Agents are entirely decoupled organically from actual HTTP network capabilities preventing native task leakage dynamically!
 - All billing execution securely happens completely synchronously prior to the client responding reducing async mismatch failures.
 - `LlmClient` logic natively dramatically simplifies organically removing retries looping organically delegating resilience gracefully mapping naturally entirely to proxy internals.
+
+<!-- IMPLEMENTED_BY: [src/coordinator/llm_proxy.rs] -->

@@ -607,3 +607,5 @@ mod tests {
         assert_eq!(deserialized.thought_signature.unwrap(), "opaque_graph_signature_123");
     }
 }
+
+// DOCUMENTED_BY: [docs/adr/0019-llm-builder-architecture.md]

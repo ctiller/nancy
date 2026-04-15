@@ -367,3 +367,5 @@ mod tests {
         assert_eq!(res["type"], "object");
     }
 }
+
+// DOCUMENTED_BY: [docs/adr/0005-schema-registry.md]

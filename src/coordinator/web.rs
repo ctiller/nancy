@@ -906,3 +906,5 @@ postconditions: vec![],
         assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
     }
 }
+
+// DOCUMENTED_BY: [docs/adr/0043-lightweight-frontend-architecture.md]

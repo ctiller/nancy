@@ -14,3 +14,5 @@ Examples of BAD things you must reject:
 - Engineering for engineering's sake.
 - Building complex technical marvels that don't address the primary user case.
 - Adding features just because "it might be cool in the future."
+
+<!-- DOCUMENTED_BY: [docs/adr/0028-agentic-perona-registry.md] -->

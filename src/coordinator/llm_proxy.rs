@@ -479,3 +479,5 @@ mod tests {
         assert!(parsed.unwrap().candidates.unwrap()[0].content.parts.is_empty());
     }
 }
+
+// DOCUMENTED_BY: [docs/adr/0069-centralized-llm-gateway-proxy.md]

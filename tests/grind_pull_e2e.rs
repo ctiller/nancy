@@ -120,3 +120,5 @@ async fn test_grinder_pull_assignment_over_ipc() -> Result<()> {
 
     Ok(())
 }
+
+// DOCUMENTED_BY: [docs/adr/0068-execute-task-test-module-migration.md]

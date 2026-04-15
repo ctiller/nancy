@@ -24,3 +24,5 @@ We are completely tearing down the Leptos architecture in favor of **Yew**.
 - **Improved Testability**: Since the API boundaries are explicit in isolated handlers, we can effortlessly attach pure black-box `e2e_web` testing harness limits to the `coordinator` API responses without having to run WASM bundles.
 - `cargo leptos` will be entirely stripped from the `build.sh` artifact compiler, eliminating complex multi-pass workspace synchronization logic.
 - We will vendor Monaco locally within the `web/public` mapping statically pushed into the `rust_embed` cache with absolute predictability.
+
+<!-- IMPLEMENTED_BY: [web/src/main.rs, web/src/agents.rs] -->

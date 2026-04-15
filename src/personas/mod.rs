@@ -112,3 +112,5 @@ mod tests {
         assert_eq!(pedant.temperature, None);
     }
 }
+
+// DOCUMENTED_BY: [docs/adr/0028-agentic-perona-registry.md]

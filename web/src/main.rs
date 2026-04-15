@@ -436,3 +436,5 @@ pub fn app() -> Html {
 pub fn main() {
     yew::Renderer::<App>::new().render();
 }
+
+// DOCUMENTED_BY: [docs/adr/0047-frontend-yew-migration.md]

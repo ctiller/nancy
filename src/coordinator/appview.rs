@@ -633,3 +633,5 @@ postconditions: vec![],
         assert_eq!(ready.len(), 2); // T2 and T3 are now ready
     }
 }
+
+// DOCUMENTED_BY: [docs/adr/0061-grinder-appview-isolation-and-event-resolution.md]

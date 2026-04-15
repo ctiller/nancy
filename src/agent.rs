@@ -461,3 +461,5 @@ pub async fn run_agent<P: AsRef<Path>, Processor: AgentTaskProcessor>(
     let _ = tokio::fs::remove_file(&socket_path_self).await;
     Ok(())
 }
+
+// DOCUMENTED_BY: [docs/adr/0030-unified-task-dag-orchestration.md]

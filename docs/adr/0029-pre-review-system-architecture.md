@@ -19,3 +19,5 @@ We establish a multi-round, consensus-driven "Pre-Review System" with the follow
 - Requires the creation of a new top-level `src/pre_review/` module, specifically `src/pre_review/schema.rs`, explicitly defining `ReviewVote`, `ReviewOutput`, `GhostVeto`, and `DissentLog` using `serde` and linking the `PersonaCategory` enum from `src/personas/mod.rs` to ensure domain type safety.
 - The dispatch to multiple reviewer agents is decoupled into an explicit stateful `ReviewSession` module mapping experts to persistent LLM backends using `.tools()` and maintaining memory per round. The `Coordinator` prompt and tool execution loop simply petitions `ReviewSession::invoke_reviewers` iteratively while managing the `Dissent Log`.
 - This inherently creates mathematically constrained workflows that heavily penalize a Coordinator attempting to "game" the system (firing strict reviewers creates structural roadblocks worse than complying with the review).
+
+<!-- IMPLEMENTED_BY: [src/pre_review/mod.rs, src/pre_review/runner.rs, src/pre_review/session.rs] -->

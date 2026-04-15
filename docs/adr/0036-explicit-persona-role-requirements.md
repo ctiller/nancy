@@ -27,3 +27,5 @@ The `ReviewSession::enforce_quorum()` algorithm was updated to filter and inject
 ## Consequences
 - Requires developers creating or modifying Persona profiles to add explicit `<role>: <state>` boundaries directly into the markdown front-matter.
 - Allows test mocking frameworks to explicitly determine deterministic test coverage scopes that accurately verify the new quorum behavior.
+
+<!-- IMPLEMENTED_BY: [src/grind/prompts.rs] -->

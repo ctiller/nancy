@@ -71,7 +71,7 @@ pub fn logs_view() -> Html {
                                             { format!("Current Budget: ${:.2}", state.budget_pool_nanocents.0 as f64 / 100_000_000_000.0) }
                                         </div>
                                         <div style="font-size: 0.9em; color: var(--text-muted);">
-                                            { format!("Available (less expected costs): ${:.2}", state.budget_pool_nanocents.0.saturating_sub(state.inflight_costs_nanocents.0) as f64 / 100_000_000_000.0) }
+                                            { format!("Available (less expected costs): ${:.2}", (state.budget_pool_nanocents.0 as f64 - state.inflight_costs_nanocents.0 as f64) / 100_000_000_000.0) }
                                         </div>
                                     </div>
                                 </div>
@@ -198,3 +198,5 @@ pub fn logs_view() -> Html {
         </div>
     }
 }
+
+// DOCUMENTED_BY: [docs/adr/0060-llm-streaming-introspection-and-ledger-rollup.md]

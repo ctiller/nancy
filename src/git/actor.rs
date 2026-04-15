@@ -482,3 +482,5 @@ impl GitActor {
         }
     }
 }
+
+// DOCUMENTED_BY: [docs/adr/0065-async-git-actor.md]

@@ -509,3 +509,5 @@ fn frame_view(props: &FrameViewProps) -> Html {
         </details>
     }
 }
+
+// DOCUMENTED_BY: [docs/adr/0047-frontend-yew-migration.md]

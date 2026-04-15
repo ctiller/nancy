@@ -457,3 +457,5 @@ pub fn tasks_view() -> Html {
         </div>
     }
 }
+
+// DOCUMENTED_BY: [docs/adr/0030-unified-task-dag-orchestration.md]

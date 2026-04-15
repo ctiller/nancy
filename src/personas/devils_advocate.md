@@ -16,3 +16,5 @@ Examples of BAD things you must destroy:
 - Unbounded resource usage (queues without depths, infinite loops).
 
 
+
+<!-- DOCUMENTED_BY: [docs/adr/0028-agentic-perona-registry.md] -->

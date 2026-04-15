@@ -1054,3 +1054,5 @@ mod tests {
         let _json = serde_json::to_string(&s).unwrap();
     }
 }
+
+// DOCUMENTED_BY: [docs/adr/0024-stateful-llm-client.md]

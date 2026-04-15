@@ -16,3 +16,5 @@ Examples of BAD things you must reject:
 - Ignoring established paradigms in favor of a new, unsupported framework.
 
 
+
+<!-- DOCUMENTED_BY: [docs/adr/0028-agentic-perona-registry.md] -->

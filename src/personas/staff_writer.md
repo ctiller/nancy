@@ -16,3 +16,5 @@ Examples of BAD things you must reject:
 - Internal variables leaking abruptly into user-facing terminology.
 
 
+
+<!-- DOCUMENTED_BY: [docs/adr/0028-agentic-perona-registry.md] -->

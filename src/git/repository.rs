@@ -302,3 +302,5 @@ impl AsyncRepository {
         resp_rx.await.context("Actor thread closed")?
     }
 }
+
+// DOCUMENTED_BY: [docs/adr/0065-async-git-actor.md]

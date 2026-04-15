@@ -322,3 +322,5 @@ pub fn repo_view() -> Html {
         </div>
     }
 }
+
+// DOCUMENTED_BY: [docs/adr/0043-lightweight-frontend-architecture.md]

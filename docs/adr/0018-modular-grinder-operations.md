@@ -11,3 +11,5 @@ We are relocating the distinct business execution boundaries out of the core eve
 ## Consequences
 - Requires explicitly passing contextual ownerships (e.g., `Repository`, `Identity`) or structs mapping them into these handlers cleanly.
 - Preserves the `grind` commands' core responsibility strictly to polling/ledger parsing while maintaining a clean file structure for extending specific prompt/tool behaviors later. 
+
+<!-- IMPLEMENTED_BY: [src/coordinator/grinder.rs, src/grind/mod.rs] -->

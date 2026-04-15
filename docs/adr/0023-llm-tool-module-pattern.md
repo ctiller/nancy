@@ -10,3 +10,5 @@ We updated the `#[llm_tool]` procedural macro to gracefully output a submodule m
 - Tool interfaces are completely encapsulated into logical namespace hierarchies securely mapped directly into their operational definition (e.g. `manage_paths` scopes both the rust action and its LLM representation wrapper).
 - It removes arbitrary casing anomalies from external code consuming `#[llm_tool]` macros.
 - Future LLM-specific functions (like custom deserializers, formatters, etc.) can cleanly expand inside the `manage_paths` generated module boundary.
+
+<!-- IMPLEMENTED_BY: [src/tools/mod.rs] -->

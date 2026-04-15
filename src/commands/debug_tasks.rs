@@ -113,3 +113,5 @@ postconditions: vec![],
         Ok(())
     }
 }
+
+// DOCUMENTED_BY: [docs/adr/0062-accumulate-native-debug-utilities.md]
