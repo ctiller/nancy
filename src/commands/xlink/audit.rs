@@ -75,24 +75,43 @@ pub async fn run(cwd: PathBuf) -> Result<()> {
     let mut tracked_files = Vec::new();
     for entry in index.iter() {
         let path_str = String::from_utf8(entry.path).unwrap();
+        if path_str.starts_with("3p/") || path_str == "3p" || path_str.starts_with(".agents/") || path_str == ".agents" {
+            continue;
+        }
         let path = workdir.join(&path_str);
         if path.is_file() {
             tracked_files.push(path_str);
         }
     }
 
+    let pos_re = Regex::new(r"(?s)(IMPLEMENTED_BY|DOCUMENTED_BY|TESTED_BY|DEPRECATES|DEPRECATED_BY|SEE_ALSO):\s*\[.*?\]").unwrap();
+
     for path_str in &tracked_files {
         let full_path = workdir.join(path_str);
         if let Ok(content) = fs::read_to_string(&full_path) {
             let data = extract_tags(&content);
             all_files.insert(path_str.clone(), data);
+
+            // Check if tags are at the end of file
+            let mut last_end = 0;
+            for cap in pos_re.find_iter(&content) {
+                last_end = cap.end();
+            }
+            if last_end > 0 {
+                let remainder = &content[last_end..];
+                let cleaned = remainder.replace("-->", "").replace("*/", "");
+                if !cleaned.trim().is_empty() {
+                    errors.push(format!("File {} xlink tags are not at the end of the file", path_str));
+                }
+            }
         }
     }
 
     // Rules verification
     for (file, data) in &all_files {
-        let is_doc = file.ends_with(".md") || file.ends_with(".txt") || file.contains("docs/");
-        let is_source = !is_doc && (file.ends_with(".rs") || file.ends_with(".js") || file.ends_with(".html"));
+        let is_persona = file.contains("src/personas/");
+        let is_doc = !is_persona && (file.ends_with(".md") || file.ends_with(".txt") || file.contains("docs/"));
+        let is_source = is_persona || (!is_doc && (file.ends_with(".rs") || file.ends_with(".js") || file.ends_with(".html")));
 
         if is_doc {
             if data.implemented_by.is_empty() {
@@ -115,6 +134,10 @@ pub async fn run(cwd: PathBuf) -> Result<()> {
             let mut file_errs = Vec::new();
             for link in links {
                 if link == "none" {
+                    continue;
+                }
+                if link.starts_with("3p/") || link == "3p" {
+                    file_errs.push(format!("File {} cannot reference 3p/ file {}", file, link));
                     continue;
                 }
                 if !all_files.contains_key(link) {

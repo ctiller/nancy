@@ -305,3 +305,6 @@ pub struct MarketStateResponse {
     pub inflight_costs_nanocents: NanoCent,
     pub subagent_costs: Vec<(String, NanoCent)>,
 }
+
+// DOCUMENTED_BY: [docs/adr/0005-schema-registry.md]
+

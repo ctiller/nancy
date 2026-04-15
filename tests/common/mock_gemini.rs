@@ -113,3 +113,6 @@ pub async fn push_tool_call_response(
         "modelVersion": "MockAxumServer"
     }));
 }
+
+// DOCUMENTED_BY: [docs/adr/0009-enforce-strict-test-coverage-using-llvm-cov.md]
+

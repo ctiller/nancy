@@ -12,11 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod add;
-pub mod audit;
-pub mod common;
-pub mod cull_orphans;
-pub mod fix_position;
-pub mod hydrate;
+use anyhow::Result;
+use std::path::PathBuf;
+
+#[tokio::test]
+async fn test_xlink_audit() -> Result<()> {
+    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR")?;
+    let cwd = PathBuf::from(manifest_dir);
+    
+    // Call the audit run function
+    nancy::commands::xlink::audit::run(cwd).await?;
+    
+    Ok(())
+}
 
 // DOCUMENTED_BY: [docs/adr/0076-xlink-microformat.md]

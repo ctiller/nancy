@@ -41,3 +41,8 @@ When appending links, you can use the built in utilities across your workspace o
 - `nancy xlink audit` - Verifies no broken or unilateral mapping exists across tracked git files natively safely.
 - `nancy xlink add-implemented-by docs/adr/0010-test.md src/test.rs` - Adds the bidirectional connections automatically.
 - `nancy xlink add-documented-by src/test.rs docs/adr/0010-test.md`
+- `nancy xlink hydrate` - Automatically adds missing back-references wherever they're missing.
+- `nancy xlink cull-orphans` - Removes xlinks to files that don't exist.
+- `nancy xlink fix-position` - Corrects xlink positions ensuring they are at the end of the file.
+
+

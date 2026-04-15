@@ -47,4 +47,4 @@ Task executions enforce complete node isolation across mapped Git Worktree branc
 - Deep, deterministic integration with Git worktree lifecycle cleanly isolates active model boundaries escaping corruption vulnerabilities or workspace contamination.
 - Explicit JSON storage mapping of review states directly bypasses massive JSON event log bloat while preserving infinite context iterations automatically tracked linearly mapped onto commit sequences.
 
-<!-- IMPLEMENTED_BY: [src/agent.rs, src/coordinator/mod.rs, src/coordinator/workflow.rs, src/grind/execute_task.rs, web/src/tasks.rs, src/web/site/index.html] -->
+<!-- IMPLEMENTED_BY: [src/agent.rs, src/coordinator/mod.rs, src/coordinator/workflow.rs, src/grind/execute_task.rs, src/tasks/manager.rs, src/tasks/mod.rs, web/index.html, web/src/tasks.rs] -->

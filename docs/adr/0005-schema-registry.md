@@ -20,4 +20,4 @@ By defining the central registry as an enum annotated with `#[serde(tag = "$type
 - **Positive:** Type-safety across the workflow limits edge cases drastically.
 - **Negative:** Non-Rust peers will still need off-band JSON schema string definitions to guarantee compliance if they attempt to write raw JSON out of our control constraints.
 
-<!-- IMPLEMENTED_BY: [src/llm/schema.rs, src/pre_review/schema.rs, src/schema/coordinator_config.rs, src/schema/identity.rs, src/schema/identity_config.rs, src/schema/ipc.rs, src/schema/llm.rs, src/schema/mod.rs, src/schema/registry.rs, src/schema/task.rs] -->
+<!-- IMPLEMENTED_BY: [schema/src/lib.rs, src/llm/schema.rs, src/pre_review/schema.rs, src/schema/coordinator_config.rs, src/schema/identity.rs, src/schema/identity_config.rs, src/schema/ipc.rs, src/schema/llm.rs, src/schema/mod.rs, src/schema/registry.rs, src/schema/task.rs] -->

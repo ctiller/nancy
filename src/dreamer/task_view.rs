@@ -360,3 +360,6 @@ mod tests {
         assert!(found);
     }
 }
+
+// DOCUMENTED_BY: [docs/adr/0051-stateless-dreamer-hydration.md]
+

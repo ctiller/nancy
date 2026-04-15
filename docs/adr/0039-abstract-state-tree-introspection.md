@@ -15,3 +15,5 @@ The generic state tree pushes updates locally using a `tokio::sync::watch::chann
 - State schema is implicitly boundless JSON, allowing Grinder UI implementers heavily unconstrained bounds dynamically.
 - Since we use standard `std::sync::Mutex` for `FrameNode` vectors, synchronous functions are not forced into `.await` blocks to map generic logs organically!
 - It is not possible to share `INTROSPECTION_CTX` generically across disconnected spawned threads safely without propagating `.scope()` references natively, enforcing disciplined boundary hierarchies securely.
+
+<!-- IMPLEMENTED_BY: [src/introspection/mod.rs] -->

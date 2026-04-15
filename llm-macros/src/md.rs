@@ -263,3 +263,6 @@ pub fn include_md(input: TokenStream) -> TokenStream {
 
     TokenStream::from(expanded)
 }
+
+// DOCUMENTED_BY: [docs/adr/0020-llm-tool-bindings.md]
+

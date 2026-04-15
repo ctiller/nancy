@@ -106,3 +106,6 @@ postconditions: vec![],
         writer_feat.commit_batch().await.unwrap();
     }
 }
+
+// DOCUMENTED_BY: [docs/adr/0009-enforce-strict-test-coverage-using-llvm-cov.md]
+

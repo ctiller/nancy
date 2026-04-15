@@ -113,3 +113,6 @@ mod tests {
         assert!(res.is_err()); // Serde handles mapping errors cleanly safely!
     }
 }
+
+// DOCUMENTED_BY: [docs/adr/0026-eval-runner-architecture.md]
+

@@ -19,4 +19,4 @@ We extracted the `EvalRunner` into `src/eval/mod.rs` to explicitly enforce an as
 - Evaluation scenarios are executed safely within isolated directories (`tempfile::TempDir`), allowing reliable parallel test execution without interference.
 - Local repository states, task evaluations, and `.nancy` ledger events remain deterministic and assertable without relying on external remote states.
 
-<!-- IMPLEMENTED_BY: [src/llm/mock.rs] -->
+<!-- IMPLEMENTED_BY: [src/commands/debug_eval.rs, src/eval/implement.rs, src/eval/mod.rs, src/eval/plan.rs, src/eval/plan_implement.rs, src/llm/mock.rs] -->

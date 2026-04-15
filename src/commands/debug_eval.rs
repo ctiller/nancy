@@ -78,3 +78,6 @@ pub async fn debug_eval(file_path: PathBuf) -> Result<()> {
 
     Ok(())
 }
+
+// DOCUMENTED_BY: [docs/adr/0026-eval-runner-architecture.md]
+

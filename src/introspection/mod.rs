@@ -424,3 +424,6 @@ mod tests {
         data_log("k", serde_json::json!(1));
     }
 }
+
+// DOCUMENTED_BY: [docs/adr/0039-abstract-state-tree-introspection.md]
+

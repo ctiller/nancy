@@ -18,4 +18,4 @@ Because parsing dynamic Rust closure semantics mechanically requires abstract AS
 - Requires developers creating adhoc task constraints inside standard Agent loops to annotate parameters using explicitly typed `derive(Deserialize, JsonSchema)` structs whenever utilizing the closure logic block.
 - Abstracting macro evaluations exclusively into `llm-macros` maintains our unified Cargo build targets reliably cleanly while safely satisfying rust's internal Module boundaries mapping requirements.
 
-<!-- IMPLEMENTED_BY: [src/llm/tool.rs] -->
+<!-- IMPLEMENTED_BY: [llm-macros/src/lib.rs, llm-macros/src/md.rs, src/llm/tool.rs] -->

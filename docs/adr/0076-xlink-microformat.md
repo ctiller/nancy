@@ -22,4 +22,4 @@ A native validation command, `nancy xlink audit`, enforces bidirectionality and 
 - Increases initial overhead for adding new files.
 - Refactoring locations breaks static string mappings, needing automated tools like `nancy xlink add-...` and explicit find-replace to mend links dynamically.
 
-<!-- IMPLEMENTED_BY: [src/commands/xlink/add.rs, src/commands/xlink/audit.rs, src/commands/xlink/mod.rs] -->
+<!-- IMPLEMENTED_BY: [src/commands/xlink/add.rs, src/commands/xlink/audit.rs, src/commands/xlink/mod.rs, tests/xlink_audit.rs] -->

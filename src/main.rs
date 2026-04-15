@@ -72,10 +72,27 @@ pub enum XlinkCommands {
     AddImplementedBy(XlinkAddArgs),
     /// Appends the target documented_by logic organically
     AddDocumentedBy(XlinkAddArgs),
+    /// Automatically add back refs wherever they're missing
+    Hydrate(XlinkHydrateArgs),
+    /// Remove xlinks to files that don't exist
+    CullOrphans(XlinkCullOrphansArgs),
+    /// Correct xlink positions ensuring they are at the end of file
+    FixPosition(XlinkFixPositionArgs),
 }
 
 #[derive(clap::Args, Debug)]
+pub struct XlinkFixPositionArgs {}
+
+
+#[derive(clap::Args, Debug)]
 pub struct XlinkAuditArgs {}
+
+#[derive(clap::Args, Debug)]
+pub struct XlinkHydrateArgs {}
+
+#[derive(clap::Args, Debug)]
+pub struct XlinkCullOrphansArgs {}
+
 
 #[derive(clap::Args, Debug)]
 pub struct XlinkAddArgs {
@@ -163,7 +180,18 @@ pub(crate) async fn execute_command(args: &Args, cwd: PathBuf) -> Result<()> {
             XlinkCommands::AddDocumentedBy(args) => {
                 nancy::commands::xlink::add::run_add_documented_by(cwd, args.source.clone(), args.target.clone()).await?;
             }
+            XlinkCommands::Hydrate(_args) => {
+                nancy::commands::xlink::hydrate::run(cwd).await?;
+            }
+            XlinkCommands::CullOrphans(_args) => {
+                nancy::commands::xlink::cull_orphans::run(cwd).await?;
+            }
+            XlinkCommands::FixPosition(_args) => {
+                nancy::commands::xlink::fix_position::run(cwd).await?;
+            }
         },
+
+
     }
 
     Ok(())

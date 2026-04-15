@@ -13,3 +13,6 @@
 // limitations under the License.
 
 pub mod mock_gemini;
+
+// DOCUMENTED_BY: [docs/adr/0009-enforce-strict-test-coverage-using-llvm-cov.md]
+

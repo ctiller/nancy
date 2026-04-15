@@ -13,3 +13,5 @@ Instead of discarding memory gracefully, the Dreamer caches these explicit node 
 ## Consequences
 1. Re-running the `dreamer` pipeline safely resumes exactly where the execution halted natively without any token loss.
 2. Changes to evaluation constraints inherently require clearing or manually editing registry node outputs to force LLM re-run evaluations mechanically.
+
+<!-- IMPLEMENTED_BY: [src/dreamer/task_view.rs] -->

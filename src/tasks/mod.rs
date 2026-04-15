@@ -13,3 +13,6 @@
 // limitations under the License.
 
 pub mod manager;
+
+// DOCUMENTED_BY: [docs/adr/0030-unified-task-dag-orchestration.md]
+

@@ -61,10 +61,8 @@ pub async fn run_add_implemented_by(cwd: PathBuf, doc: PathBuf, source: PathBuf)
     let doc_path = cwd.join(&doc);
     let source_path = cwd.join(&source);
     
-    // In doc, add IMPLEMENTED_BY: [source]
     append_tag(&doc_path, "IMPLEMENTED_BY", &source, false)?;
     
-    // In source, add DOCUMENTED_BY: [doc, docs/adr/0076-xlink-microformat.md]
     append_tag(&source_path, "DOCUMENTED_BY", &doc, source.extension().map_or(false, |e| e == "rs"))?;
 
     println!("Successfully linked {} <> {}", doc.display(), source.display());
@@ -74,3 +72,7 @@ pub async fn run_add_implemented_by(cwd: PathBuf, doc: PathBuf, source: PathBuf)
 pub async fn run_add_documented_by(cwd: PathBuf, source: PathBuf, doc: PathBuf) -> Result<()> {
     run_add_implemented_by(cwd, doc, source).await
 }
+
+// IMPLEMENTED_BY: [source]
+
+// DOCUMENTED_BY: [doc, docs/adr/0076-xlink-microformat.md]

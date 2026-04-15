@@ -251,3 +251,6 @@ pub fn md_defined(attr: TokenStream, item: TokenStream) -> TokenStream {
 pub fn include_md(input: TokenStream) -> TokenStream {
     md::include_md(input)
 }
+
+// DOCUMENTED_BY: [docs/adr/0020-llm-tool-bindings.md]
+

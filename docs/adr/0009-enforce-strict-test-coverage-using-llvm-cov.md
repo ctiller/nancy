@@ -22,3 +22,5 @@ to visualize untested bounds and remediate them systematically.
 - **Positive:** Project stability maintains extremely high rigor seamlessly.
 - **Positive:** Clear line-by-line misses assist in finding logic dead-ends.
 - **Negative:** Increased friction to completing MVP task assignments, as rigorous integration testing becomes a strict blocking invariant.
+
+<!-- IMPLEMENTED_BY: [src/debug/test_repo.rs, tests/common/mock_gemini.rs, tests/common/mod.rs] -->
